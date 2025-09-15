@@ -16,7 +16,7 @@
 
 # .PHONYターゲット: ファイル名ではないターゲットを宣言します。
 .PHONY: help \
-	clean fmt clippy test run doc \
+	clean fmt clippy test build doc \
 	coverage coverage-json coverage-summary \
 	check ci pipeline
 
@@ -44,9 +44,9 @@ test: ## すべてのテストを詳細ログ付きで実行します
 	@echo ">> テストを実行中..."
 	@cargo test --all --verbose
 
-run: ## メインのバイナリをビルドして実行します
-	@echo ">> バイナリ 'typelang-repl' をビルド・実行中..."
-	@cargo run --bin typelang-repl
+build: ## メインのバイナリをビルドします
+	@echo ">> バイナリ 'typelang-repl' をビルド中..."
+	@cargo build --release
 
 doc: ## ドキュメントを生成します (依存クレートは除く)
 	@echo ">> ドキュメントを生成中..."
@@ -68,11 +68,11 @@ coverage-summary: ## カバレッジの概要をコンソールに表示しま�
 	@cargo llvm-cov --workspace --summary-only
 
 # --- 複合ターゲット ---
-check: fmt clippy test ## フォーマット、リント、テストを順に実行します
-	@echo "✅ すべての品質チェックが完了しました！"
+check: fmt clippy test build ## フォーマット、リント、テスト、ビルドを順に実行します
+	@echo "✅ すべての品質チェックとビルドが完了しました！"
 
-ci: clean check ## CI環境で実行するタスク (品質チェックとカバレッジレポート生成)
+ci: clean check ## CI環境で実行するタスク
 	@echo "✅ CI用のタスクが完了しました！"
 
-pipeline: clean check run doc coverage coverage-json coverage-summary ## プロジェクトの全主要タスクを順に実行します
+pipeline: ci doc coverage coverage-json coverage-summary ## プロジェクトの全主要タスクを順に実行します
 	@echo "✅ 全てのパイプライン処理が完了しました！"
