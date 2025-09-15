@@ -4,101 +4,41 @@ name: cl
 on:
   push:
     branches: [ main ]
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - '.gitignore'
   pull_request:
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-  # 手動トリガー（例：カバレッジ確認など）
   workflow_dispatch:
-
-permissions:
-  contents: read
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
-  CARGO_INCREMENTAL: 0
+    inputs:
+      coverage:
+        description: "Run make coverage"
+        type: boolean
+        default: false
 
 jobs:
   ci:
-    name: Rust CI
     runs-on: ubuntu-latest
-    timeout-minutes: 30
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - uses: actions/checkout@v4
 
-      - name: Install Rust (stable + components)
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
 
-      - name: Cache (cargo/target)
-        uses: Swatinem/rust-cache@v2
-        with:
-          cache-all-crates: true
+      - uses: Swatinem/rust-cache@v2
 
-      # Makefile の 'ci'（fmt-check → clippy → test → release）をそのまま使用
-      - name: Run make ci
+      - name: make ci
         run: make ci
 
-      # 失敗時に target/ のログやテスト結果を拾っておく
-      - name: Upload artifacts on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: target-on-failure
-          path: |
-            target/**
-          if-no-files-found: ignore
-          retention-days: 7
-
-  # 手動トリガー時に使うカバレッジ計測（Makefileの coverage ターゲットを実行）
-  coverage:
-    name: Coverage (llvm-cov)
-    runs-on: ubuntu-latest
-    needs: []
-    if: ${{ github.event_name == 'workflow_dispatch' }}
-    timeout-minutes: 45
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Install Rust (stable + llvm-tools)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt, llvm-tools-preview
-
-      - name: Cache (cargo/target)
-        uses: Swatinem/rust-cache@v2
-        with:
-          cache-all-crates: true
-
-      # Makefile 側で cargo-llvm-cov を入れてくれる（add-tools 経由）
-      - name: Run make coverage
+      - name: make coverage (manual only)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.coverage }}
         run: make coverage
 
-      - name: Upload coverage artifacts
+      - name: upload coverage artifacts
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.coverage }}
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-artifacts
+          name: coverage
           path: |
             target/llvm-cov/html/**
             target/llvm-cov/lcov.info
             coverage.json
           if-no-files-found: warn
-          retention-days: 14
