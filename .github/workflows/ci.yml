@@ -2,12 +2,7 @@
 
 name: CI
 
-# main または master ブランチへの push および pull_request でワークフローを実行
-on:
-  push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
+on: [push, pull_request]
 
 jobs:
   ci:
@@ -15,17 +10,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. リポジトリのコードをチェックアウト
+      # リポジトリのコードをチェックアウト
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Rustのツールチェインと、Makefileで必要なコンポーネントをインストール
+      # Rustのツールチェインと、Makefileで必要なコンポーネントをインストール
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy, rustfmt, llvm-tools-preview
+          components: clippy, rustfmt
 
-      # 3. cargoの依存関係とビルド成果物をキャッシュして、将来の実行を高速化
+      # cargoの依存関係とビルド成果物をキャッシュして、将来の実行を高速化
       - name: Cache cargo registry and target directory
         uses: actions/cache@v4
         with:
@@ -39,18 +34,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      # 4. Makefileのカバレッジターゲットで必要な 'cargo-llvm-cov' をインストール
-      - name: Install cargo-llvm-cov
-        run: cargo install cargo-llvm-cov --locked
-
-      # 5. Makefileの 'ci' ターゲットを実行
-      # これにより、クリーン、チェック、リリースビルド、ドキュメント生成、全カバレッジ測定が実行される
-      - name: Run all CI tasks via Makefile
+      # Makefileの 'ci' ターゲットを実行
+      - name: Run CI tasks via Makefile
         run: make ci
-
-      # 6. 生成されたHTMLカバレッジレポートをアーティファクトとしてアップロード
-      - name: Upload HTML coverage report
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report-html
-          path: target/llvm-cov/html/

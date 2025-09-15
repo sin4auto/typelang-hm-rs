@@ -18,7 +18,7 @@
 .PHONY: help \
 	clean fmt clippy test debug_build release_build doc \
 	coverage \
-	debug release ci
+	debug release ci full_local
 
 # --- メインターゲット ---
 help: ## このヘルプメッセージを表示します
@@ -72,5 +72,8 @@ debug: fmt clippy test debug_build ## フォーマット、リント、テスト
 release: fmt clippy test release_build ## フォーマット、リント、テスト、リリースビルドを順に実行します
 	@echo "✅ すべての品質チェックとリリースビルドが完了しました！"
 
-ci: clean fmt clippy release_build doc coverage ## CIで実行する全タスク
-	@echo "✅ 全てのCIパイプライン処理が完了しました！"
+ci: clean release ## CIで実行するタスク
+	@echo "✅ 全てのCI処理が完了しました！"
+
+full_local: clean fmt clippy release_build doc coverage ## ドキュメント生成からカバレッジテストまでのフルパイプライン 
+	@echo "✅ ドキュメント生成からカバレッジテストまでのフルパイプライン処理が完了しました！"

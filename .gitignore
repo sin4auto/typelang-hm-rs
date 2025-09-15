@@ -1,6 +1,5 @@
-# ignore everything in the target directory
-/target/*
-# but not the documentation...
-!/target/doc/
-# ...or the coverage reports
-!/target/llvm-cov/
+# directories
+target/
+
+# files
+**/*.rs.bk
