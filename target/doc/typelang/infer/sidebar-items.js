@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["infer_expr","infer_type_str","infer_type_str_with_defaulting","initial_class_env","initial_env","type_from_texpr"],"struct":["InferState"]};

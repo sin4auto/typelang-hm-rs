@@ -17,8 +17,8 @@
 # .PHONYターゲット: ファイル名ではないターゲットを宣言します。
 .PHONY: help \
 	clean fmt clippy test debug_build release_build doc \
-	coverage coverage-json coverage-summary \
-	debug release ci pipeline
+	coverage \
+	debug release ci
 
 # --- メインターゲット ---
 help: ## このヘルプメッセージを表示します
@@ -56,20 +56,14 @@ doc: ## ドキュメントを生成します (依存クレートは除く)
 	@echo ">> ドキュメントを生成中..."
 	@RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 
-# --- カバレッジ関連ターゲット ---
-coverage: ## HTML形式のカバレッジレポートを生成します
-	@echo ">> HTMLカバレッジレポートを生成中..."
+# --- カバレッジ関連ターゲット (エラー修正版) ---
+coverage: ## カバレッジレポート (HTML, JSON) を生成します
+	@echo ">> カバレッジ測定用のテストを実行し、HTMLレポートを生成中..."
 	@cargo llvm-cov --workspace --html
 	@echo "HTMLレポートが target/llvm-cov/html/index.html に生成されました"
-
-coverage-json: ## JSON形式のカバレッジレポートを生成します (CIでのチェック用)
-	@echo ">> JSONカバレッジレポートを生成中..."
+	@echo ">> 生成されたデータを元に、JSONレポートを生成中..."
 	@cargo llvm-cov report --json --output-path coverage.json
 	@echo "JSONレポートが coverage.json に生成されました"
-
-coverage-summary: ## カバレッジの概要をコンソールに表示します
-	@echo ">> カバレッジの概要を表示中..."
-	@cargo llvm-cov --workspace --summary-only
 
 # --- 複合ターゲット ---
 debug: fmt clippy test debug_build ## フォーマット、リント、テスト、デバッグビルドを順に実行します
@@ -78,8 +72,5 @@ debug: fmt clippy test debug_build ## フォーマット、リント、テスト
 release: fmt clippy test release_build ## フォーマット、リント、テスト、リリースビルドを順に実行します
 	@echo "✅ すべての品質チェックとリリースビルドが完了しました！"
 
-ci: clean release ## CI環境で実行するタスク
-	@echo "✅ CI用のタスクが完了しました！"
-
-pipeline: ci doc coverage coverage-json coverage-summary ## プロジェクトの全主要タスクを順に実行します
-	@echo "✅ 全てのパイプライン処理が完了しました！"
+ci: clean fmt clippy release_build doc coverage ## CIで実行する全タスク
+	@echo "✅ 全てのCIパイプライン処理が完了しました！"
