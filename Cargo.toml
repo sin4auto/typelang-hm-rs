@@ -1,0 +1,20 @@
+[package]
+name = "typelang-hm-rs"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.70"
+description = "A tiny Hindley–Milner-based functional language for learning and validation (Rust)."
+license = "MIT"
+readme = "README.md"
+
+[lib]
+name = "typelang"
+path = "src/lib.rs"
+
+[[bin]]
+name = "typelang-repl"
+path = "src/bin/typelang.rs"
+
+[profile.release]
+lto = true
+codegen-units = 1
