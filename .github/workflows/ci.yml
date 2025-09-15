@@ -1,16 +1,10 @@
 # .github/workflows/cl.yml
-name: cl
+name: CI
 
 on:
   push:
     branches: [ main ]
   pull_request:
-  workflow_dispatch:
-    inputs:
-      coverage:
-        description: "Run make coverage"
-        type: boolean
-        default: false
 
 jobs:
   ci:
@@ -19,26 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-
       - uses: Swatinem/rust-cache@v2
 
       - name: make ci
         run: make ci
-
-      - name: make coverage (manual only)
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.coverage }}
-        run: make coverage
-
-      - name: upload coverage artifacts
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.coverage }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage
-          path: |
-            target/llvm-cov/html/**
-            target/llvm-cov/lcov.info
-            coverage.json
-          if-no-files-found: warn
