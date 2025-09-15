@@ -48,13 +48,7 @@ jobs:
       - name: Run all CI tasks via Makefile
         run: make ci
 
-      # 6. 生成されたカバレッジレポートをアーティファクトとしてアップロード
-      - name: Upload JSON coverage report
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report-json
-          path: coverage.json
-
+      # 6. 生成されたHTMLカバレッジレポートをアーティファクトとしてアップロード
       - name: Upload HTML coverage report
         uses: actions/upload-artifact@v4
         with:
