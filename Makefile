@@ -1,79 +1,96 @@
-# ==============================================================================
-# Rustプロジェクト用 Makefile
-#
-# 使い方:
-#   make          - このヘルプメッセージを表示します。
-#   make <ターゲット名> - 特定のタスクを実行します。
-#
-# 事前準備 (一度だけ実行):
-#   カバレッジ測定のターゲットを使うには、事前に以下のツールをインストールしてください。
-#   $ rustup component add llvm-tools-preview
-#   $ cargo install cargo-llvm-cov --locked
-# ==============================================================================
-
-# makeコマンドの引数が指定されなかった場合、デフォルトで'help'ターゲットを実行します。
 .DEFAULT_GOAL := help
 
-# .PHONYターゲット: ファイル名ではないターゲットを宣言します。
-.PHONY: help \
-	clean fmt clippy test debug_build release_build doc \
-	coverage \
-	debug release ci full_local
+SHELL := /usr/bin/bash
+.SHELLFLAGS := -eu -o pipefail -c
+.ONESHELL:
+.EXPORT_ALL_VARIABLES:
 
-# --- メインターゲット ---
-help: ## このヘルプメッセージを表示します
-	@echo "使い方: make [ターゲット名]"
-	@echo ""
-	@echo "利用可能なターゲット:"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
-		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+.PHONY: \
+  help add-tools clean \
+  fmt fmt-check clippy \
+  test build release \
+  doc doc-open coverage \
+  audit deny outdated udeps miri bench \
+  check full_local ci
 
-clean: ## targetディレクトリとビルド成果物を削除します
-	@echo ">> ビルド成果物をクリーンアップ中..."
-	@cargo clean
+help: ## このヘルプを表示
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | \
+	  awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
-fmt: ## ソースコードをフォーマットします
-	@echo ">> コードをフォーマット中..."
-	@cargo fmt
+# ---- 基本 ---------------------------------------------------------------------
+clean: ## target などを削除
+	cargo clean
 
-clippy: ## Clippyでコードをリントします (警告をエラーとして扱います)
-	@echo ">> Clippyでコードをリント中..."
-	@cargo clippy --all-targets -- -D warnings
+fmt: ## 整形を実行（ローカル用）
+	cargo fmt --all
 
-test: ## すべてのテストを詳細ログ付きで実行します
-	@echo ">> テストを実行中..."
-	@cargo test --all --verbose
+fmt-check: ## 整形済みかを検査（CI向け）
+	cargo fmt --all -- --check
 
-debug_build: ## デバッグビルドを行います (最適化なし、開発用)
-	@echo ">> デバッグビルド中..."
-	@cargo build
+clippy: ## Clippy（警告=エラー）
+	cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-release_build: ## リリースビルドを行います (最適化あり、本番用)
-	@echo ">> リリースビルド中..."
-	@cargo build --release
+test: ## テスト（ワークスペース全体）
+	cargo test --workspace --all-features --verbose
 
-doc: ## ドキュメントを生成します (依存クレートは除く)
-	@echo ">> ドキュメントを生成中..."
-	@RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
+build: ## デバッグビルド
+	cargo build --workspace --all-features --frozen --locked
 
-# --- カバレッジ関連ターゲット (エラー修正版) ---
-coverage: ## カバレッジレポート (HTML, JSON) を生成します
-	@echo ">> カバレッジ測定用のテストを実行し、HTMLレポートを生成中..."
-	@cargo llvm-cov --workspace --html
-	@echo "HTMLレポートが target/llvm-cov/html/index.html に生成されました"
-	@echo ">> 生成されたデータを元に、JSONレポートを生成中..."
-	@cargo llvm-cov report --json --output-path coverage.json
-	@echo "JSONレポートが coverage.json に生成されました"
+release: ## リリースビルド
+	cargo build --workspace --all-features --frozen --locked --release
 
-# --- 複合ターゲット ---
-debug: fmt clippy test debug_build ## フォーマット、リント、テスト、デバッグビルドを順に実行します
-	@echo "✅ すべての品質チェックとデバッグビルドが完了しました！"
+doc: ## ドキュメント生成（警告=エラー）
+	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
 
-release: fmt clippy test release_build ## フォーマット、リント、テスト、リリースビルドを順に実行します
-	@echo "✅ すべての品質チェックとリリースビルドが完了しました！"
+doc-open: doc ## 生成後にブラウザで開く
+	html="target/doc/index.html"; \
+	if command -v wslview >/dev/null 2>&1; then wslview "$$html"; \
+	elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$$html"; \
+	elif command -v open >/dev/null 2>&1; then open "$$html"; \
+	else echo "open $$html"; fi
 
-ci: clean release ## CIで実行するタスク
-	@echo "✅ 全てのCI処理が完了しました！"
+# ---- ツール導入（未導入時のみ） -----------------------------------------------
+add-tools: ## rustfmt/clippy/llvm-cov を未導入なら導入
+	command -v rustfmt >/dev/null 2>&1 || rustup component add rustfmt
+	command -v cargo-clippy >/dev/null 2>&1 || rustup component add clippy
+	command -v cargo-llvm-cov >/dev/null 2>&1 || { rustup component add llvm-tools-preview; cargo install cargo-llvm-cov --locked; }
 
-full_local: clean fmt clippy release_build doc coverage ## ドキュメント生成からカバレッジテストまでのフルパイプライン 
-	@echo "✅ ドキュメント生成からカバレッジテストまでのフルパイプライン処理が完了しました！"
+# ---- カバレッジ ---------------------------------------------------------------
+coverage: add-tools ## カバレッジ測定＋レポート生成（HTML/JSON/LCOV）
+	RUSTFLAGS="-C link-dead-code" cargo llvm-cov --workspace --html
+	cargo llvm-cov report --json --output-path coverage.json
+	cargo llvm-cov report --lcov --output-path target/llvm-cov/lcov.info
+	@echo "HTML: target/llvm-cov/html/index.html"
+	@echo "JSON: coverage.json"
+	@echo "LCOV: target/llvm-cov/lcov.info"
+
+# ---- 健康診断 & 解析 ----------------------------------------------------------
+audit: ## 既知脆弱性チェック
+	command -v cargo-audit >/dev/null 2>&1 || cargo install cargo-audit
+	cargo audit
+
+outdated: ## 依存の更新状況
+	command -v cargo-outdated >/dev/null 2>&1 || cargo install cargo-outdated
+	cargo outdated
+
+udeps: ## 未使用依存（nightly）
+	rustup toolchain install nightly --no-self-update || true
+	cargo +nightly install cargo-udeps || true
+	cargo +nightly udeps --workspace
+
+miri: ## 未定義動作の検査（nightly）
+	rustup +nightly component add miri
+	cargo +nightly miri test
+
+bench: ## ベンチ（criterion 想定）
+	cargo bench
+
+# ---- チェック & CI フロー -----------------------------------------------------
+check: fmt clippy test ## フォーマット＋Lint＋テスト
+	@echo "✅ コードチェック (fmt → clippy → test) 完了"
+
+full_local: clean fmt clippy test release audit outdated udeps miri doc coverage ## フルローカルビルド + 健康診断 + ドキュメント生成 + 解析
+	@echo "✅ フルローカルビルド (clean → fmt → clippy → test → release → audit → deny → outdated → udeps → miri → doc → coverage) 完了"
+
+ci: clean fmt-check clippy test release ## CI: クリーンビルド + fmt-check + clippy + test + release
+	@echo "✅ CIフロー (clean → fmt-check → clippy → test → release) 完了"

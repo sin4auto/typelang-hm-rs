@@ -2,6 +2,9 @@
 
 use typelang::{evaluator, infer, parser};
 
+// 実行時I/Oを避けて、テストデータをビルド時に埋め込む（Miri対応）
+const BASICS_TL: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/examples/basics.tl"));
+
 #[test]
 fn infer_lambda_num() {
     let e = parser::parse_expr("\\x -> x + 1").expect("parse");
@@ -33,8 +36,9 @@ fn eval_powf_neg() {
 
 #[test]
 fn load_program_examples() {
-    let src = std::fs::read_to_string("examples/basics.tl").expect("read examples/basics.tl");
-    let prog = parser::parse_program(&src).expect("parse program");
+    // 以前は std::fs::read_to_string で実行時I/Oを行っていたが、
+    // Miri の isolation で失敗するため include_str! に変更
+    let prog = parser::parse_program(BASICS_TL).expect("parse program");
     let mut tenv = infer::initial_env();
     let mut venv = evaluator::initial_env();
     let cenv = infer::initial_class_env();
