@@ -1,13 +1,19 @@
-# .github/workflows/ci.yml
+# .github/workflows/cl.yml
+name: cl
 
-name: CI
-
-on: [push, pull_request]
-
-jobs:
-  ci:
-    name: Rust CI
-    runs-on: ubuntu-latest
+on:
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - '.gitignore'
+  pull_request:
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+  # 手動トリガー（例：カバレッジ確認など）
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -16,32 +22,83 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+
 jobs:
   ci:
-    name: Rust CI (linux)
+    name: Rust CI
     runs-on: ubuntu-latest
-
-    env:
-      CARGO_TERM_COLOR: always
-      RUST_BACKTRACE: 1
-      # CI ではインクリメンタル無効の方が安定（キャッシュで十分高速）
-      CARGO_INCREMENTAL: 0
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # バージョン埋め込みや変更点チェックをする場合は 0 を推奨
           fetch-depth: 0
 
-      # 推奨：Rust専用キャッシュ（~/.cargo/bin や target を良きに計らってくれる）
-      - name: Rust cache
+      - name: Install Rust (stable + components)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache (cargo/target)
         uses: Swatinem/rust-cache@v2
         with:
-          # workspace: true が既定。複数クレートでもOK
-          # cache-on-failure: true でも可
           cache-all-crates: true
 
-      # Makefileの 'ci' ターゲットを実行
-      - name: Run CI tasks via Makefile
+      # Makefile の 'ci'（fmt-check → clippy → test → release）をそのまま使用
+      - name: Run make ci
         run: make ci
+
+      # 失敗時に target/ のログやテスト結果を拾っておく
+      - name: Upload artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: target-on-failure
+          path: |
+            target/**
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # 手動トリガー時に使うカバレッジ計測（Makefileの coverage ターゲットを実行）
+  coverage:
+    name: Coverage (llvm-cov)
+    runs-on: ubuntu-latest
+    needs: []
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust (stable + llvm-tools)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt, llvm-tools-preview
+
+      - name: Cache (cargo/target)
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: true
+
+      # Makefile 側で cargo-llvm-cov を入れてくれる（add-tools 経由）
+      - name: Run make coverage
+        run: make coverage
+
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-artifacts
+          path: |
+            target/llvm-cov/html/**
+            target/llvm-cov/lcov.info
+            coverage.json
+          if-no-files-found: warn
+          retention-days: 14
