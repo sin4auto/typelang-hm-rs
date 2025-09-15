@@ -16,9 +16,9 @@
 
 # .PHONYターゲット: ファイル名ではないターゲットを宣言します。
 .PHONY: help \
-	clean fmt clippy test build doc \
+	clean fmt clippy test debug_build release_build doc \
 	coverage coverage-json coverage-summary \
-	check ci pipeline
+	debug release ci pipeline
 
 # --- メインターゲット ---
 help: ## このヘルプメッセージを表示します
@@ -44,8 +44,12 @@ test: ## すべてのテストを詳細ログ付きで実行します
 	@echo ">> テストを実行中..."
 	@cargo test --all --verbose
 
-build: ## メインのバイナリをビルドします
-	@echo ">> バイナリ 'typelang-repl' をビルド中..."
+debug_build: ## デバッグビルドを行います (最適化なし、開発用)
+	@echo ">> デバッグビルド中..."
+	@cargo build
+
+release_build: ## リリースビルドを行います (最適化あり、本番用)
+	@echo ">> リリースビルド中..."
 	@cargo build --release
 
 doc: ## ドキュメントを生成します (依存クレートは除く)
@@ -68,10 +72,13 @@ coverage-summary: ## カバレッジの概要をコンソールに表示しま�
 	@cargo llvm-cov --workspace --summary-only
 
 # --- 複合ターゲット ---
-check: fmt clippy test build ## フォーマット、リント、テスト、ビルドを順に実行します
-	@echo "✅ すべての品質チェックとビルドが完了しました！"
+debug: fmt clippy test debug_build ## フォーマット、リント、テスト、デバッグビルドを順に実行します
+	@echo "✅ すべての品質チェックとデバッグビルドが完了しました！"
 
-ci: clean check ## CI環境で実行するタスク
+release: fmt clippy test release_build ## フォーマット、リント、テスト、リリースビルドを順に実行します
+	@echo "✅ すべての品質チェックとリリースビルドが完了しました！"
+
+ci: clean release ## CI環境で実行するタスク
 	@echo "✅ CI用のタスクが完了しました！"
 
 pipeline: ci doc coverage coverage-json coverage-summary ## プロジェクトの全主要タスクを順に実行します
