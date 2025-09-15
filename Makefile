@@ -92,5 +92,5 @@ check: fmt clippy test ## フォーマット＋Lint＋テスト
 full_local: clean fmt clippy test release audit outdated udeps miri doc coverage ## フルローカルビルド + 健康診断 + ドキュメント生成 + 解析
 	@echo "✅ フルローカルビルド (clean → fmt → clippy → test → release → audit → deny → outdated → udeps → miri → doc → coverage) 完了"
 
-ci: fmt-check clippy test release ## CI: クリーンビルド + fmt-check + clippy + test + release
+ci: fmt-check clippy test release ## CI: fmt-check + clippy + test + release
 	@echo "✅ CIフロー (clean → fmt-check → clippy → test → release) 完了"
