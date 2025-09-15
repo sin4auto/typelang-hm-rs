@@ -9,30 +9,39 @@ jobs:
     name: Rust CI
     runs-on: ubuntu-latest
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: Rust CI (linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: 1
+      # CI ではインクリメンタル無効の方が安定（キャッシュで十分高速）
+      CARGO_INCREMENTAL: 0
+
     steps:
-      # リポジトリのコードをチェックアウト
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
-
-      # Rustのツールチェインと、Makefileで必要なコンポーネントをインストール
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy, rustfmt
+          # バージョン埋め込みや変更点チェックをする場合は 0 を推奨
+          fetch-depth: 0
 
-      # cargoの依存関係とビルド成果物をキャッシュして、将来の実行を高速化
-      - name: Cache cargo registry and target directory
-        uses: actions/cache@v4
+      # 推奨：Rust専用キャッシュ（~/.cargo/bin や target を良きに計らってくれる）
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+          # workspace: true が既定。複数クレートでもOK
+          # cache-on-failure: true でも可
+          cache-all-crates: true
 
       # Makefileの 'ci' ターゲットを実行
       - name: Run CI tasks via Makefile
