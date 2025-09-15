@@ -1,7 +1,6 @@
 # TypeLang HM (Rust)
 
 [![CI](https://github.com/sin4auto/typelang-hm-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/sin4auto/typelang-hm-rs/actions/workflows/ci.yml)
-[![Coverage](https://codecov.io/gh/sin4auto/typelang-hm-rs/branch/main/graph/badge.svg)](https://codecov.io/gh/sin4auto/typelang-hm-rs)
 [![MSRV](https://img.shields.io/badge/MSRV-1.70%2B-blue.svg)](#)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
