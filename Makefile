@@ -15,7 +15,7 @@ SHELL := /usr/bin/bash
 
 help: ## このヘルプを表示
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | \
-	  awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	  awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
 
 # ---- 基本 ---------------------------------------------------------------------
 clean: ## target などを削除
@@ -88,11 +88,11 @@ bench: ## ベンチ（criterion 想定）
 	cargo bench
 
 # ---- チェック & CI フロー -----------------------------------------------------
-check: fmt clippy test ## フォーマット＋Lint＋テスト
+check: fmt clippy test ## フォーマット + Lint + テスト
 	@echo "✅ コードチェック (fmt → clippy → test) 完了"
 
-full_local: clean fmt clippy test release audit outdated udeps miri doc coverage ## フルローカルビルド + 健康診断 + ドキュメント生成 + 解析
-	@echo "✅ フルローカルビルド (clean → fmt → clippy → test → release → audit → outdated → udeps → miri → doc → coverage) 完了"
+full_local: clean fmt clippy test doc audit outdated coverage release udeps miri ## clean + フォーマット + Lint + テスト + ドキュメント + 健康診断 + カバレッジ + リリースビルド + 未使用依存 + 未定義動作検査
+	@echo "✅ フルローカルビルド (clean → fmt → clippy → test → doc → audit → outdated → coverage → release → udeps → miri) 完了"
 
-ci: fmt-check clippy test release ## CI: fmt-check + clippy + test + release
+ci: fmt-check clippy test release ## CI: format check + Lint + テスト + リリースビルド
 	@echo "✅ CIフロー (fmt-check → clippy → test → release) 完了"
