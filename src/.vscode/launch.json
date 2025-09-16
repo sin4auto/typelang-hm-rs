@@ -1,0 +1,406 @@
+{
+    // IntelliSense を使用して利用可能な属性を学べます。
+    // 既存の属性の説明をホバーして表示します。
+    // 詳細情報は次を確認してください: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in library 'typelang'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--lib",
+                    "--package=typelang-hm-rs"
+                ],
+                "filter": {
+                    "name": "typelang",
+                    "kind": "lib"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'typelang-repl'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=typelang-repl",
+                    "--package=typelang-hm-rs"
+                ],
+                "filter": {
+                    "name": "typelang-repl",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'typelang-repl'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=typelang-repl",
+                    "--package=typelang-hm-rs"
+                ],
+                "filter": {
+                    "name": "typelang-repl",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug integration test 'boundary_lex_parse'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--test=boundary_lex_parse",
+                    "--package=typelang-hm-rs"
+                ],
+                "filter": {
+                    "name": "boundary_lex_parse",
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug integration test 'error_cases'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--test=error_cases",
+                    "--package=typelang-hm-rs"
+                ],
+                "filter": {
+                    "name": "error_cases",
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug integration test 'error_message_patterns'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--test=error_message_patterns",
+                    "--package=typelang-hm-rs"
+                ],
+                "filter": {
+                    "name": "error_message_patterns",
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug integration test 'errors_display'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--test=errors_display",
+                    "--package=typelang-hm-rs"
+                ],
+                "filter": {
+                    "name": "errors_display",
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug integration test 'evaluator_additional'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--test=evaluator_additional",
+                    "--package=typelang-hm-rs"
+                ],
+                "filter": {
+                    "name": "evaluator_additional",
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug integration test 'evaluator_more'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--test=evaluator_more",
+                    "--package=typelang-hm-rs"
+                ],
+                "filter": {
+                    "name": "evaluator_more",
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug integration test 'examples_types'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--test=examples_types",
+                    "--package=typelang-hm-rs"
+                ],
+                "filter": {
+                    "name": "examples_types",
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug integration test 'infer_additional'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--test=infer_additional",
+                    "--package=typelang-hm-rs"
+                ],
+                "filter": {
+                    "name": "infer_additional",
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug integration test 'infer_more'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--test=infer_more",
+                    "--package=typelang-hm-rs"
+                ],
+                "filter": {
+                    "name": "infer_more",
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug integration test 'integration_basic'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--test=integration_basic",
+                    "--package=typelang-hm-rs"
+                ],
+                "filter": {
+                    "name": "integration_basic",
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug integration test 'lexer_additional'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--test=lexer_additional",
+                    "--package=typelang-hm-rs"
+                ],
+                "filter": {
+                    "name": "lexer_additional",
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug integration test 'lexer_more'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--test=lexer_more",
+                    "--package=typelang-hm-rs"
+                ],
+                "filter": {
+                    "name": "lexer_more",
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug integration test 'lexer_unicode'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--test=lexer_unicode",
+                    "--package=typelang-hm-rs"
+                ],
+                "filter": {
+                    "name": "lexer_unicode",
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug integration test 'parser_additional'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--test=parser_additional",
+                    "--package=typelang-hm-rs"
+                ],
+                "filter": {
+                    "name": "parser_additional",
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug integration test 'parser_more'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--test=parser_more",
+                    "--package=typelang-hm-rs"
+                ],
+                "filter": {
+                    "name": "parser_more",
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug integration test 'repl_load_program_errors'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--test=repl_load_program_errors",
+                    "--package=typelang-hm-rs"
+                ],
+                "filter": {
+                    "name": "repl_load_program_errors",
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug integration test 'typesys_additional'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--test=typesys_additional",
+                    "--package=typelang-hm-rs"
+                ],
+                "filter": {
+                    "name": "typesys_additional",
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug integration test 'unit_suite'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--test=unit_suite",
+                    "--package=typelang-hm-rs"
+                ],
+                "filter": {
+                    "name": "unit_suite",
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}

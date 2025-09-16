@@ -10,7 +10,7 @@ SHELL := /usr/bin/bash
   fmt fmt-check clippy \
   test build release \
   doc doc-open coverage \
-  audit deny outdated udeps miri bench \
+  audit outdated udeps miri bench \
   check full_local ci
 
 help: ## このヘルプを表示
@@ -57,7 +57,8 @@ add-tools: ## rustfmt/clippy/llvm-cov を未導入なら導入
 
 # ---- カバレッジ ---------------------------------------------------------------
 coverage: add-tools ## カバレッジ測定＋レポート生成（HTML/JSON/LCOV）
-	RUSTFLAGS="-C link-dead-code" cargo llvm-cov --workspace --html
+	cargo llvm-cov clean --workspace
+	cargo llvm-cov --workspace --html
 	cargo llvm-cov report --json --output-path coverage.json
 	cargo llvm-cov report --lcov --output-path target/llvm-cov/lcov.info
 	@echo "HTML: target/llvm-cov/html/index.html"
@@ -75,10 +76,11 @@ outdated: ## 依存の更新状況
 
 udeps: ## 未使用依存（nightly）
 	rustup toolchain install nightly --no-self-update || true
-	cargo +nightly install cargo-udeps || true
+	command -v cargo-udeps >/dev/null 2>&1 || cargo +nightly install cargo-udeps --locked
 	cargo +nightly udeps --workspace
 
 miri: ## 未定義動作の検査（nightly）
+	rustup toolchain install nightly --no-self-update || true
 	rustup +nightly component add miri
 	cargo +nightly miri test
 
@@ -90,7 +92,7 @@ check: fmt clippy test ## フォーマット＋Lint＋テスト
 	@echo "✅ コードチェック (fmt → clippy → test) 完了"
 
 full_local: clean fmt clippy test release audit outdated udeps miri doc coverage ## フルローカルビルド + 健康診断 + ドキュメント生成 + 解析
-	@echo "✅ フルローカルビルド (clean → fmt → clippy → test → release → audit → deny → outdated → udeps → miri → doc → coverage) 完了"
+	@echo "✅ フルローカルビルド (clean → fmt → clippy → test → release → audit → outdated → udeps → miri → doc → coverage) 完了"
 
 ci: fmt-check clippy test release ## CI: fmt-check + clippy + test + release
-	@echo "✅ CIフロー (clean → fmt-check → clippy → test → release) 完了"
+	@echo "✅ CIフロー (fmt-check → clippy → test → release) 完了"
