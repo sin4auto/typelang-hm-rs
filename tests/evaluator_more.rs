@@ -1,4 +1,4 @@
-use typelang::{evaluator, parser};
+use typelang::{evaluator, parser, EvalError};
 
 #[test]
 fn eval_apply_non_function_error() {
@@ -38,4 +38,15 @@ fn eval_nan_comparison_is_error() {
     let mut env = evaluator::initial_env();
     let res = evaluator::eval_expr(&e, &mut env);
     assert!(res.is_err());
+}
+
+#[test]
+fn eval_pow_int_overflow_is_error() {
+    // 2^(2^(2^(2^2))) = 2^65536 は Int に収まらず EvalError
+    let e = parser::parse_expr("2 ^ 2 ^ 2 ^ 2 ^ 2").unwrap();
+    let mut env = evaluator::initial_env();
+    match evaluator::eval_expr(&e, &mut env) {
+        Err(EvalError(info)) => assert_eq!(info.code, "EVAL060"),
+        _ => panic!("expected EvalError for overflow"),
+    }
 }

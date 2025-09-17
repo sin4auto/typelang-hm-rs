@@ -83,7 +83,15 @@ pub fn initial_env() -> Env {
     // (^) と (**) の仕様
     fn powi(a: Value, b: Value) -> Result<Value, EvalError> {
         match (a, b) {
-            (Value::Int(x), Value::Int(y)) if y >= 0 => Ok(Value::Int(x.pow(y as u32))),
+            (Value::Int(x), Value::Int(y)) if y >= 0 => {
+                if y > u32::MAX as i64 {
+                    return Err(EvalError::new("EVAL060", "(^) の指数が大きすぎます", None));
+                }
+                // オーバーフローは利用者へ明示的なエラーとして返す
+                x.checked_pow(y as u32).map(Value::Int).ok_or_else(|| {
+                    EvalError::new("EVAL060", "(^) の結果が Int の範囲を超えました", None)
+                })
+            }
             (x, y) => Ok(Value::Double(to_double(&x)?.powf(to_double(&y)?))),
         }
     }
