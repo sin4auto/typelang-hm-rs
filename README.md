@@ -1,94 +1,69 @@
 # TypeLang HM (Rust)
 
-[![CI](https://github.com/sin4auto/typelang-hm-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/sin4auto/typelang-hm-rs/actions/workflows/ci.yml)
-[![MSRV](https://img.shields.io/badge/MSRV-1.70%2B-blue.svg)](#)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-
-<!-- NOTE: CI/coverage バッジは sin4auto/typelang-hm-rs を参照しています。private の場合は Codecov のトークン設定が必要です。 -->
-
-学習と検証に特化した極小の関数型言語処理系です。Rust 実装は Hindley–Milner 型推論を中核に、最小限の型クラス、簡易評価器、REPL を備えます。設計目標は「読みやすく、壊しにくい最小実装」。
+TypeLang HM は、Hindley–Milner 型推論を核にした最小構成の関数型言語処理系です。学習用途で読みやすく壊しにくいコードを目指し、Rust 標準ライブラリのみで実装しています。
 
 ## 特長
-- HM 型推論（let 多相）と単一化
-- 最小型クラス: `Eq` / `Ord` / `Show` / `Num` / `Fractional`
-- 値: 整数/浮動小数/Bool/Char/String/リスト/タプル
-- 演算: 比較（辞書式対応）、四則、累乗（`^` 整数指数、`**` 連続値指数）
-- REPL で型照会・定義・ファイルロード
+- Hindley–Milner 型推論（Algorithm W）と単一化をフルサポート
+- 最小限の型クラス (`Eq` / `Ord` / `Show` / `Num` / `Fractional`)
+- 正格評価器とカリー化されたプリミティブ（整数・浮動小数・Bool・Char・String・リスト・タプル）
+- 演算子優先順位/結合性の考慮、累乗演算 `^`（整数指数）と `**`（連続値指数）
+- 使いやすい REPL（ヒストリー、矢印移動、`:history` 出力、多行入力）
 
-## カバレッジ
-- ツール: `cargo-llvm-cov`（LLVM の source-based coverage）
-- 導入: `cargo install cargo-llvm-cov`
-- Makefile ターゲット（どれもワークスペース全体を対象）
-  - `make coverage`          — HTML レポートを生成（`target/llvm-cov/html/index.html`）
-  - `make coverage-summary`  — 概要のみを標準出力へ
-  - `make coverage-lcov`     — `lcov.info` を生成（Codecov などに送信可能）
-  - `make coverage-json`     — `coverage.json` を生成（CI の閾値チェックが利用）
-  - `make coverage-clean`    — 生成物の掃除
-
-CI 連携（GitHub Actions）
-- `coverage` ジョブが `cargo-llvm-cov` を用いて `lcov.info` と `coverage.json` を生成し、
-  - Codecov にアップロード（バッジ用）
-  - PR には自動でカバレッジコメントを投稿（差分の閾値判定は `COVERAGE_MIN` で制御）
-- 閾値は `.github/workflows/ci.yml` の `COVERAGE_MIN` で調整（既定: 70）。
-
-## クイックスタート（1分）
-```
+## クイックスタート
+```bash
+# REPL を起動
 cargo run --bin typelang-repl
-> :let add x y = x + y
-> add 2 3
-5
-> :t \x -> x ** 2
--- Fractional a => a -> a
-> :load examples/basics.tl
+
+# REPL 内の例
+> :let square x = x * x
+> :t square
+-- Num a => a -> a
 > square 12
 144
--- 例: ファイルをロードすると各定義の型が表示されます
-> :load examples/advanced.tl
-Loaded 6 def(s) from examples/advanced.tl
-  plus1 :: Num a => a -> a
-  one_int :: Int
-  inv2 :: Double
-  powf :: Double
-  make_pair :: a -> b -> (a, b)
+> :load examples/basics.tl
+Loaded 6 def(s) from examples/basics.tl
+  factorial :: Num a => a -> a
+  ...
+> :history    # 直近の入力を一覧表示
 ```
+REPL では矢印キー（↑/↓/←/→）と Backspace が利用でき、`Ctrl+C` で入力を中断、`Ctrl+D` で終了できます。複数行の式は `.. ` プロンプトで継続入力してください。
 
-## REPL コマンド
-- `:t EXPR` / `:type EXPR`  型を表示（`:set default on|off` で既定化の切替）
-- `:let DEF [; DEF2 ...]`  その場で定義（複数は `;` 区切り）
-- `:load PATH` / `:reload`  ファイル読込/再読込
-- `:browse [PFX]`  定義一覧（接頭辞フィルタ）
-- `:unset NAME`  定義削除
-- `:quit`  終了
+## プロジェクト構成
+- `src/ast.rs` – 抽象構文木と表示ロジック
+- `src/lexer.rs` / `src/parser.rs` – UTF-8 対応の字句・構文解析（優先順位/結合性込み）
+- `src/typesys.rs` / `src/infer.rs` – 型表現、制約、単一化、defaulting 補助
+- `src/evaluator.rs` – 正格評価器とプリミティブ実装
+- `src/repl/` – REPL 本体（コマンド処理、表示、ファイル読込、ラインエディタ）
+- `examples/*.tl` – 言語機能のサンプル
+- `tests/` – lexer/parser/infer/evaluator/repl などの回帰テスト群
+- `EBNF.md` – 言語仕様の EBNF 定義
 
-## 言語の要点
-- 式: 変数 / 関数適用 / ラムダ `\x y -> ...` / `let ... in ...` / `if ... then ... else ...` / 注釈 `e :: T`
-- リテラル: `Int`/`Integer`/`Double`/`Bool`/`Char`/`String`/`[a]`/`(a,b,...)`
-- 優先順位: 関数適用 > `^/**`(右結合) > `* /` > `+ -` > 比較
-- 累乗: `^` は非負の整数指数で整数計算。負指数は `Double` にフォールバック。`**` は常に連続値指数。
+## ビルド & テスト
+小規模の変更確認: `make check`
+```bash
+make check   # cargo fmt → cargo clippy -D warnings → cargo test
+```
+最終確認（CI 相当フルセット）: `make full_local`
+```bash
+make full_local
+# clean → fmt → clippy → test → doc -D warnings → audit → outdated → coverage → release → udeps → miri
+```
+その他の主なターゲット:
+- `make doc` – `cargo doc` を警告をエラー扱いで生成
+- `make coverage` – `cargo llvm-cov` による HTML/JSON/LCOV 出力
+- `make add-tools` – 開発に必要なツール（rustfmt / clippy / cargo-llvm-cov 等）を導入
 
-詳細仕様は `EBNF.md`、エラー体系は `ERROR_CODES.md` を参照してください。
+## トークン節約と Serena 連携
+- `make serena-summarize` – `.serena/MODEL_INPUT.md` を最新化（Codex CLI 経由）
+- `make diffpack` / `make test-brief` / `make build-brief` – `.summ/` 以下に差分やログ抜粋を生成
+- `make model-pack` – `.serena` と `.summ` をまとめた `model_pack.zip` を作成
+これらの生成物は `.gitignore` 済みでリポジトリには含めません。
 
-## アーキテクチャ
-- `lexer.rs` / `parser.rs`: UTF-8 安全な字句/構文解析（優先順位・結合性対応）
-- `typesys.rs`: 型・制約・置換・単一化・表示（既定化は表示用）
-- `infer.rs`: Algorithm W + 型クラス制約
-- `evaluator.rs`: 正格・副作用なし。プリミティブをカリー化提供
-- `repl/*`: 対話環境。`^` の負指数を `**` へ正規化し可読な型表示を維持
-
-## 設計メモ
-- 型クラス充足は学習重視で厳密検証を簡略化。誤用は表示抑制/フォールバックで扱う
-- 既定化（defaulting）は「表示専用」。推論ロジックは既定化に依存しない
-- 推論失敗時は評価結果から代表型（Int/Double/Bool/Char/String）にフォールバック
-
-## 開発
-- 要件: Rust 1.70+（標準ライブラリのみ）
-- 品質: `cargo fmt` / `cargo clippy -D warnings` / `cargo test`
-- まとめ: `make check`（fmt → clippy → test）/ `make doc`
-- CI: GitHub Actions（`fmt`/`clippy`/`test`/`doc -D warnings`）
-
-### コントリビュート
-- 方針・規約は `AGENTS.md` を参照。
-- 1 PR = 1 目的。小さく、読みやすく。`make check` が通ること。
+## コントリビュート
+- 方針・運用・リリース規約は `AGENTS.md` を参照してください
+- コミット前に `make check` を実行し、PR 作成前またはリリース前に `make full_local` を通してください
+- コメントやドキュメントは日本語、識別子は英語で統一します
+- 依存は標準ライブラリのみ。外部クレートを追加する場合は事前に議論してください
 
 ## ライセンス
-MIT（`LICENSE` 参照）。
+MIT License – 詳細は `LICENSE` を参照してください。

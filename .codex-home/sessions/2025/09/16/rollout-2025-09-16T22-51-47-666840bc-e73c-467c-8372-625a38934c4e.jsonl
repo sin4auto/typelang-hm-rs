@@ -1,0 +1,4 @@
+{"timestamp":"2025-09-16T13:51:47.146Z","type":"session_meta","payload":{"id":"666840bc-e73c-467c-8372-625a38934c4e","timestamp":"2025-09-16T13:51:47.141Z","cwd":"/home/hsin4/myproject","originator":"codex_cli_rs","cli_version":"0.34.0","instructions":null}}
+{"timestamp":"2025-09-16T13:51:50.655Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <cwd>/home/hsin4/myproject</cwd>\n  <approval_policy>on-request</approval_policy>\n  <sandbox_mode>workspace-write</sandbox_mode>\n  <network_access>restricted</network_access>\n  <shell>bash</shell>\n</environment_context>"}]}}
+{"timestamp":"2025-09-16T13:52:03.815Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"こんにちは"}]}}
+{"timestamp":"2025-09-16T13:52:03.815Z","type":"event_msg","payload":{"type":"user_message","message":"こんにちは","kind":"plain"}}
