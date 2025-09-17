@@ -1,5 +1,7 @@
 # directories
 target/
+serena/
+summ/
 
 # files
 **/*.rs.bk
