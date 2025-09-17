@@ -339,8 +339,11 @@ impl ClassEnv {
         match &c.r#type {
             Type::TCon(tc) => self.has_instance(&c.classname, &tc.name),
             Type::TApp(TApp { func, arg }) => {
-                // リスト型: [] a の Eq/Ord は a の Eq/Ord に依存
                 if let Type::TCon(TCon { name }) = &**func {
+                    if self.has_instance(&c.classname, name) {
+                        return true;
+                    }
+                    // リスト型: [] a の Eq/Ord は要素の制約に委譲
                     if name == "[]" && (c.classname == "Eq" || c.classname == "Ord") {
                         return self.entails_one(&Constraint {
                             classname: c.classname.clone(),

@@ -1,3 +1,5 @@
+b044bf7 fix: guard integer pow overflow
+f6e8275 replにヒストリー機能追加
 f445feb Makefile変更
 31f07be .gitignare変更
 0de1ffe Makefile等変更

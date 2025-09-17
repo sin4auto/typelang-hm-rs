@@ -1,0 +1,70 @@
+src/lexer.rs:14:pub struct Token {
+src/lexer.rs:23:pub enum TokenKind {
+src/lexer.rs:94:pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
+src/evaluator.rs:17:pub enum Value {
+src/evaluator.rs:35:pub struct Prim2 {
+src/evaluator.rs:42:pub fn initial_env() -> Env {
+src/evaluator.rs:357:pub fn eval_expr(e: &A::Expr, env: &mut Env) -> Result<Value, EvalError> {
+src/infer.rs:16:pub struct InferState {
+src/infer.rs:23:pub fn initial_class_env() -> ClassEnv {
+src/infer.rs:52:pub fn initial_env() -> TypeEnv {
+src/infer.rs:347:pub fn infer_expr(
+src/infer.rs:630:pub fn type_from_texpr(te: &A::TypeExpr) -> Type {
+src/infer.rs:670:pub fn infer_type_str(expr: &A::Expr) -> Result<String, TypeError> {
+src/infer.rs:681:pub fn infer_type_str_with_defaulting(
+src/errors.rs:7:pub struct ErrorInfo {
+src/errors.rs:78:pub struct LexerError(pub ErrorInfo);
+src/errors.rs:105:pub struct ParseError(pub ErrorInfo);
+src/errors.rs:122:pub struct TypeError(pub ErrorInfo);
+src/errors.rs:149:pub struct EvalError(pub ErrorInfo);
+src/repl/line_editor.rs:7:pub enum ReadResult {
+src/repl/line_editor.rs:13:pub struct LineEditor {
+src/repl/line_editor.rs:432:mod tests {
+src/repl/loader.rs:27:pub fn load_program_into_env(
+src/repl/cmd.rs:26:pub fn run_repl() {
+src/repl/cmd.rs:595:mod tests {
+src/typesys.rs:15:pub struct TVar {
+src/typesys.rs:20:pub struct TCon {
+src/typesys.rs:25:pub struct TApp {
+src/typesys.rs:31:pub struct TFun {
+src/typesys.rs:37:pub struct TTuple {
+src/typesys.rs:42:pub enum Type {
+src/typesys.rs:50:pub fn t_list(elem: Type) -> Type {
+src/typesys.rs:56:pub fn t_string() -> Type {
+src/typesys.rs:63:pub struct Constraint {
+src/typesys.rs:69:pub struct QualType {
+src/typesys.rs:75:pub struct Scheme {
+src/typesys.rs:83:pub fn ftv(t: &Type) -> HashSet<i64> {
+src/typesys.rs:107:pub fn apply_subst_t(s: &Subst, t: &Type) -> Type {
+src/typesys.rs:125:pub fn apply_subst_c(s: &Subst, c: &Constraint) -> Constraint {
+src/typesys.rs:131:pub fn apply_subst_q(s: &Subst, q: &QualType) -> QualType {
+src/typesys.rs:137:pub fn apply_subst_s(s: &Subst, sc: &Scheme) -> Scheme {
+src/typesys.rs:150:pub fn compose(a: &Subst, b: &Subst) -> Subst {
+src/typesys.rs:160:pub struct TypeEnv {
+src/typesys.rs:200:pub fn qualify(t: Type, constraints: Vec<Constraint>) -> QualType {
+src/typesys.rs:208:pub struct TVarSupply {
+src/typesys.rs:228:pub fn generalize(env: &TypeEnv, q: QualType) -> Scheme {
+src/typesys.rs:238:pub fn instantiate(sc: &Scheme, supply: &mut TVarSupply) -> QualType {
+src/typesys.rs:247:pub struct UnifyError {
+src/typesys.rs:260:pub fn unify(t1: Type, t2: Type) -> Result<Subst, UnifyError> {
+src/typesys.rs:302:pub fn bind(tv: TVar, t: Type) -> Result<Subst, UnifyError> {
+src/typesys.rs:319:pub struct ClassEnv {
+src/typesys.rs:504:pub fn pretty_qual(q: &QualType) -> String {
+src/typesys.rs:530:pub fn apply_defaulting_simple(q: &QualType) -> QualType {
+src/repl/printer.rs:40:mod tests {
+src/repl/util.rs:82:mod tests {
+src/ast.rs:15:pub enum Expr {
+src/ast.rs:70:pub enum IntBase {
+src/ast.rs:79:pub enum TypeExpr {
+src/ast.rs:90:pub struct Constraint {
+src/ast.rs:96:pub struct SigmaType {
+src/ast.rs:103:pub struct TopLevel {
+src/ast.rs:111:pub struct Program {
+src/repl/mod.rs:10:mod line_editor;
+src/repl/mod.rs:11:mod loader;
+src/repl/mod.rs:12:mod printer;
+src/repl/mod.rs:13:mod util;
+src/parser.rs:16:pub struct Parser {
+src/parser.rs:588:pub fn parse_program(src: &str) -> Result<Program, ParseError> {
+src/parser.rs:592:pub fn parse_expr(src: &str) -> Result<Expr, ParseError> {
+src/parser.rs:610:mod tests {

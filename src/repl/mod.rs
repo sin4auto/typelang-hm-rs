@@ -7,6 +7,7 @@
 //! - `util`: REPL 内部で使う小さな正規化処理
 
 pub mod cmd;
+mod line_editor;
 mod loader;
 mod printer;
 mod util;

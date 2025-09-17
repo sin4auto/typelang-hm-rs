@@ -23,3 +23,24 @@ fn infer_ambiguous_add_without_defaulting_keeps_constraint() {
     let ty = infer::infer_type_str_with_defaulting(&e, false).expect("infer");
     assert_eq!(ty, "Num a => a");
 }
+
+#[test]
+fn infer_map_scheme_is_functor_polymorphic() {
+    let e = parser::parse_expr("map").expect("parse");
+    let ty = infer::infer_type_str(&e).expect("infer");
+    assert_eq!(ty, "Functor a => (b -> c) -> a b -> a c");
+}
+
+#[test]
+fn infer_foldl_scheme_is_foldable_polymorphic() {
+    let e = parser::parse_expr("foldl").expect("parse");
+    let ty = infer::infer_type_str(&e).expect("infer");
+    assert_eq!(ty, "Foldable a => (b -> c -> b) -> b -> a c -> b");
+}
+
+#[test]
+fn infer_foldr_scheme_is_foldable_polymorphic() {
+    let e = parser::parse_expr("foldr").expect("parse");
+    let ty = infer::infer_type_str(&e).expect("infer");
+    assert_eq!(ty, "Foldable a => (b -> c -> c) -> c -> a b -> c");
+}

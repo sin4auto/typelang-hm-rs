@@ -1,7 +1,5 @@
 //! REPL のコマンドとメインループ
 
-use std::io::{self, Write};
-
 use crate::ast as A;
 use crate::evaluator::{eval_expr, initial_env as value_env_init, Value};
 use crate::infer::{infer_expr, initial_class_env, initial_env as type_env_init, InferState};
@@ -11,6 +9,7 @@ use crate::typesys::{
     Type,
 };
 
+use super::line_editor::{LineEditor, ReadResult};
 use super::loader::load_program_into_env;
 use super::printer::{print_help, print_value};
 use super::util::normalize_expr;
@@ -31,32 +30,49 @@ pub fn run_repl() {
     let mut value_env = value_env_init();
     let mut last_loaded_paths: Vec<String> = Vec::new();
 
-    let mut line = String::new();
+    let mut editor = LineEditor::new();
     let mut buffer = String::new();
     let mut defaulting_on = false;
-    loop {
-        // 入力（多行対応）
+    'repl: loop {
         buffer.clear();
-        line.clear();
-        print!("> ");
-        let _ = io::stdout().flush();
-        if io::stdin().read_line(&mut line).is_err() {
-            break;
-        }
-        buffer.push_str(&line);
-        while needs_more_input(&buffer) {
-            line.clear();
-            print!(".. ");
-            let _ = io::stdout().flush();
-            if io::stdin().read_line(&mut line).is_err() {
-                break;
+        let mut prompt = "> ";
+        let mut first_line = true;
+        let input = loop {
+            match editor.read_line(prompt) {
+                Ok(ReadResult::Line(line)) => {
+                    buffer.push_str(&line);
+                    buffer.push('\n');
+                    if needs_more_input(&buffer) {
+                        prompt = ".. ";
+                        first_line = false;
+                        continue;
+                    }
+                    break buffer.trim().to_string();
+                }
+                Ok(ReadResult::Eof) => {
+                    if first_line && buffer.trim().is_empty() {
+                        println!();
+                        break 'repl;
+                    }
+                    break buffer.trim().to_string();
+                }
+                Ok(ReadResult::Interrupted) => {
+                    continue 'repl;
+                }
+                Err(err) => {
+                    eprintln!("入力エラー: {}", err);
+                    break 'repl;
+                }
             }
-            buffer.push_str(&line);
-        }
-        let input = buffer.trim();
+        };
+
+        let input = input.trim();
         if input.is_empty() {
             continue;
         }
+
+        editor.add_history(input);
+
         // 新しい純関数パス: コマンド解釈 → 作用
         match parse_repl_command(input) {
             ReplCommand::Help => {
@@ -88,6 +104,10 @@ pub fn run_repl() {
                 }
             }
         }
+    }
+
+    if let Err(err) = editor.save_history() {
+        eprintln!("ヒストリーの保存に失敗しました: {}", err);
     }
 }
 
@@ -451,6 +471,12 @@ pub(crate) fn parse_repl_command(input: &str) -> ReplCommand {
         }
         return ReplCommand::Unset(name.to_string());
     }
+    if s.starts_with("let ") {
+        if parse_expr(s).is_ok() {
+            return ReplCommand::Eval(s.to_string());
+        }
+        return ReplCommand::Let(normalize_let_payload(s));
+    }
     ReplCommand::Eval(s.to_string())
 }
 
@@ -639,6 +665,10 @@ mod tests {
             parse_repl_command(":unset x"),
             ReplCommand::Unset("x".into())
         );
+        match parse_repl_command("let id x = x") {
+            ReplCommand::Let(src) => assert!(src.starts_with("let id")),
+            other => panic!("unexpected: {:?}", other),
+        }
         assert_eq!(
             parse_repl_command("1 + 2"),
             ReplCommand::Eval("1 + 2".into())

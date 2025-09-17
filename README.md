@@ -4,7 +4,8 @@ TypeLang HM は、Hindley–Milner 型推論を核にした最小構成の関数
 
 ## 特長
 - Hindley–Milner 型推論（Algorithm W）と単一化をフルサポート
-- 最小限の型クラス (`Eq` / `Ord` / `Show` / `Num` / `Fractional`)
+- 最小限の型クラス (`Eq` / `Ord` / `Show` / `Num` / `Fractional` / `Functor` / `Foldable`)
+- Functor/Foldable 制約と高階関数 `map` / `foldl` / `foldr` を標準搭載
 - 正格評価器とカリー化されたプリミティブ（整数・浮動小数・Bool・Char・String・リスト・タプル）
 - 演算子優先順位/結合性の考慮、累乗演算 `^`（整数指数）と `**`（連続値指数）
 - 使いやすい REPL（ヒストリー、矢印移動、`:history` 出力、多行入力）

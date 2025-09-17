@@ -28,7 +28,7 @@ let compose f g = \x -> f (g x);
 let applyTwice f = \x -> f (f x);
 
 -- 条件分岐のバリエーション
-let equalOrNot x y = if x == y then True else x /= y;
+let equalOrNot x y = if x == y then True else False;
 let choiceMessage = if flag then greeting else "fallback";
 
 -- Double 計算例

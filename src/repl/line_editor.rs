@@ -36,12 +36,6 @@ impl LineEditor {
         self.history.add(entry);
     }
 
-    pub fn print_history(&self) {
-        for (idx, entry) in self.history.iter().enumerate() {
-            println!("{:>5}  {}", idx + 1, entry);
-        }
-    }
-
     pub fn save_history(&self) -> io::Result<()> {
         self.history.save()
     }
@@ -122,15 +116,18 @@ impl LineEditor {
                     }
                 }
                 0x1b => {
+                    let context = EscapeContext {
+                        history: &self.history,
+                        history_index: &mut history_index,
+                        saved_current: &mut saved_current,
+                    };
                     handle_escape(
                         &mut stdin,
                         &mut stdout,
                         prompt,
                         &mut buffer,
                         &mut cursor,
-                        &mut history_index,
-                        &self.history,
-                        &mut saved_current,
+                        context,
                     )?;
                 }
                 _ => {
@@ -170,16 +167,26 @@ fn read_utf8_char<R: Read>(first: u8, reader: &mut R) -> io::Result<Option<char>
 }
 
 #[cfg(unix)]
+struct EscapeContext<'a> {
+    history: &'a History,
+    history_index: &'a mut usize,
+    saved_current: &'a mut Option<Vec<char>>,
+}
+
+#[cfg(unix)]
 fn handle_escape<R: Read, W: Write>(
     reader: &mut R,
     writer: &mut W,
     prompt: &str,
     buffer: &mut Vec<char>,
     cursor: &mut usize,
-    history_index: &mut usize,
-    history: &History,
-    saved_current: &mut Option<Vec<char>>,
+    context: EscapeContext<'_>,
 ) -> io::Result<()> {
+    let EscapeContext {
+        history,
+        history_index,
+        saved_current,
+    } = context;
     let mut seq = [0u8; 2];
     if reader.read_exact(&mut seq[..1]).is_err() {
         return Ok(());
@@ -267,7 +274,7 @@ impl History {
             .as_ref()
             .and_then(|p| fs::read_to_string(p).ok())
             .map(|content| content.lines().map(|s| s.to_string()).collect())
-            .unwrap_or_else(Vec::new);
+            .unwrap_or_default();
         Self {
             entries,
             path,
@@ -287,10 +294,6 @@ impl History {
             self.entries.remove(0);
         }
         self.entries.push(trimmed.to_string());
-    }
-
-    fn iter(&self) -> impl Iterator<Item = &str> {
-        self.entries.iter().map(|s| s.as_str())
     }
 
     fn len(&self) -> usize {
@@ -340,11 +343,10 @@ impl RawMode {
             return Err(io::Error::last_os_error());
         }
         let mut raw = termios;
-        raw.c_iflag &= !(IXON | ICRNL);
-        raw.c_oflag &= !OPOST;
-        raw.c_lflag &= !(ICANON | ECHO | ISIG | IEXTEN);
-        raw.c_cc[VMIN as usize] = 1;
-        raw.c_cc[VTIME as usize] = 0;
+        // `cfmakeraw` に任せることで OS ごとの差分を吸収して Raw モードへ移行する。
+        unsafe {
+            cfmakeraw(&mut raw as *mut _);
+        }
         if unsafe { tcsetattr(fd, TCSANOW, &raw as *const _) } != 0 {
             return Err(io::Error::last_os_error());
         }
@@ -364,24 +366,6 @@ impl Drop for RawMode {
 
 #[cfg(unix)]
 const TCSANOW: i32 = 0;
-#[cfg(unix)]
-const VMIN: u8 = 6;
-#[cfg(unix)]
-const VTIME: u8 = 5;
-#[cfg(unix)]
-const ECHO: u32 = 0x00000008;
-#[cfg(unix)]
-const ICANON: u32 = 0x00000100;
-#[cfg(unix)]
-const ISIG: u32 = 0x00000080;
-#[cfg(unix)]
-const IEXTEN: u32 = 0x00000400;
-#[cfg(unix)]
-const IXON: u32 = 0x00000400;
-#[cfg(unix)]
-const ICRNL: u32 = 0x00000100;
-#[cfg(unix)]
-const OPOST: u32 = 0x00000001;
 
 #[cfg(unix)]
 #[repr(C)]
@@ -414,12 +398,34 @@ impl Default for Termios {
 }
 
 #[cfg(unix)]
+#[cfg(any(target_os = "linux", target_os = "android"))]
+const NCCS: usize = 32;
+#[cfg(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "netbsd",
+    target_os = "openbsd",
+))]
+const NCCS: usize = 20;
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "netbsd",
+    target_os = "openbsd",
+)))]
 const NCCS: usize = 32;
 
 #[cfg(unix)]
 extern "C" {
     fn tcgetattr(fd: i32, termios: *mut Termios) -> i32;
     fn tcsetattr(fd: i32, optional_actions: i32, termios: *const Termios) -> i32;
+    fn cfmakeraw(termios: *mut Termios);
 }
 
 #[cfg(test)]

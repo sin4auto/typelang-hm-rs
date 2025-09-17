@@ -214,7 +214,92 @@ pub fn initial_env() -> Env {
             }))
         }),
     );
+    env.insert("map".into(), prim2(map_prim));
+    env.insert("foldl".into(), prim2(foldl_impl));
+    env.insert("foldr".into(), prim2(foldr_impl));
     env
+}
+
+fn map_prim(fun: Value, xs: Value) -> Result<Value, EvalError> {
+    match xs {
+        Value::List(items) => {
+            let mut out = Vec::with_capacity(items.len());
+            for item in items {
+                let mapped = apply(&fun, item)?;
+                out.push(mapped);
+            }
+            Ok(Value::List(out))
+        }
+        _ => Err(EvalError::new(
+            "EVAL050",
+            "map: リスト以外に適用できません",
+            None,
+        )),
+    }
+}
+
+fn foldl_impl(fun: Value, acc: Value) -> Result<Value, EvalError> {
+    Ok(Value::Prim2(Prim2 {
+        f: foldl_finish,
+        a: Some(Box::new(Value::Tuple(vec![fun, acc]))),
+    }))
+}
+
+fn foldl_finish(state: Value, xs: Value) -> Result<Value, EvalError> {
+    let (fun, acc0) = unpack_pair(state, "foldl");
+    match xs {
+        Value::List(items) => {
+            let mut acc = acc0;
+            for item in items {
+                let next = apply(&fun, acc)?;
+                acc = apply(&next, item)?;
+            }
+            Ok(acc)
+        }
+        _ => Err(EvalError::new(
+            "EVAL050",
+            "foldl: リスト以外に適用できません",
+            None,
+        )),
+    }
+}
+
+fn foldr_impl(fun: Value, acc: Value) -> Result<Value, EvalError> {
+    Ok(Value::Prim2(Prim2 {
+        f: foldr_finish,
+        a: Some(Box::new(Value::Tuple(vec![fun, acc]))),
+    }))
+}
+
+fn foldr_finish(state: Value, xs: Value) -> Result<Value, EvalError> {
+    let (fun, acc0) = unpack_pair(state, "foldr");
+    match xs {
+        Value::List(items) => {
+            let mut acc = acc0;
+            for item in items.into_iter().rev() {
+                let step = apply(&fun, item)?;
+                acc = apply(&step, acc)?;
+            }
+            Ok(acc)
+        }
+        _ => Err(EvalError::new(
+            "EVAL050",
+            "foldr: リスト以外に適用できません",
+            None,
+        )),
+    }
+}
+
+fn unpack_pair(state: Value, label: &str) -> (Value, Value) {
+    if let Value::Tuple(items) = state {
+        if items.len() == 2 {
+            let mut iter = items.into_iter();
+            let first = iter.next().expect("内部タプルが存在する必要があります");
+            let second = iter.next().expect("内部タプルが存在する必要があります");
+            return (first, second);
+        }
+    }
+    panic!("{}: 内部状態が不正です", label);
 }
 
 fn apply(f: &Value, x: Value) -> Result<Value, EvalError> {

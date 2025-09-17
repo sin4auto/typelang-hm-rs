@@ -28,6 +28,8 @@ pub fn initial_class_env() -> ClassEnv {
     ce.add_class("Show", std::iter::empty::<&str>());
     ce.add_class("Num", std::iter::empty::<&str>());
     ce.add_class("Fractional", ["Num"]);
+    ce.add_class("Functor", std::iter::empty::<&str>());
+    ce.add_class("Foldable", std::iter::empty::<&str>());
     // インスタンス
     for ty in ["Int", "Integer", "Double", "Char", "Bool"] {
         ce.add_instance("Eq", ty);
@@ -38,6 +40,8 @@ pub fn initial_class_env() -> ClassEnv {
         ce.add_instance("Num", ty);
     }
     ce.add_instance("Fractional", "Double");
+    ce.add_instance("Functor", "[]");
+    ce.add_instance("Foldable", "[]");
     // String = [Char]
     ce.add_instance("Eq", "[Char]");
     ce.add_instance("Ord", "[Char]");
@@ -125,6 +129,151 @@ pub fn initial_env() -> TypeEnv {
             qual: q,
         }
     }
+    fn map_scheme(s: &mut TVarSupply) -> Scheme {
+        // map :: Functor f => (a -> b) -> f a -> f b
+        let f_ty = Type::TVar(s.fresh());
+        let a_ty = Type::TVar(s.fresh());
+        let b_ty = Type::TVar(s.fresh());
+        let fn_ab = Type::TFun(TFun {
+            arg: Box::new(a_ty.clone()),
+            ret: Box::new(b_ty.clone()),
+        });
+        let fa = Type::TApp(TApp {
+            func: Box::new(f_ty.clone()),
+            arg: Box::new(a_ty.clone()),
+        });
+        let fb = Type::TApp(TApp {
+            func: Box::new(f_ty.clone()),
+            arg: Box::new(b_ty.clone()),
+        });
+        let ty = Type::TFun(TFun {
+            arg: Box::new(fn_ab),
+            ret: Box::new(Type::TFun(TFun {
+                arg: Box::new(fa),
+                ret: Box::new(fb),
+            })),
+        });
+        let tv_f = match &f_ty {
+            Type::TVar(tv) => tv.clone(),
+            _ => unreachable!(),
+        };
+        let tv_a = match &a_ty {
+            Type::TVar(tv) => tv.clone(),
+            _ => unreachable!(),
+        };
+        let tv_b = match &b_ty {
+            Type::TVar(tv) => tv.clone(),
+            _ => unreachable!(),
+        };
+        Scheme {
+            vars: vec![tv_f, tv_a, tv_b],
+            qual: qualify(
+                ty,
+                vec![Constraint {
+                    classname: "Functor".into(),
+                    r#type: f_ty,
+                }],
+            ),
+        }
+    }
+    fn foldl_scheme(s: &mut TVarSupply) -> Scheme {
+        // foldl :: Foldable t => (b -> a -> b) -> b -> t a -> b
+        let t_ty = Type::TVar(s.fresh());
+        let a_ty = Type::TVar(s.fresh());
+        let b_ty = Type::TVar(s.fresh());
+        let step_fn = Type::TFun(TFun {
+            arg: Box::new(b_ty.clone()),
+            ret: Box::new(Type::TFun(TFun {
+                arg: Box::new(a_ty.clone()),
+                ret: Box::new(b_ty.clone()),
+            })),
+        });
+        let ta = Type::TApp(TApp {
+            func: Box::new(t_ty.clone()),
+            arg: Box::new(a_ty.clone()),
+        });
+        let ty = Type::TFun(TFun {
+            arg: Box::new(step_fn),
+            ret: Box::new(Type::TFun(TFun {
+                arg: Box::new(b_ty.clone()),
+                ret: Box::new(Type::TFun(TFun {
+                    arg: Box::new(ta),
+                    ret: Box::new(b_ty.clone()),
+                })),
+            })),
+        });
+        let tv_t = match &t_ty {
+            Type::TVar(tv) => tv.clone(),
+            _ => unreachable!(),
+        };
+        let tv_a = match &a_ty {
+            Type::TVar(tv) => tv.clone(),
+            _ => unreachable!(),
+        };
+        let tv_b = match &b_ty {
+            Type::TVar(tv) => tv.clone(),
+            _ => unreachable!(),
+        };
+        Scheme {
+            vars: vec![tv_t, tv_a, tv_b],
+            qual: qualify(
+                ty,
+                vec![Constraint {
+                    classname: "Foldable".into(),
+                    r#type: t_ty,
+                }],
+            ),
+        }
+    }
+    fn foldr_scheme(s: &mut TVarSupply) -> Scheme {
+        // foldr :: Foldable t => (a -> b -> b) -> b -> t a -> b
+        let t_ty = Type::TVar(s.fresh());
+        let a_ty = Type::TVar(s.fresh());
+        let b_ty = Type::TVar(s.fresh());
+        let step_fn = Type::TFun(TFun {
+            arg: Box::new(a_ty.clone()),
+            ret: Box::new(Type::TFun(TFun {
+                arg: Box::new(b_ty.clone()),
+                ret: Box::new(b_ty.clone()),
+            })),
+        });
+        let ta = Type::TApp(TApp {
+            func: Box::new(t_ty.clone()),
+            arg: Box::new(a_ty.clone()),
+        });
+        let ty = Type::TFun(TFun {
+            arg: Box::new(step_fn),
+            ret: Box::new(Type::TFun(TFun {
+                arg: Box::new(b_ty.clone()),
+                ret: Box::new(Type::TFun(TFun {
+                    arg: Box::new(ta),
+                    ret: Box::new(b_ty.clone()),
+                })),
+            })),
+        });
+        let tv_t = match &t_ty {
+            Type::TVar(tv) => tv.clone(),
+            _ => unreachable!(),
+        };
+        let tv_a = match &a_ty {
+            Type::TVar(tv) => tv.clone(),
+            _ => unreachable!(),
+        };
+        let tv_b = match &b_ty {
+            Type::TVar(tv) => tv.clone(),
+            _ => unreachable!(),
+        };
+        Scheme {
+            vars: vec![tv_t, tv_a, tv_b],
+            qual: qualify(
+                ty,
+                vec![Constraint {
+                    classname: "Foldable".into(),
+                    r#type: t_ty,
+                }],
+            ),
+        }
+    }
 
     env.extend("+", binop_scheme("Num", &mut s));
     env.extend("-", binop_scheme("Num", &mut s));
@@ -132,6 +281,9 @@ pub fn initial_env() -> TypeEnv {
     env.extend("/", frlop_scheme(&mut s));
     env.extend("^", intpow_scheme(&mut s));
     env.extend("**", frlop_scheme(&mut s));
+    env.extend("map", map_scheme(&mut s));
+    env.extend("foldl", foldl_scheme(&mut s));
+    env.extend("foldr", foldr_scheme(&mut s));
     // 比較演算: Eq/Ord a => a -> a -> Bool
     fn pred_scheme(cls: &str, s: &mut TVarSupply) -> Scheme {
         let a = Type::TVar(s.fresh());
