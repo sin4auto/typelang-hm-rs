@@ -11,7 +11,8 @@ SHELL := /usr/bin/bash
   test build release \
   doc doc-open coverage \
   audit outdated udeps miri bench \
-  check full_local ci
+  check full_local ci \
+  serena-summarize diffpack code-meta test-brief build-brief model-pack
 
 help: ## このヘルプを表示
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -87,12 +88,59 @@ miri: ## 未定義動作の検査（nightly）
 bench: ## ベンチ（criterion 想定）
 	cargo bench
 
+# ---- Serena 要約 --------------------------------------------------------------
+serena-summarize: ## Serena の要約(.serena)を更新
+	# Codex CLI から Serena MCP を呼ぶ
+	codex mcp run serena summarize || true
+	@echo "=> .serena/ を更新しました（MODEL_INPUT.md / SYMBOLS など）"
+
+# ---- トークン節約支援 ---------------------------------------------------------
+diffpack: ## 直近差分の要約（ファイル一覧/短統計/最近ログ）
+	@mkdir -p .summ
+	@{ git rev-parse --is-inside-work-tree >/dev/null 2>&1 && \
+	   git fetch --quiet origin || true; } || true
+	ORIGIN_REF ?= origin/main
+	@git diff --name-only $(ORIGIN_REF)...HEAD > .summ/CHANGED_FILES.txt || true
+	@git diff --shortstat  $(ORIGIN_REF)...HEAD > .summ/DIFF_SHORTSTAT.txt || true
+	@git log --oneline -n 30 > .summ/RECENT_LOG.txt
+	@echo "=> .summ/CHANGED_FILES.txt / DIFF_SHORTSTAT.txt / RECENT_LOG.txt を生成"
+
+code-meta: ## 公開APIやシンボルを軽量抽出（ctags/rg があれば活用）
+	@mkdir -p .summ
+	@if command -v ctags >/dev/null 2>&1; then \
+	  ctags -R --fields=+n --languages=Rust -f .summ/SYMBOLS.tags src || true ; \
+	else echo "WARN: ctags が見つかりません（SYMBOLS.tagsはスキップ）"; fi
+	@if command -v rg >/dev/null 2>&1; then \
+	  rg -n "^(pub (fn|struct|enum|trait)|mod\s+)" -S src > .summ/PUBLIC_API.tsv || true ; \
+	else echo "WARN: ripgrep(rg) が見つかりません（PUBLIC_API.tsvはスキップ）"; fi
+	@echo "=> .summ/SYMBOLS.tags / PUBLIC_API.tsv を生成（存在すれば）"
+
+test-brief: ## テストの失敗要点を抽出（最大200行）
+	cargo test --workspace --all-features -q || true
+	@if command -v rg >/dev/null 2>&1; then \
+	  rg -n "FAILED|error|panicked" -S target | tail -n 200 > .summ/TEST_ERRORS.txt || true ; \
+	else \
+	  grep -RniE "FAILED|error|panicked" target 2>/dev/null | tail -n 200 > .summ/TEST_ERRORS.txt || true ; \
+	fi
+	@echo "=> .summ/TEST_ERRORS.txt（最大200行）"
+
+build-brief: ## ビルドエラー・警告の要点（最大200行）
+	cargo build --workspace --all-features -q || true
+	@if command -v rg >/dev/null 2>&1; then \
+	  rg -n "error\[|warning:" -S target | tail -n 200 > .summ/BUILD_ERRORS.txt || true ; \
+	else \
+	  grep -RniE "error\\[|warning:" target 2>/dev/null | tail -n 200 > .summ/BUILD_ERRORS.txt || true ; \
+	fi
+	@echo "=> .summ/BUILD_ERRORS.txt（最大200行）"
+
+model-pack: serena-summarize diffpack code-meta test-brief build-brief ## .serena + .summ をZip
+	@mkdir -p .summ
+	@zip -q -r .summ/model_pack.zip .summ .serena 2>/dev/null || true
+	@echo "=> .summ/model_pack.zip を生成（MODEL_INPUT.md/差分/短いログを同梱）"
+
 # ---- チェック & CI フロー -----------------------------------------------------
 check: fmt clippy test ## フォーマット + Lint + テスト
 	@echo "✅ コードチェック (fmt → clippy → test) 完了"
 
 full_local: clean fmt clippy test doc audit outdated coverage release udeps miri ## clean + フォーマット + Lint + テスト + ドキュメント + 健康診断 + カバレッジ + リリースビルド + 未使用依存 + 未定義動作検査
 	@echo "✅ フルローカルビルド (clean → fmt → clippy → test → doc → audit → outdated → coverage → release → udeps → miri) 完了"
-
-ci: fmt-check clippy test release ## CI: format check + Lint + テスト + リリースビルド
-	@echo "✅ CIフロー (fmt-check → clippy → test → release) 完了"
