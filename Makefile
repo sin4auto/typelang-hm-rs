@@ -5,6 +5,9 @@ SHELL := /usr/bin/bash
 .ONESHELL:
 .EXPORT_ALL_VARIABLES:
 
+# diffpack で使う比較基準（環境で上書き可: ORIGIN_REF=origin/develop make diffpack）
+ORIGIN_REF ?= origin/main
+
 .PHONY: \
   help add-tools clean \
   fmt fmt-check clippy \
@@ -99,7 +102,6 @@ diffpack: ## 直近差分の要約（ファイル一覧/短統計/最近ログ�
 	@mkdir -p .summ
 	@{ git rev-parse --is-inside-work-tree >/dev/null 2>&1 && \
 	   git fetch --quiet origin || true; } || true
-	ORIGIN_REF ?= origin/main
 	@git diff --name-only $(ORIGIN_REF)...HEAD > .summ/CHANGED_FILES.txt || true
 	@git diff --shortstat  $(ORIGIN_REF)...HEAD > .summ/DIFF_SHORTSTAT.txt || true
 	@git log --oneline -n 30 > .summ/RECENT_LOG.txt
@@ -144,3 +146,6 @@ check: fmt clippy test ## フォーマット + Lint + テスト
 
 full_local: clean fmt clippy test doc audit outdated coverage release udeps miri ## clean + フォーマット + Lint + テスト + ドキュメント + 健康診断 + カバレッジ + リリースビルド + 未使用依存 + 未定義動作検査
 	@echo "✅ フルローカルビルド (clean → fmt → clippy → test → doc → audit → outdated → coverage → release → udeps → miri) 完了"
+
+ci: fmt-check clippy test release ## CI用 target フォルダはGithubにアップしない。キャッシュを効かせるためcleanは行わない。（フォーマット検査 + Lint + テスト + リリースビルド）
+	@echo "✅ CIビルド (fmt-check → clippy → test → release) 完了"
