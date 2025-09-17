@@ -94,7 +94,7 @@ bench: ## ベンチ（criterion 想定）
 # ---- Serena 要約 --------------------------------------------------------------
 serena-summarize: ## Serena の要約(.serena)を更新
 	# Codex CLI から Serena MCP を呼ぶ
-	codex mcp run serena summarize || true
+	codex exec "/mcp__serena__summarize" || true
 	@echo "=> .serena/ を更新しました（MODEL_INPUT.md / SYMBOLS など）"
 
 # ---- トークン節約支援 ---------------------------------------------------------
@@ -135,11 +135,8 @@ build-brief: ## ビルドエラー・警告の要点（最大200行）
 	fi
 	@echo "=> .summ/BUILD_ERRORS.txt（最大200行）"
 
-model-pack: serena-summarize diffpack code-meta test-brief build-brief ## .serena + .summ をZip
-	@mkdir -p .summ
-	@zip -q -r .summ/model_pack.zip .summ .serena 2>/dev/null || true
-	@echo "=> .summ/model_pack.zip を生成（MODEL_INPUT.md/差分/短いログを同梱）"
-
+summ: deffpack code-meta test-brief build-brief ## 変更点・API・テストエラー・ビルドエラーをまとめて抽出
+	@echo "✅ 要約 (.summ/) 完了"
 # ---- チェック & CI フロー -----------------------------------------------------
 check: fmt clippy test ## フォーマット + Lint + テスト
 	@echo "✅ コードチェック (fmt → clippy → test) 完了"

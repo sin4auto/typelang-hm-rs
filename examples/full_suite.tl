@@ -37,3 +37,26 @@ let combinedDemo =
       p = powFracExample;
       q = 2.0 ** 3.0
   in s + p + q;
+
+-- 型注釈とクラス制約の動作確認
+let annotatedSquare = (square 5 :: Int);
+
+let numericIdInt = (numericId 7 :: Int);
+
+let equalityCheck = sampleTuple == (42, "answer", False);
+let orderingCheck = numbers < [1, 2, 3, 5];
+let tupleOrderingCheck = (1, 2, 3) > (1, 2, 1);
+let charOrdering = 'A' < firstLetter;
+let shownFlag = show flag;
+let shownGreeting = show greeting;
+let fractionalDemo = 7 / 2;
+
+-- Functor / Foldable の利用例
+let mappedNumbers = map (\x -> x + 10) numbers;
+
+let foldedSum = foldl (\acc x -> acc + x) 0 numbers;
+let foldedProduct = foldr (\x acc -> x * acc) 1 [2, 3, 4];
+
+-- 高階関数の結果検証
+let composeResult = (compose square (\x -> x + 1)) 3;
+let applyTwiceResult = (applyTwice (\x -> x - 1)) 5;
