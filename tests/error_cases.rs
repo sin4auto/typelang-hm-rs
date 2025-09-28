@@ -1,3 +1,7 @@
+// パス: tests/error_cases.rs
+// 役割: Integration tests exercising failure scenarios
+// 意図: Ensure the pipeline surfaces understandable diagnostics
+// 関連ファイル: src/parser.rs, src/infer.rs, src/evaluator.rs
 use typelang::{evaluator, infer, parser, typesys};
 
 #[test]

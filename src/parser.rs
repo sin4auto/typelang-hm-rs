@@ -1,3 +1,7 @@
+// パス: src/parser.rs
+// 役割: Recursive-descent parser that converts tokens into AST nodes
+// 意図: Bridge lexical tokens to structures used by inference and evaluation
+// 関連ファイル: src/lexer.rs, src/ast.rs, src/errors.rs
 //! 構文解析（parser）
 //!
 //! 目的:

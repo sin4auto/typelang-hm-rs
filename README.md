@@ -1,70 +1,85 @@
-# TypeLang HM (Rust)
+<!-- パス: README.md -->
+<!-- 役割: TypeLang HM プロジェクトの全体像とセットアップ手順を案内するトップドキュメント -->
+<!-- 意図: 利用者とコントリビューターが短時間で環境構築・開発に着手できるよう支援する -->
+<!-- 関連ファイル: AGENTS.md, EBNF.md, docs/typeclass-extension.md -->
 
-TypeLang HM は、Hindley–Milner 型推論を核にした最小構成の関数型言語処理系です。学習用途で読みやすく壊しにくいコードを目指し、Rust 標準ライブラリのみで実装しています。
+# TypeLang HM (Rust) Overview
 
-## 特長
-- Hindley–Milner 型推論（Algorithm W）と単一化をフルサポート
-- 最小限の型クラス (`Eq` / `Ord` / `Show` / `Num` / `Fractional` / `Functor` / `Foldable`)
-- Functor/Foldable 制約と高階関数 `map` / `foldl` / `foldr` を標準搭載
-- 正格評価器とカリー化されたプリミティブ（整数・浮動小数・Bool・Char・String・リスト・タプル）
-- 演算子優先順位/結合性の考慮、累乗演算 `^`（整数指数）と `**`（連続値指数）
-- 使いやすい REPL（ヒストリー、矢印移動、`:history` 出力、多行入力）
+TypeLang HM は Hindley–Milner 型推論をコアに据えた教育向け関数型言語処理系です。Rust 標準ライブラリのみで構築し、読みやすさと壊しにくさを重視しています。
+
+## 特徴ハイライト
+- Algorithm W をベースにした HM 型推論と単一化エンジン
+- `Eq` / `Ord` / `Show` / `Num` / `Fractional` など学習に必要な型クラスを同梱
+- 基本演算、条件分岐、リスト操作など必修トピックを優先実装
+- 整数累乗 `^` と実数指数 `**` の両方をサポート
+- 履歴・矢印キー・複数行入力に対応した対話型 REPL
 
 ## クイックスタート
 ```bash
 # REPL を起動
-cargo run --bin typelang-repl
+cargo run typelang-repl
 
-# REPL 内の例
-> :let square x = x * x
-> :t square
+# セッション例
+> :let inc n = n + 1
+> inc 5
+6
+> :t inc
 -- Num a => a -> a
-> square 12
-144
-> :load examples/basics.tl
-Loaded 6 def(s) from examples/basics.tl
-  factorial :: Num a => a -> a
-  ...
-> :history    # 直近の入力を一覧表示
+> :load examples/step2_functions.tl
+Loaded 5 def(s)
 ```
-REPL では矢印キー（↑/↓/←/→）と Backspace が利用でき、`Ctrl+C` で入力を中断、`Ctrl+D` で終了できます。複数行の式は `.. ` プロンプトで継続入力してください。
+`Ctrl+C` で現在の入力をキャンセル、`Ctrl+D` で REPL を終了できます。継続行は `.. ` プロンプトで示されます。
 
-## プロジェクト構成
-- `src/ast.rs` – 抽象構文木と表示ロジック
-- `src/lexer.rs` / `src/parser.rs` – UTF-8 対応の字句・構文解析（優先順位/結合性込み）
-- `src/typesys.rs` / `src/infer.rs` – 型表現、制約、単一化、defaulting 補助
-- `src/evaluator.rs` – 正格評価器とプリミティブ実装
-- `src/repl/` – REPL 本体（コマンド処理、表示、ファイル読込、ラインエディタ）
-- `examples/*.tl` – 言語機能のサンプル
-- `tests/` – lexer/parser/infer/evaluator/repl などの回帰テスト群
-- `EBNF.md` – 言語仕様の EBNF 定義
+## ディレクトリガイド
+- `src/ast.rs` — 抽象構文木の定義と表示補助
+- `src/lexer.rs` / `src/parser.rs` — UTF-8 対応の字句/構文解析
+- `src/typesys.rs` / `src/infer.rs` — 型表現、制約解決、defaulting
+- `src/evaluator.rs` — 正格評価器とプリミティブ実装
+- `src/repl/` — コマンド、レンダラ、履歴管理
+- `examples/*.tl` — 段階別の教材スクリプト
+- `tests/` — lexer / parser / infer / evaluator / repl の回帰テスト群
+- `EBNF.md` — 言語仕様の正準 EBNF
+- `docs/typeclass-extension.md` — 拡張予定の型クラスメモ
 
-## ビルド & テスト
-小規模の変更確認: `make check`
-```bash
-make check   # cargo fmt → cargo clippy -D warnings → cargo test
-```
-最終確認（CI 相当フルセット）: `make full_local`
-```bash
-make full_local
-# clean → fmt → clippy → test → doc -D warnings → audit → outdated → coverage → release → udeps → miri
-```
-その他の主なターゲット:
-- `make doc` – `cargo doc` を警告をエラー扱いで生成
-- `make coverage` – `cargo llvm-cov` による HTML/JSON/LCOV 出力
-- `make add-tools` – 開発に必要なツール（rustfmt / clippy / cargo-llvm-cov 等）を導入
+## 学習ロードマップ
+1. `examples/step1_numbers.tl` で数値演算とリテラルに慣れる。
+2. `examples/step2_functions.tl` で関数定義と部分適用を体験。
+3. `examples/step3_conditionals.tl` で条件式と論理演算を復習。
+4. `tests/` を参照して仕様ベースのテスト作法を学ぶ。
 
-## トークン節約と Serena 連携
-- `make serena-summarize` – `.serena/MODEL_INPUT.md` を最新化（Codex CLI 経由）
-- `make diffpack` / `make test-brief` / `make build-brief` – `.summ/` 以下に差分やログ抜粋を生成
-- `make model-pack` – `.serena` と `.summ` をまとめた `model_pack.zip` を作成
-これらの生成物は `.gitignore` 済みでリポジトリには含めません。
+## 開発ワークフロー
+| フェーズ | コマンド | 目的 |
+| --- | --- | --- |
+| 日常開発 | `make check` | `cargo fmt` → `cargo clippy -D warnings` → `cargo test` を一括実行 |
+| リリース前整備 | `make full_local` | クリーンビルド・テスト・ドキュメント・監査までを包括実行 |
+| ドキュメント生成 | `make doc` | `cargo doc` を警告をエラー扱いで作成 |
+| カバレッジ | `make coverage` | `cargo llvm-cov` による HTML/JSON/LCOV 出力 |
 
-## コントリビュート
-- 方針・運用・リリース規約は `AGENTS.md` を参照してください
-- コミット前に `make check` を実行し、PR 作成前またはリリース前に `make full_local` を通してください
-- コメントやドキュメントは日本語、識別子は英語で統一します
-- 依存は標準ライブラリのみ。外部クレートを追加する場合は事前に議論してください
+補助スクリプト
+- `make add-tools` — rustfmt / clippy / cargo-llvm-cov の導入を自動化
+- `make serena-summarize` — `.serena/MODEL_INPUT.md` を最新化
+- `make diffpack` / `make test-brief` / `make build-brief` — 差分やログを `.summ/` に集約
 
-## ライセンス
-MIT License – 詳細は `LICENSE` を参照してください。
+## 開発ポリシー
+- 運用上の詳細は `AGENTS.md` に集約されています（Quickstart, チェックリスト等）。
+- コメント・ドキュメントは日本語で、識別子は英語で統一します。
+- 外部依存を追加する場合は事前に議論し、合意を得てから導入します。
+- リモートへの push は必ずユーザーの明示承認を受けてください。
+
+## ドキュメントリソース
+- `AGENTS.md` — オペレーションガイドとテンプレート
+- `EBNF.md` — 文法仕様の一次ソース
+- `docs/typeclass-extension.md` — 型クラス拡張の検討ノート
+
+## トラブルシューティング
+| 症状 | 対応策 |
+| --- | --- |
+| `make check` が失敗する | 直近の変更ファイルを確認し、`cargo test --test <name>` で局所再検証。 |
+| REPL が固まる | `Ctrl+C` で現在の入力を一旦破棄し、多行入力が継続していないか確認。 |
+| 推論結果が意図しない | `:t` で型を確認し、`Num` / `Fractional` 制約の残り具合をチェック。 |
+
+## コミュニティ & ライセンス
+- 質問・提案は GitHub Issue へ。発生手順、期待値と実際の結果、使用環境（OS・Rust 版）を添えてください。
+- ライセンスは MIT（`LICENSE` を確認）。
+
+Happy hacking!

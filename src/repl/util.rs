@@ -1,3 +1,7 @@
+// パス: src/repl/util.rs
+// 役割: Expression normalization utilities for REPL workflows
+// 意図: Ensure inference and evaluation behave predictably on user input
+// 関連ファイル: src/repl/cmd.rs, src/infer.rs, src/ast.rs
 //! REPL 内部ユーティリティ
 
 use crate::ast as A;

@@ -1,3 +1,7 @@
+// パス: tests/evaluator_additional.rs
+// 役割: Supplemental evaluator tests for tuples, pow, and show behaviour
+// 意図: Cover runtime edge cases beyond the main suite
+// 関連ファイル: src/evaluator.rs, tests/evaluator_more.rs, src/parser.rs
 // 日本語コメント: 評価器の正常/異常系テスト追加
 
 use typelang::{evaluator, parser};

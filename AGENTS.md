@@ -1,57 +1,124 @@
-# CONTRIBUTING（TypeLang HM / Rust）
+<!-- パス: AGENTS.md -->
+<!-- 役割: Codex/TypeLang チームの統一オペレーションガイド -->
+<!-- 意図: 日常タスクを効率的かつ安全に遂行するための原則と手順を集約する -->
+<!-- 関連ファイル: README.md, EBNF.md, docs/typeclass-extension.md -->
 
-TypeLang HM では「読みやすく、壊しにくい最小実装」を共同で維持することを目標にしています。以下の指針に従って作業してください。
+# Codex エージェント運用ハンドブック
 
-## 基本方針
-- 1 PR = 1 目的。差分は小さく保ちレビューしやすい単位でまとめる
-- 識別子は英語、コメント/ドキュメント/会話は日本語
-- 外部依存は原則禁止（標準ライブラリのみ）。追加が必要な場合は事前に議論する
+TypeLang HM/Rust プロジェクトで作業する AI エージェントと人間開発者は、このドキュメントを唯一の判断基準として参照してください。常に 80/20 の最小実装と可読性を優先し、疑問があればここに立ち戻ります。
 
-## コーディング規約
-- Rust 2021 / MSRV 1.70 を維持（`rust-toolchain.toml` 固定）
-- 必須ゲート: `cargo fmt` / `cargo clippy -D warnings` / `cargo test`
-- 公開 API (`pub`) の追加は慎重に行い、最小限に留める
-- `panic!` は到達不能コードやテスト補助など限定的な場面でのみ使用し、利用者向け API では `Result` を返す
+---
 
-## テストと品質保証
-- 小規模確認: `make check`（`fmt` → `clippy` → `test`）
-- PR マージ・リリース前: `make full_local`（`clean` → `fmt` → `clippy` → `test` → `doc -D warnings` → `audit` → `outdated` → `coverage` → `release` → `udeps` → `miri`）
-- 例示プログラム `examples/*.tl` を含む全テスト (`tests/`) が通ることを必須条件とする
-- カバレッジ確認やログ要約には `make coverage` / `make test-brief` / `make build-brief` を活用
+## Quickstart（10 行）
+1. **指示に忠実に従い、過不足を生まないこと。**
+2. **最小で十分な解を選び、複雑さを避ける。**
+3. **編集対象と関連ファイルを必ず全文確認してから手を動かす。**
+4. **まず小さく動くプロトタイプを用意し、検証→拡張の順に進める。**
+5. **全ファイルに日本語 4 行ヘッダを欠かさず記載する。**
+6. **コミットは小粒で意味を持たせ、1PR=1目的を徹底する。**
+7. **暗黙のロジックには簡潔なコメントを残し、明快な英語識別子を使う。**
+8. **リスクのある操作は理由・代替・ロールバックを実行前に提示する。**
+9. **意思決定はファイルヘッダと PR 本文に必ず記録する。**
+10. **GitHub 等への push はユーザーの明示承認がある場合のみ行う。**
 
-## ディレクトリ/モジュールの目安
-- `src/lexer.rs` / `src/parser.rs`: 字句解析・構文解析（優先順位/結合性、型注釈）
-- `src/typesys.rs` / `src/infer.rs`: 型表現、制約、単一化、defaulting 補助
-- `src/evaluator.rs`: 正格評価器とプリミティブ実装
-- `src/repl/`: コマンド処理、ラインエディタ（矢印ヒストリー対応）、表示、ファイル読込
-- `examples/`: 学習サンプルと回帰テスト対象
-- `tests/`: lexer / parser / infer / evaluator / repl / integration など領域別テスト
-- `EBNF.md`: 言語仕様の参照定義
+---
 
-## 作業フロー
-1. `make check` で整形・Lint・テストを通す
-2. レビュー前または結合テスト前に `make full_local` を実行
-3. Serena 要約は必要に応じて `make serena-summarize` で更新。差分サマリは `make diffpack`
-4. 履歴やログは `.serena/`・`.summ/`・`.codex-home/` に出力される。これらは `.gitignore` 済みでコミットしない
+## GOAL / 目的
+- いつでも読み返せるシンプルで堅牢なコードを提供する。
+- シニア開発者と同等の判断力を意識し、過剰設計や未検証の賭けを避ける。
 
-## PR / コミット運用
-- タイトルは英語の命令形 (`add`, `fix`, `update` など)
-- 本文（日本語）に背景 / 対処 / 影響 / テスト結果を簡潔に記載
-- コミットメッセージは [Conventional Commits](https://www.conventionalcommits.org/) 形式を推奨
-- ブランチは `feature/*`, `fix/*`, `chore/*` など目的が分かる名前にする
-- CI（GitHub Actions）では `make ci` を実行し、main ブランチへの直接 push は禁止
+## OPERATING PRINCIPLES / 作法
+- ミニマルな構成を常に選択し、必要に応じて最小再現例を提示する。
+- 不確実な課題は「小さな試作 → 観察 → 調整」で前進する。
+- 会話・報告は日本語を基調に、用語や識別子は英語で統一する。
 
-## リリース指針
-- セマンティックバージョニング（MAJOR / MINOR / PATCH）
-- リリース直前に `make full_local` と `cargo publish --dry-run` を実施
-- タグは `vMAJOR.MINOR.PATCH` 形式。CHANGELOG 更新後にタグ付け
+## ROLES / 関与者
+- **User**: ゴール定義と最終判断を担当。
+- **Human Devs**: 実装・レビュー・設計相談を補助。
+- **VS Code / Copilot**: IDE 内での提案補助。採用は必ず人間/エージェントが評価する。
+- **AI Agents（Codex 等）**: 複数ファイルの編集、テスト、Git 操作、リファクタを遂行。
 
-## ドキュメント・ナレッジ共有
-- 新規モジュールを追加したら `docs/` または関連 Markdown に概要と使用例を追記
-- 言語仕様の変更は `EBNF.md` と `README.md` を更新
-- トークン節約や会話向け要約の更新は `.serena/MODEL_INPUT.md` を参照
+## SCOPE & VERSION CONTROL / 範囲とバージョン管理
+- 依頼外の作業は提案として切り出し、勝手に実装しない。
+- Push は明示許可があるときのみ。ローカル作業は小さなコミットに分割し、`<type>: <summary>` 形式を守る。
+- 1 つの PR は厳密に 1 目的に紐づけ、差分をレビューしやすい大きさに保つ。
 
-## 連絡先
-バグ報告・提案は GitHub Issue へ。再現手順、期待結果/実際の結果、使用環境（OS・Rust 版）を記載してください。
+## FILE HEADER ルール
+各ファイルの先頭 4 行は必須です。削除・省略は禁止。
+```txt
+<!-- パス: <repo 相対パス> -->
+<!-- 役割: <ファイルの役割> -->
+<!-- 意図: <存在理由や狙い> -->
+<!-- 関連ファイル: <2〜4件> -->
+```
 
-codex起動時は必ずこのREDEME.mdファイルを読み込むこと。
+## COMMENTS & NAMING / コメントと命名
+- ファイル先頭で対象領域を宣言し、非自明な処理にのみ補足コメントを入れる。
+- 識別子・関数名は英語。説明は日本語でも構わないが簡潔に。
+- コメントは「何を・なぜ」を優先し、「どうやって」はコードで示す。
+
+## WORKFLOW CHECKLISTS / 作業チェックリスト
+**Before Change**
+- [ ] 依頼内容を 1〜2 行で言い換え共有
+- [ ] 関連ファイルと影響箇所を列挙
+- [ ] 仕様 / UI / API の差分・期待値を確認
+
+**During Implementation**
+- [ ] 最小構成で動くところまで実装し、徐々に広げる
+- [ ] 4 行ヘッダ・命名・コメント指針を順守
+- [ ] エラーは再現手順とともに改善案を添える
+
+**Test & Verify**
+- [ ] 正常系 / 異常系 / 境界条件のテストを実行
+- [ ] 必要なら手動確認メモを残す
+- [ ] UI 変更は可能であれば Before/After を記録
+
+**Before PR**
+- [ ] 変更要点を 3 行以内でまとめる
+- [ ] なぜ今回が 80/20 な解なのか説明する
+- [ ] ロールバック手段を 1〜2 行で示す（例: `revert <sha>`）
+
+## EXECUTION GUARDRAILS / 危険操作ガイド
+- リスク対象: データ喪失・セキュリティ・広範囲リファクタ・インフラ変更。
+- 実施前に「目的」「代替案」「影響範囲」「ロールバック」「段階導入案」を提出し、承認を得る。
+
+## QUALITY GATES / 品質ゲート
+- 標準: `cargo fmt`, `cargo clippy -D warnings`, `cargo test` を常に通す。
+- 影響が大きい場合は E2E / 統合テストや追加検証を検討する。
+- 決定や背景はヘッダ・PR・Issue に記録し、後追いできる状態を保つ。
+
+## TEMPLATES / 雛形
+**PR タイトル**
+```
+feat: deliver minimal X (clarifies Y)
+```
+
+**PR 本文（最小構成）**
+- **Summary**: 何を変更したか。
+- **80/20**: なぜ十分なのか。
+- **Impact**: API / UI / Migration の有無。
+- **Rollback**: どう戻すか。
+
+**コミットメッセージ**: Conventional Commits の `<type>: <summary>` を使用。
+
+## UI ESSENTIALS / UI ガイド
+- 情報量を絞り、明瞭な余白リズム（4/8px）と短い文章で視認性を高める。
+- ベースカラーは黒/白、アクセントは深い青、グレーはニュートラル系を利用。
+- Apple / ChatGPT のシンプルさをベンチマークにする。
+
+## DATA POLICY / データ取扱い
+- データベースや永続化を伴う操作はユーザーのみが実行する。
+- 変更提案時は理由・スキーマ差分・移行計画・リスク・ロールバックをセットで提示。
+- 重大変更にはバックアップと段階導入計画を必ず用意する。
+
+## BOOT PROMPT（任意）
+```
+Read ./.codex/AGENTS.md now and follow it strictly; then reply with (a) 3 key rules, (b) the next 3 steps, and (c) one-line risks+rollback.
+```
+
+## GLOSSARY / 用語集
+- **80/20**: 最小の労力で最大の効果を得る姿勢。
+- **APPU**: Active Paying Power Users。課金中で継続利用している指標。
+- **Minimal implementation**: 要件を満たす堅牢な最小構成。まずこれを固め、必要なら拡張する。
+
+このハンドブックを常に参照し、判断に迷ったときは戻って確認してください。

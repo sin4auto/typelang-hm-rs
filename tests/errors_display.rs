@@ -1,3 +1,7 @@
+// パス: tests/errors_display.rs
+// 役割: Unit tests for ErrorInfo display formatting paths
+// 意図: Prevent regressions in diagnostic string rendering
+// 関連ファイル: src/errors.rs, tests/error_message_patterns.rs, src/parser.rs
 // エラー表示（Display）の分岐網羅テスト
 use typelang::errors::ErrorInfo;
 

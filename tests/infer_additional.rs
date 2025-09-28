@@ -1,3 +1,7 @@
+// パス: tests/infer_additional.rs
+// 役割: Additional inference and let-polymorphism regression tests
+// 意図: Guard Algorithm W behaviour and error reporting
+// 関連ファイル: src/infer.rs, src/evaluator.rs, tests/infer_more.rs
 // 日本語コメント: 型推論の正常/異常系を追加
 
 use typelang::{infer, parser, typesys};

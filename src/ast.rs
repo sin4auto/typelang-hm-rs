@@ -1,3 +1,7 @@
+// パス: src/ast.rs
+// 役割: AST definitions for expressions and program units
+// 意図: Share a common structure across parsing, inference, and evaluation
+// 関連ファイル: src/parser.rs, src/infer.rs, src/evaluator.rs
 //! 抽象構文木（AST）
 //!
 //! 目的:

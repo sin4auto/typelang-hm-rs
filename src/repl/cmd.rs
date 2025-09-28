@@ -1,3 +1,7 @@
+// パス: src/repl/cmd.rs
+// 役割: REPL command loop, command parsing, and evaluation orchestration
+// 意図: Drive interactive usage by coordinating type and value environments
+// 関連ファイル: src/infer.rs, src/evaluator.rs, src/repl/util.rs
 //! REPL のコマンドとメインループ
 
 use crate::ast as A;

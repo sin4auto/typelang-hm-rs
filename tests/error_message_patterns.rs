@@ -1,3 +1,7 @@
+// パス: tests/error_message_patterns.rs
+// 役割: Assertions on specific diagnostic message content
+// 意図: Keep user-facing error text stable across releases
+// 関連ファイル: src/errors.rs, src/lexer.rs, src/parser.rs
 // 日本語コメント: エラーメッセージの詳細一致（部分一致）
 
 use typelang::{lexer, parser};

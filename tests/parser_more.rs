@@ -1,3 +1,7 @@
+// パス: tests/parser_more.rs
+// 役割: Parser regression tests for sugar and precedence rules
+// 意図: Lock in expression shaping semantics
+// 関連ファイル: src/parser.rs, tests/parser_additional.rs, src/ast.rs
 use typelang::parser;
 
 // 異常系: if の else 省略

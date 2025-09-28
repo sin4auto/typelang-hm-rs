@@ -1,3 +1,7 @@
+// パス: tests/lexer_more.rs
+// 役割: Lexer regression tests for error handling and floats
+// 意図: Detect regressions around literal parsing edge cases
+// 関連ファイル: src/lexer.rs, src/errors.rs, tests/lexer_additional.rs
 use typelang::lexer;
 
 // 追加: 字句解析の異常系テスト

@@ -1,3 +1,7 @@
+// パス: tests/typesys_additional.rs
+// 役割: Extra tests for unify errors and constraint normalisation
+// 意図: Keep core type-system helpers predictable under edge cases
+// 関連ファイル: src/typesys.rs, src/infer.rs, tests/infer_more.rs
 // 日本語コメント: 型システムまわりの追加テスト
 
 use typelang::typesys::*;

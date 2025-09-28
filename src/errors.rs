@@ -1,3 +1,7 @@
+// パス: src/errors.rs
+// 役割: Shared error types and message formatting helpers
+// 意図: Keep diagnostics uniform for lexer, parser, and runtime layers
+// 関連ファイル: src/lexer.rs, src/parser.rs, src/evaluator.rs
 //! エラー型の定義（共通フォーマット: \[CODE\] メッセージ @line:col / @pos）。
 
 use std::error::Error as StdError;
@@ -189,5 +193,3 @@ impl Display for EvalError {
     }
 }
 impl StdError for EvalError {}
-
-// 後方互換エイリアスは不要となったため削除

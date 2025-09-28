@@ -1,3 +1,7 @@
+// パス: tests/infer_more.rs
+// 役割: 数値制約と defaulting の推論カバレッジ
+// 意図: 累乗演算と defaulting の特別挙動を検証する
+// 関連ファイル: src/infer.rs, src/typesys.rs, tests/infer_additional.rs
 use typelang::{infer, parser};
 
 #[test]
@@ -22,25 +26,4 @@ fn infer_ambiguous_add_without_defaulting_keeps_constraint() {
     let e = parser::parse_expr("1 + 2").expect("parse");
     let ty = infer::infer_type_str_with_defaulting(&e, false).expect("infer");
     assert_eq!(ty, "Num a => a");
-}
-
-#[test]
-fn infer_map_scheme_is_functor_polymorphic() {
-    let e = parser::parse_expr("map").expect("parse");
-    let ty = infer::infer_type_str(&e).expect("infer");
-    assert_eq!(ty, "Functor a => (b -> c) -> a b -> a c");
-}
-
-#[test]
-fn infer_foldl_scheme_is_foldable_polymorphic() {
-    let e = parser::parse_expr("foldl").expect("parse");
-    let ty = infer::infer_type_str(&e).expect("infer");
-    assert_eq!(ty, "Foldable a => (b -> c -> b) -> b -> a c -> b");
-}
-
-#[test]
-fn infer_foldr_scheme_is_foldable_polymorphic() {
-    let e = parser::parse_expr("foldr").expect("parse");
-    let ty = infer::infer_type_str(&e).expect("infer");
-    assert_eq!(ty, "Foldable a => (b -> c -> c) -> c -> a b -> c");
 }

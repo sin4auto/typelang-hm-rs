@@ -1,3 +1,7 @@
+// パス: tests/lexer_additional.rs
+// 役割: Extra lexer coverage for numeric prefixes and escapes
+// 意図: Ensure tokenization stays robust on tricky literals
+// 関連ファイル: src/lexer.rs, tests/lexer_more.rs, tests/lexer_unicode.rs
 // 日本語コメント: 字句解析の正常系/異常系を追加検証
 
 use typelang::lexer;

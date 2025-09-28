@@ -1,3 +1,7 @@
+// パス: src/lexer.rs
+// 役割: UTF-8 aware lexer producing position-tagged tokens
+// 意図: Supply the parser with precise tokens ahead of analysis
+// 関連ファイル: src/parser.rs, src/errors.rs, tests/lexer_more.rs
 //! 字句解析（lexer）
 //!
 //! 目的:

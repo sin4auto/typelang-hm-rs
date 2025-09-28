@@ -1,3 +1,7 @@
+// パス: src/repl/loader.rs
+// 役割: Program loader that merges definitions into REPL environments
+// 意図: Safely import files with inference checks before evaluation
+// 関連ファイル: src/infer.rs, src/evaluator.rs, src/repl/util.rs
 //! プログラムのロード処理
 
 use crate::ast as A;

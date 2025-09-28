@@ -1,3 +1,7 @@
+// パス: tests/parser_additional.rs
+// 役割: Supplemental parser tests for precedence and errors
+// 意図: Document grammar decisions beyond primary cases
+// 関連ファイル: src/parser.rs, tests/parser_more.rs, src/lexer.rs
 // 日本語コメント: 構文解析の優先順位/結合性やプログラム構文の検証
 
 use typelang::parser;

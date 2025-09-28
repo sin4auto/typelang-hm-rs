@@ -1,3 +1,7 @@
+// パス: tests/boundary_lex_parse.rs
+// 役割: Boundary tests for lexer and parser extremes
+// 意図: Catch overflow, nesting, and size edge cases early
+// 関連ファイル: src/lexer.rs, src/parser.rs, tests/error_cases.rs
 // 日本語コメント: 生成規則の境界値テスト（巨大整数/長文字列/深いネスト）
 
 use typelang::{lexer, parser};

@@ -1,3 +1,7 @@
+// パス: tests/unit_suite.rs
+// 役割: Consolidated smoke tests for lexer, parser, types, and evaluator
+// 意図: Provide quick regression coverage across the core pipeline
+// 関連ファイル: src/lexer.rs, src/parser.rs, src/infer.rs
 use typelang::{evaluator, infer, lexer, parser, typesys};
 
 // ============ LEXER ==========

@@ -1,3 +1,7 @@
+// パス: tests/repl_load_program_errors.rs
+// 役割: Regression test for load_program_into_env failure handling
+// 意図: Ensure REPL loads report unresolved bindings safely
+// 関連ファイル: src/repl/loader.rs, src/infer.rs, src/evaluator.rs
 use typelang::{evaluator, infer, parser};
 
 // 異常系: 未束縛変数を含むトップレベル定義は :load 相当で失敗を返す

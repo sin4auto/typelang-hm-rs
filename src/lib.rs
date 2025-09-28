@@ -1,3 +1,7 @@
+// パス: src/lib.rs
+// 役割: Crate root wiring modules and exports
+// 意図: Expose minimal API surface for language components
+// 関連ファイル: src/ast.rs, src/parser.rs, src/errors.rs
 //! TypeLang (Rust) ルートモジュール
 //!
 //! 目的:

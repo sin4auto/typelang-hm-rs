@@ -1,3 +1,7 @@
+// パス: src/repl/printer.rs
+// 役割: Helpers for rendering REPL help and value output
+// 意図: Keep interactive messaging consistent across commands
+// 関連ファイル: src/repl/cmd.rs, src/evaluator.rs, src/repl/util.rs
 //! REPL の表示系
 
 use crate::evaluator::Value;

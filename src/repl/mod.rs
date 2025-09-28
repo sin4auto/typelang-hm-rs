@@ -1,3 +1,7 @@
+// パス: src/repl/mod.rs
+// 役割: REPL module facade and re-exports
+// 意図: Expose interactive entry points without leaking internals
+// 関連ファイル: src/repl/cmd.rs, src/repl/loader.rs, src/bin/typelang.rs
 //! REPL（対話環境）モジュール
 //!
 //! 入力受付・コマンド解釈・ファイルロード・表示などを薄く分割しています。

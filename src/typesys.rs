@@ -1,3 +1,7 @@
+// パス: src/typesys.rs
+// 役割: Type representations, substitutions, and constraint utilities
+// 意図: Back inference, defaulting, and pretty-printing of types
+// 関連ファイル: src/infer.rs, src/ast.rs, tests/typesys_additional.rs
 //! 型システム（typesys）
 //!
 //! 目的:

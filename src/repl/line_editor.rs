@@ -1,3 +1,7 @@
+// パス: src/repl/line_editor.rs
+// 役割: Terminal line editor handling history and cursor movement
+// 意図: Provide portable interactive input for the REPL
+// 関連ファイル: src/repl/cmd.rs, src/repl/printer.rs, src/repl/util.rs
 use std::env;
 use std::fs;
 use std::io::{self, Read, Write};

@@ -1,3 +1,7 @@
+// パス: tests/lexer_unicode.rs
+// 役割: Unicode-focused lexer regression coverage
+// 意図: Prevent UTF-8 boundary panics and ensure safe parsing
+// 関連ファイル: src/lexer.rs, tests/lexer_additional.rs, src/errors.rs
 // 日本語コメント: UTF-8と2文字トークンの境界でパニックしないことを確認
 
 use typelang::lexer;

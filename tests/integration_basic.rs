@@ -1,3 +1,7 @@
+// パス: tests/integration_basic.rs
+// 役割: Basic end-to-end tests for inference and evaluation
+// 意図: Validate the full pipeline on representative snippets
+// 関連ファイル: src/infer.rs, src/evaluator.rs, examples/basics.tl
 // 日本語コメント: 基本的な型推論と評価の統合テスト
 
 use typelang::{evaluator, infer, parser};
