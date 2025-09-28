@@ -1,7 +1,7 @@
 <!-- パス: AGENTS.md -->
 <!-- 役割: Codex/TypeLang チームの統一オペレーションガイド -->
 <!-- 意図: 日常タスクを効率的かつ安全に遂行するための原則と手順を集約する -->
-<!-- 関連ファイル: README.md, EBNF.md, docs/typeclass-extension.md -->
+<!-- 関連ファイル: README.md, EBNF.md -->
 
 # Codex エージェント運用ハンドブック
 

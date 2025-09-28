@@ -1,7 +1,7 @@
 <!-- パス: README.md -->
 <!-- 役割: TypeLang HM プロジェクトの全体像とセットアップ手順を案内するトップドキュメント -->
 <!-- 意図: 利用者とコントリビューターが短時間で環境構築・開発に着手できるよう支援する -->
-<!-- 関連ファイル: AGENTS.md, EBNF.md, docs/typeclass-extension.md -->
+<!-- 関連ファイル: AGENTS.md, EBNF.md -->
 
 # TypeLang HM (Rust) Overview
 
@@ -39,7 +39,6 @@ Loaded 5 def(s)
 - `examples/*.tl` — 段階別の教材スクリプト
 - `tests/` — lexer / parser / infer / evaluator / repl の回帰テスト群
 - `EBNF.md` — 言語仕様の正準 EBNF
-- `docs/typeclass-extension.md` — 拡張予定の型クラスメモ
 
 ## 学習ロードマップ
 1. `examples/step1_numbers.tl` で数値演算とリテラルに慣れる。
@@ -69,7 +68,6 @@ Loaded 5 def(s)
 ## ドキュメントリソース
 - `AGENTS.md` — オペレーションガイドとテンプレート
 - `EBNF.md` — 文法仕様の一次ソース
-- `docs/typeclass-extension.md` — 型クラス拡張の検討ノート
 
 ## トラブルシューティング
 | 症状 | 対応策 |
