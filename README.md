@@ -51,13 +51,7 @@ Loaded 5 def(s)
 | --- | --- | --- |
 | 日常開発 | `make check` | `cargo fmt` → `cargo clippy -D warnings` → `cargo test` を一括実行 |
 | リリース前整備 | `make full_local` | クリーンビルド・テスト・ドキュメント・監査までを包括実行 |
-| ドキュメント生成 | `make doc` | `cargo doc` を警告をエラー扱いで作成 |
 | カバレッジ | `make coverage` | `cargo llvm-cov` による HTML/JSON/LCOV 出力 |
-
-補助スクリプト
-- `make add-tools` — rustfmt / clippy / cargo-llvm-cov の導入を自動化
-- `make serena-summarize` — `.serena/MODEL_INPUT.md` を最新化
-- `make diffpack` / `make test-brief` / `make build-brief` — 差分やログを `.summ/` に集約
 
 ## 開発ポリシー
 - 運用上の詳細は `AGENTS.md` に集約されています（Quickstart, チェックリスト等）。
