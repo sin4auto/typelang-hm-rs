@@ -1,5 +1,8 @@
 # directories
 target/
+# allow tracking of generated Rust docs
+!target/doc/
+!target/doc/**
 
 # files
 **/*.rs.bk
