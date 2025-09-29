@@ -1,22 +1,19 @@
 // パス: src/ast.rs
-// 役割: AST definitions for expressions and program units
-// 意図: Share a common structure across parsing, inference, and evaluation
+// 役割: 抽象構文木(AST)の型定義と表示ユーティリティを管理する
+// 意図: パーサ・型推論・評価器が同じデータ構造を共有できるように整える
 // 関連ファイル: src/parser.rs, src/infer.rs, src/evaluator.rs
-//! 抽象構文木（AST）
+//! AST モジュール
 //!
-//! 目的:
-//! - 構文解析結果を評価/型推論で共用できる中立的な表現に落とし込む。
-//!
-//! 設計ノート:
-//! - 構文シュガーはここでは扱わず、parser/repl 側で正規化する。
-//! - 数値の基数（`IntBase`）は表示や一部の最適化のために保持する。
-//! - 型式（`TypeExpr`）は注釈・シグネチャ用で、型システムの `Type` とは分離。
+//! 概要:
+//! - 構文解析で得た式やプログラム定義を列挙体・構造体で表現する。
+//! - 型推論器と評価器が追加の変換なしに読み取れる中立的な形を提供する。
+//! - 糖衣構文の解決や値の既定化は parser / repl 側に任せ、この層では正規化済みデータのみ扱う。
 
 use std::fmt;
 
-// 式ノード
+// 式を構成する列挙体
 #[derive(Clone, Debug, PartialEq)]
-/// 言語の式を表す抽象構文木。
+/// 言語内の式を表す AST ノードの集合。
 pub enum Expr {
     Var {
         name: String,
@@ -72,7 +69,7 @@ pub enum Expr {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-/// 整数リテラルの基数を識別する。
+/// 整数リテラルが使用した基数を保持する列挙体。
 pub enum IntBase {
     Dec,
     Hex,
@@ -80,9 +77,9 @@ pub enum IntBase {
     Bin,
 }
 
-// 型式（パーサ用）
+// パーサが扱う型式ノード
 #[derive(Clone, Debug, PartialEq, Eq)]
-/// パーサが扱う型式のバリアント。
+/// 構文上の型注釈を表すバリアント集合。
 pub enum TypeExpr {
     TEVar(String),
     TECon(String),
@@ -92,24 +89,24 @@ pub enum TypeExpr {
     TETuple(Vec<TypeExpr>),
 }
 
-// 制約と多相型（シグマ）
+// 型クラス制約とシグマ型
 #[derive(Clone, Debug, PartialEq, Eq)]
-/// 型クラス制約を表現する構造体。
+/// 型クラス名と対象の型変数を結び付ける制約。
 pub struct Constraint {
     pub classname: String,
     pub typevar: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-/// 制約付き多相型（シグマ型）を表す構造体。
+/// 制約と型式を組み合わせたシグマ型。
 pub struct SigmaType {
     pub constraints: Vec<Constraint>,
     pub r#type: TypeExpr,
 }
 
-// トップレベル定義とプログラム
+// トップレベル定義とプログラム全体
 #[derive(Clone, Debug, PartialEq)]
-/// トップレベル関数定義を保持する構造体。
+/// トップレベルで宣言された関数を保持するレコード。
 pub struct TopLevel {
     pub name: String,
     pub params: Vec<String>,
@@ -118,14 +115,14 @@ pub struct TopLevel {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-/// 複数のトップレベル定義から成るプログラム。
+/// トップレベル定義の集まりとしてのプログラム。
 pub struct Program {
     pub decls: Vec<TopLevel>,
 }
 
-/// 抽象構文木を文字列化する。
+/// 式ノードを文字列表現へ整形する。
 impl fmt::Display for Expr {
-    /// 人が読める形で式を整形する。
+    /// デバッグしやすい括弧付きの表記に変換する。
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Expr::Var { name } => write!(f, "{name}"),

@@ -1,21 +1,17 @@
 // パス: src/lexer.rs
-// 役割: UTF-8 aware lexer producing position-tagged tokens
-// 意図: Supply the parser with precise tokens ahead of analysis
-// 関連ファイル: src/parser.rs, src/errors.rs, tests/lexer_more.rs
-//! 字句解析（lexer）
+// 役割: UTF-8 対応の字句解析器とトークン定義を提供する
+// 意図: 構文解析に必要な位置付きトークンを生成する
+// 関連ファイル: src/parser.rs, src/errors.rs, tests/lexer_parser.rs
+//! 字句解析モジュール
 //!
-//! 目的:
-//! - EBNFに従ってソース文字列をトークン列に変換する。
-//!
-//! 方針/制約:
-//! - 標準ライブラリのみ（正規表現ライブラリは不使用）。
-//! - UTF-8 前提。コードポイント単位で走査し、2文字演算子やコメント終端を安全に検出。
-//! - エラーは一意なコード（`LEX***`）と位置（バイトオフセット）で報告。
+//! - EBNF の規則に従い、ソースをトークン列へ変換する。
+//! - 正規表現ライブラリを使わず、標準ライブラリのみで実装する。
+//! - すべてのトークンに行・列・バイト位置を記録し、診断情報と連携させる。
 
 use crate::errors::LexerError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-/// 字句解析で得られたトークンを表す構造体。
+/// 生成されたトークンとその位置情報を保持するレコード。
 pub struct Token {
     pub kind: TokenKind,
     pub value: String,
@@ -25,14 +21,14 @@ pub struct Token {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-/// 字句解析が生成するトークン種別。
+/// 字句解析で識別されるトークンの分類。
 pub enum TokenKind {
     EOF,
-    // 記号/演算子
-    LAMBDA, // '\\'
-    ARROW,  // '->'
-    DCOLON, // '::'
-    DARROW, // '=>'
+    // 演算子・記号トークン
+    LAMBDA, // バックスラッシュ `\`
+    ARROW,  // 右矢印 `->`
+    DCOLON, // 型注釈用のダブルコロン `::`
+    DARROW, // 制約矢印 `=>`
     LE,
     GE,
     EQ,
@@ -54,7 +50,7 @@ pub enum TokenKind {
     EQUAL,
     QMARK,
     UNDERSCORE,
-    // リテラル
+    // リテラル分類
     CHAR,
     STRING,
     HEX,
@@ -62,10 +58,10 @@ pub enum TokenKind {
     BIN,
     FLOAT,
     INT,
-    // 識別子
+    // 識別子分類
     CONID,
     VARID,
-    // キーワード
+    // キーワード分類
     LET,
     IN,
     IF,
@@ -75,43 +71,43 @@ pub enum TokenKind {
     FALSE,
 }
 
-/// 空白文字かどうかを判定する。
+/// 空白文字かどうかを判定するユーティリティ。
 fn is_whitespace(c: char) -> bool {
     matches!(c, ' ' | '\t' | '\r' | '\n')
 }
-/// 10進数字かどうかを判定する。
+/// 10 進数字かどうかを判定するユーティリティ。
 fn is_digit(c: char) -> bool {
     c.is_ascii_digit()
 }
-/// 16進数字かどうかを判定する。
+/// 16 進数字かどうかを判定するユーティリティ。
 fn is_hexdigit(c: char) -> bool {
     c.is_ascii_hexdigit()
 }
-/// 8進数字かどうかを判定する。
+/// 8 進数字かどうかを判定するユーティリティ。
 fn is_octdigit(c: char) -> bool {
     matches!(c, '0'..='7')
 }
-/// 2進数字かどうかを判定する。
+/// 2 進数字かどうかを判定するユーティリティ。
 fn is_bindigit(c: char) -> bool {
     matches!(c, '0' | '1')
 }
-/// 先頭に使える識別子文字かどうかを判定する。
+/// 識別子の先頭に使用可能な文字かどうかを判定する。
 fn is_letter(c: char) -> bool {
     c.is_ascii_alphabetic() || c == '_'
 }
-/// 識別子の後続文字として許可されるか判定する。
+/// 識別子の後続として許容される文字か判定する。
 fn is_ident_rest(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_' || c == '\''
 }
 
-/// ソースコードをトークン列に分割する。
+/// ソースコードを走査し、位置付きトークン列を返す。
 pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
     let mut toks: Vec<Token> = Vec::new();
     let mut i = 0usize;
     let bytes = src.as_bytes();
     let n = bytes.len();
     let next_char = |i: usize| -> Option<char> { src[i..].chars().next() };
-    /// 指定バイト位置に対応する行・桁を計算する。
+    /// 指定位置の行番号と桁位置を算出する。
     fn line_col_at(src: &str, pos: usize) -> (usize, usize) {
         let mut line = 1usize;
         let mut col = 1usize;
@@ -128,7 +124,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
         }
         (line, col)
     }
-    /// 指定した行の文字列を取得する。
+    /// 指定行のテキストを取得する。
     fn line_text_at(src: &str, line: usize) -> String {
         src.lines()
             .nth(line.saturating_sub(1))
@@ -138,19 +134,17 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
     while i < n {
         let Some(c) = next_char(i) else { break };
         let c_next_idx = i + c.len_utf8();
-        // 空白
+        // 空白文字は読み飛ばす
         if is_whitespace(c) {
             i += c.len_utf8();
             continue;
         }
 
-        // ブロックコメント "{-" ... "-}"（入れ子は非対応）
+        // ブロックコメント "{-" ... "-}"（入れ子無し）をスキップする
         if c == '{' {
             if let Some('-') = next_char(c_next_idx) {
-                // 注意: これは UTF-8 長を厳密に扱わないが、ASCII のみ
-                // 先頭の "{-"
-                i = c_next_idx + '-'.len_utf8(); // '{' と '-'
-                                                 // 終了トークン "-}"
+                // 先頭の "{-" を読み飛ばし、終端 "-}" を探す
+                i = c_next_idx + '-'.len_utf8();
                 let mut closed = false;
                 while i < n {
                     if let Some('-') = next_char(i) {
@@ -178,16 +172,13 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
             }
         }
 
-        // 行コメント "-- ... \n"
+        // 行コメント "--" 以降を改行まで読み飛ばす
         if c == '-' {
             if let Some('-') = next_char(c_next_idx) {
-                // "--"
-                // 改行まで飛ばす
+                // "--" を消費して改行まで進む
                 i = c_next_idx + '-'.len_utf8();
                 while i < n {
-                    // 内部不変: i < n のため next_char(i) は必ず存在する
-                    let ch =
-                        next_char(i).expect("内部不変違反: 行コメント走査中にEOFに到達しました");
+                    let ch = next_char(i).expect("安全性保証: 行コメント走査中に EOF へ到達しない");
                     i += ch.len_utf8();
                     if ch == '\n' {
                         break;
@@ -197,7 +188,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
             }
         }
 
-        // 2文字記号（UTF-8安全）
+        // 2 文字で構成される演算子や記号を処理する
         if c_next_idx <= n {
             if let Some(c2) = next_char(c_next_idx) {
                 match (c, c2) {
@@ -509,15 +500,14 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                 continue;
             }
             '\'' => {
-                // 文字リテラル（単一文字 or エスケープ）
+                // 単一文字またはエスケープで構成される文字リテラル
                 let start = i;
-                i += 1; // opening '
+                i += 1; // 先頭のシングルクォートを読み飛ばす
                 let mut escaped = false;
                 let mut ok = false;
                 while i < n {
-                    // 内部不変: i < n のため next_char(i) は必ず存在する
                     let ch =
-                        next_char(i).expect("内部不変違反: 文字リテラル走査中にEOFに到達しました");
+                        next_char(i).expect("安全性保証: 文字リテラル走査中に EOF へ到達しない");
                     i += ch.len_utf8();
                     if !escaped {
                         if ch == '\\' {
@@ -532,7 +522,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                             break;
                         }
                     } else {
-                        // 1 文字エスケープを許容
+                        // エスケープ済みなので通常処理へ戻す
                         escaped = false;
                     }
                 }
@@ -559,15 +549,14 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                 continue;
             }
             '"' => {
-                // 文字列リテラル
+                // 文字列リテラルの読み取り
                 let start = i;
                 i += 1;
                 let mut escaped = false;
                 let mut ok = false;
                 while i < n {
-                    // 内部不変: i < n のため next_char(i) は必ず存在する
-                    let ch = next_char(i)
-                        .expect("内部不変違反: 文字列リテラル走査中にEOFに到達しました");
+                    let ch =
+                        next_char(i).expect("安全性保証: 文字列リテラル走査中に EOF へ到達しない");
                     i += ch.len_utf8();
                     if !escaped {
                         if ch == '\\' {
@@ -610,18 +599,17 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
             _ => {}
         }
 
-        // 数値: 0x, 0o, 0b, 浮動小数, 整数
+        // 数値リテラル（基数接頭辞・浮動小数・整数）を認識する
         if is_digit(c) {
-            // 進数接頭辞
+            // プレフィックスで基数を切り替える
             if c == '0' {
                 if let Some('x') | Some('X') = next_char(c_next_idx) {
                     let start = i;
-                    i = c_next_idx + 'x'.len_utf8(); // 0x
+                    i = c_next_idx + 'x'.len_utf8(); // `0x` を読み飛ばす
                     let mut cnt = 0;
                     while i < n {
-                        // 内部不変: i < n のため next_char(i) は必ず存在する
                         let ch = next_char(i)
-                            .expect("内部不変違反: 16進リテラル走査中にEOFに到達しました");
+                            .expect("安全性保証: 16 進リテラル走査中に EOF へ到達しない");
                         if is_hexdigit(ch) {
                             i += ch.len_utf8();
                             cnt += 1;
@@ -652,12 +640,11 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                 }
                 if let Some('o') | Some('O') = next_char(c_next_idx) {
                     let start = i;
-                    i = c_next_idx + 'o'.len_utf8();
+                    i = c_next_idx + 'o'.len_utf8(); // `0o` を読み飛ばす
                     let mut cnt = 0;
                     while i < n {
-                        // 内部不変: i < n のため next_char(i) は必ず存在する
                         let ch = next_char(i)
-                            .expect("内部不変違反: 8進リテラル走査中にEOFに到達しました");
+                            .expect("安全性保証: 8 進リテラル走査中に EOF へ到達しない");
                         if is_octdigit(ch) {
                             i += ch.len_utf8();
                             cnt += 1;
@@ -688,12 +675,11 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                 }
                 if let Some('b') | Some('B') = next_char(c_next_idx) {
                     let start = i;
-                    i = c_next_idx + 'b'.len_utf8();
+                    i = c_next_idx + 'b'.len_utf8(); // `0b` を読み飛ばす
                     let mut cnt = 0;
                     while i < n {
-                        // 内部不変: i < n のため next_char(i) は必ず存在する
                         let ch = next_char(i)
-                            .expect("内部不変違反: 2進リテラル走査中にEOFに到達しました");
+                            .expect("安全性保証: 2 進リテラル走査中に EOF へ到達しない");
                         if is_bindigit(ch) {
                             i += ch.len_utf8();
                             cnt += 1;
@@ -723,33 +709,30 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                     continue;
                 }
             }
-            // 10進: 浮動小数/指数 or 整数
+            // 10 進数（整数・小数・指数表記）を処理する
             let start = i;
-            // 整数部
+            // 整数部を取り込む
             while i < n {
-                // 内部不変: i < n のため next_char(i) は必ず存在する
-                let ch = next_char(i).expect("内部不変違反: 10進整数部走査中にEOFに到達しました");
+                let ch = next_char(i).expect("安全性保証: 10 進整数部走査中に EOF へ到達しない");
                 if is_digit(ch) {
                     i += ch.len_utf8();
                 } else {
                     break;
                 }
             }
-            // 小数/指数の判定
+            // 小数部や指数部が続くかを判断する
             let mut is_float = false;
             if i < n {
                 if let Some('.') = next_char(i) {
                     let dot_next = i + '.'.len_utf8();
                     if let Some(d2) = next_char(dot_next) {
                         if d2.is_ascii_digit() {
-                            // "d.d"
+                            // 小数部あり（例: `d.d`）
                             is_float = true;
-                            i = dot_next; // '.'
+                            i = dot_next; // '.' を含む位置から小数部へ進む
                             while i < n {
-                                // 内部不変: i < n のため next_char(i) は必ず存在する
-                                let ch = next_char(i).expect(
-                                    "内部不変違反: 浮動小数点の小数部走査中にEOFに到達しました",
-                                );
+                                let ch = next_char(i)
+                                    .expect("安全性保証: 小数部走査中に EOF へ到達しない");
                                 if is_digit(ch) {
                                     i += ch.len_utf8();
                                 } else {
@@ -760,7 +743,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                     }
                 }
             }
-            // 指数部
+            // 指数部（e/E 記法）が続く場合は解析する
             if i < n {
                 if let Some('e') | Some('E') = next_char(i) {
                     let mut j = i + 'e'.len_utf8();
@@ -769,9 +752,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                     }
                     let mut cnt = 0;
                     while j < n {
-                        // 内部不変: j < n のため next_char(j) は必ず存在する
-                        let ch =
-                            next_char(j).expect("内部不変違反: 指数部走査中にEOFに到達しました");
+                        let ch = next_char(j).expect("安全性保証: 指数部走査中に EOF へ到達しない");
                         if is_digit(ch) {
                             j += ch.len_utf8();
                             cnt += 1;
@@ -782,7 +763,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                     if cnt > 0 {
                         i = j;
                         is_float = true;
-                    } else { /* 例: 1e -> ここでは指数を解釈しない */
+                    } else { /* 例: 1e のように指数部が欠ける場合は整数扱い */
                     }
                 }
             }
@@ -803,13 +784,12 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
             continue;
         }
 
-        // 識別子（CONID/VARID）
+        // 識別子（大文字開始は CONID、小文字開始は VARID）を解析する
         if is_letter(c) {
             let start = i;
             i += c.len_utf8();
             while i < n {
-                // 内部不変: i < n のため next_char(i) は必ず存在する
-                let ch = next_char(i).expect("内部不変違反: 識別子走査中にEOFに到達しました");
+                let ch = next_char(i).expect("安全性保証: 識別子走査中に EOF へ到達しない");
                 if is_ident_rest(ch) {
                     i += ch.len_utf8();
                 } else {
@@ -817,7 +797,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                 }
             }
             let s = &src[start..i];
-            // 予約語判定
+            // 予約語かどうかを振り分ける
             let token = match s {
                 "let" => Token {
                     kind: TokenKind::LET,

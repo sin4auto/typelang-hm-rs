@@ -204,210 +204,193 @@ pub(crate) fn handle_command<I: ReplIo>(
     cmd: ReplCommand,
     io: &I,
 ) -> Vec<ReplMsg> {
-    use ReplMsg as M;
+    use ReplCommand::*;
     match cmd {
-        ReplCommand::TypeOf(src) => match parse_expr(&src) {
-            Ok(expr) => match type_string_in_current_env(
-                &state.type_env,
-                &state.class_env,
-                &expr,
-                state.defaulting_on,
-                &mut state.value_env,
-            ) {
-                Ok(s) => vec![M::Out(format!("-- {}", s))],
-                Err(msg) => vec![M::Err(msg)],
-            },
-            Err(e) => vec![M::Err(format!("{}", e))],
-        },
-        ReplCommand::Let(src) => match parse_program(&src) {
-            Ok(prog) => {
-                let mut tent_env = state.type_env.clone_env();
-                let mut tent_val = state.value_env.clone();
-                let mut loaded: Vec<String> = Vec::new();
-                for decl in prog.decls {
-                    let body = if decl.params.is_empty() {
-                        decl.expr
-                    } else {
-                        A::Expr::Lambda {
-                            params: decl.params,
-                            body: Box::new(decl.expr),
-                        }
-                    };
-                    let mut st = InferState {
-                        supply: TVarSupply::new(),
-                        subst: Default::default(),
-                    };
-                    match infer_expr(&tent_env, &state.class_env, &mut st, &body) {
-                        Ok((s, mut q_rhs)) => {
-                            if let Some(sig) = &decl.signature {
-                                let ty_anno = crate::infer::type_from_texpr(&sig.r#type);
-                                match crate::typesys::unify(
-                                    crate::typesys::apply_subst_t(&s, &q_rhs.r#type),
-                                    ty_anno,
-                                ) {
-                                    Ok(s2) => {
-                                        let s = crate::typesys::compose(&s2, &s);
-                                        q_rhs = crate::typesys::apply_subst_q(&s, &q_rhs);
-                                    }
-                                    Err(e) => {
-                                        return vec![M::Err(format!(
-                                            "エラー: [{}] {}",
-                                            e.code, e.message
-                                        ))];
-                                    }
-                                }
-                            }
-                            let sch = generalize(&tent_env, q_rhs.clone());
-                            tent_env.extend(decl.name.clone(), sch);
-                            match eval_expr(&body, &mut tent_val) {
-                                Ok(v) => {
-                                    tent_val.insert(decl.name.clone(), v);
-                                    loaded.push(decl.name.clone());
-                                }
-                                Err(e) => return vec![M::Err(format!("{}", e))],
-                            }
-                        }
-                        Err(e) => return vec![M::Err(format!("{}", e))],
-                    }
-                }
-                state.type_env = tent_env;
-                state.value_env = tent_val;
-                if loaded.is_empty() {
-                    vec![]
-                } else {
-                    vec![M::Out(format!("Defined {}", loaded.join(", ")))]
-                }
-            }
-            Err(e) => vec![M::Err(format!("{}", e))],
-        },
-        ReplCommand::Load(path) => match io.read_to_string(&path) {
-            Ok(src) => match parse_program(&src) {
-                Ok(prog) => match load_program_into_env(
-                    &prog,
-                    &mut state.type_env,
-                    &state.class_env,
-                    &mut state.value_env,
-                ) {
-                    Ok(loaded) => {
-                        let mut msgs = vec![M::Out(format!(
-                            "Loaded {} def(s) from {}",
-                            loaded.len(),
-                            path
-                        ))];
-                        for name in &loaded {
-                            if let Some(sch) = state.type_env.lookup(name) {
-                                msgs.push(M::Out(format!(
-                                    "  {} :: {}",
-                                    name,
-                                    pretty_qual(&sch.qual)
-                                )));
-                            }
-                        }
-                        if !state.last_loaded_paths.contains(&path) {
-                            state.last_loaded_paths.push(path);
-                        }
-                        msgs
-                    }
-                    Err(msg) => vec![M::Err(msg)],
-                },
-                Err(e) => vec![M::Err(format!("{}", e))],
-            },
-            Err(e) => vec![M::Err(e)],
-        },
-        ReplCommand::Reload => {
-            if state.last_loaded_paths.is_empty() {
-                vec![M::Err("エラー: 直近の :load がありません".into())]
-            } else {
-                let mut msgs = Vec::new();
-                for path in &state.last_loaded_paths.clone() {
-                    match io.read_to_string(path) {
-                        Ok(src) => match parse_program(&src) {
-                            Ok(prog) => match load_program_into_env(
-                                &prog,
-                                &mut state.type_env,
-                                &state.class_env,
-                                &mut state.value_env,
-                            ) {
-                                Ok(loaded) => msgs.push(M::Out(format!(
-                                    "Reloaded {} def(s) from {}",
-                                    loaded.len(),
-                                    path
-                                ))),
-                                Err(msg) => msgs.push(M::Err(msg)),
-                            },
-                            Err(e) => msgs.push(M::Err(format!("{}", e))),
-                        },
-                        Err(e) => msgs.push(M::Err(e)),
-                    }
-                }
-                msgs
-            }
-        }
-        ReplCommand::Browse(pfx) => {
-            let p = pfx.unwrap_or_default();
-            let mut names: Vec<&String> = state
-                .type_env
-                .env
-                .keys()
-                .filter(|n| n.starts_with(&p))
-                .collect();
-            names.sort();
-            if names.is_empty() {
-                vec![M::Out("(定義なし)".into())]
-            } else {
-                names
-                    .into_iter()
-                    .map(|n| {
-                        if let Some(sch) = state.type_env.lookup(n) {
-                            M::Out(format!("  {} :: {}", n, pretty_qual(&sch.qual)))
-                        } else {
-                            M::Out(format!("  {}", n))
-                        }
-                    })
-                    .collect()
-            }
-        }
-        ReplCommand::SetDefault(on) => {
-            state.defaulting_on = on;
-            vec![M::Out(format!(
-                "set default = {}",
-                if on { "on" } else { "off" }
-            ))]
-        }
-        ReplCommand::Unset(name) => {
-            let mut removed = false;
-            if state.type_env.env.remove(&name).is_some() {
-                removed = true;
-            }
-            if state.value_env.remove(&name).is_some() {
-                removed = true;
-            }
-            if removed {
-                vec![M::Out(format!("Unset {}", name))]
-            } else {
-                vec![M::Err(format!("エラー: 未定義です: {}", name))]
-            }
-        }
-        ReplCommand::Eval(src) => match parse_expr(&src) {
-            Ok(expr) => match infer_and_generalize_for_repl(
-                &state.type_env,
-                &state.class_env,
-                &expr,
-                state.defaulting_on,
-                &mut state.value_env,
-            ) {
-                Ok((sch, val)) => {
-                    state.type_env.extend("it", sch);
-                    state.value_env.insert("it".into(), val.clone());
-                    vec![M::Value(val)]
-                }
-                Err(msg) => vec![M::Err(msg)],
-            },
-            Err(e) => vec![M::Err(format!("{}", e))],
-        },
-        ReplCommand::Help | ReplCommand::Quit => vec![],
-        ReplCommand::Invalid(s) => vec![M::Err(format!("エラー: コマンド形式が不正です: {}", s))],
+        TypeOf(src) => handle_type_of(state, &src),
+        Let(src) => handle_let(state, &src),
+        Load(path) => handle_load(state, &path, io),
+        Reload => handle_reload(state, io),
+        Browse(prefix) => handle_browse(state, prefix),
+        SetDefault(on) => handle_set_default(state, on),
+        Unset(name) => handle_unset(state, &name),
+        Eval(src) => handle_eval(state, &src),
+        Help | Quit => Vec::new(),
+        Invalid(s) => vec![ReplMsg::Err(format!(
+            "エラー: コマンド形式が不正です: {}",
+            s
+        ))],
     }
+}
+
+fn handle_type_of(state: &mut ReplState, src: &str) -> Vec<ReplMsg> {
+    match parse_expr(src) {
+        Ok(expr) => match type_string_in_current_env(
+            &state.type_env,
+            &state.class_env,
+            &expr,
+            state.defaulting_on,
+            &mut state.value_env,
+        ) {
+            Ok(s) => vec![ReplMsg::Out(format!("-- {}", s))],
+            Err(msg) => vec![ReplMsg::Err(msg)],
+        },
+        Err(e) => vec![ReplMsg::Err(format!("{}", e))],
+    }
+}
+
+fn handle_let(state: &mut ReplState, src: &str) -> Vec<ReplMsg> {
+    match parse_program(src) {
+        Ok(prog) => match apply_program(state, &prog) {
+            Ok(loaded) => {
+                if loaded.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![ReplMsg::Out(format!("Defined {}", loaded.join(", ")))]
+                }
+            }
+            Err(msg) => vec![ReplMsg::Err(msg)],
+        },
+        Err(e) => vec![ReplMsg::Err(format!("{}", e))],
+    }
+}
+
+fn handle_load<I: ReplIo>(state: &mut ReplState, path: &str, io: &I) -> Vec<ReplMsg> {
+    match io.read_to_string(path) {
+        Ok(src) => match parse_program(&src) {
+            Ok(prog) => match apply_program(state, &prog) {
+                Ok(loaded) => {
+                    let mut msgs = vec![ReplMsg::Out(format!(
+                        "Loaded {} def(s) from {}",
+                        loaded.len(),
+                        path
+                    ))];
+                    append_signature_summaries(state, &loaded, &mut msgs);
+                    if !state.last_loaded_paths.iter().any(|p| p == path) {
+                        state.last_loaded_paths.push(path.to_string());
+                    }
+                    msgs
+                }
+                Err(msg) => vec![ReplMsg::Err(msg)],
+            },
+            Err(e) => vec![ReplMsg::Err(format!("{}", e))],
+        },
+        Err(e) => vec![ReplMsg::Err(e)],
+    }
+}
+
+fn handle_reload<I: ReplIo>(state: &mut ReplState, io: &I) -> Vec<ReplMsg> {
+    if state.last_loaded_paths.is_empty() {
+        return vec![ReplMsg::Err("エラー: 直近の :load がありません".into())];
+    }
+
+    let mut msgs = Vec::new();
+    let paths = state.last_loaded_paths.clone();
+    for path in paths {
+        match io.read_to_string(&path) {
+            Ok(src) => match parse_program(&src) {
+                Ok(prog) => match apply_program(state, &prog) {
+                    Ok(loaded) => msgs.push(ReplMsg::Out(format!(
+                        "Reloaded {} def(s) from {}",
+                        loaded.len(),
+                        path
+                    ))),
+                    Err(msg) => msgs.push(ReplMsg::Err(msg)),
+                },
+                Err(e) => msgs.push(ReplMsg::Err(format!("{}", e))),
+            },
+            Err(e) => msgs.push(ReplMsg::Err(e)),
+        }
+    }
+    msgs
+}
+
+fn handle_browse(state: &ReplState, prefix: Option<String>) -> Vec<ReplMsg> {
+    let p = prefix.unwrap_or_default();
+    let mut names: Vec<&String> = state
+        .type_env
+        .env
+        .keys()
+        .filter(|n| n.starts_with(&p))
+        .collect();
+    names.sort();
+    if names.is_empty() {
+        return vec![ReplMsg::Out("(定義なし)".into())];
+    }
+
+    names
+        .into_iter()
+        .map(|n| {
+            if let Some(sch) = state.type_env.lookup(n) {
+                ReplMsg::Out(format!("  {} :: {}", n, pretty_qual(&sch.qual)))
+            } else {
+                ReplMsg::Out(format!("  {}", n))
+            }
+        })
+        .collect()
+}
+
+fn handle_set_default(state: &mut ReplState, on: bool) -> Vec<ReplMsg> {
+    state.defaulting_on = on;
+    vec![ReplMsg::Out(format!(
+        "set default = {}",
+        if on { "on" } else { "off" }
+    ))]
+}
+
+fn handle_unset(state: &mut ReplState, name: &str) -> Vec<ReplMsg> {
+    let mut removed = false;
+    if state.type_env.env.remove(name).is_some() {
+        removed = true;
+    }
+    if state.value_env.remove(name).is_some() {
+        removed = true;
+    }
+    if removed {
+        vec![ReplMsg::Out(format!("Unset {}", name))]
+    } else {
+        vec![ReplMsg::Err(format!("エラー: 未定義です: {}", name))]
+    }
+}
+
+fn handle_eval(state: &mut ReplState, src: &str) -> Vec<ReplMsg> {
+    match parse_expr(src) {
+        Ok(expr) => match infer_and_generalize_for_repl(
+            &state.type_env,
+            &state.class_env,
+            &expr,
+            state.defaulting_on,
+            &mut state.value_env,
+        ) {
+            Ok((sch, val)) => {
+                state.type_env.extend("it", sch);
+                state.value_env.insert("it".into(), val.clone());
+                vec![ReplMsg::Value(val)]
+            }
+            Err(msg) => vec![ReplMsg::Err(msg)],
+        },
+        Err(e) => vec![ReplMsg::Err(format!("{}", e))],
+    }
+}
+
+fn append_signature_summaries(state: &ReplState, names: &[String], msgs: &mut Vec<ReplMsg>) {
+    for name in names {
+        if let Some(sch) = state.type_env.lookup(name) {
+            msgs.push(ReplMsg::Out(format!(
+                "  {} :: {}",
+                name,
+                pretty_qual(&sch.qual)
+            )));
+        }
+    }
+}
+
+fn apply_program(state: &mut ReplState, prog: &A::Program) -> Result<Vec<String>, String> {
+    load_program_into_env(
+        prog,
+        &mut state.type_env,
+        &state.class_env,
+        &mut state.value_env,
+    )
 }
 /// コマンド入力の字面を純粋に解釈して列挙型へ落とし込む（I/O は行わない）。
 /// REPL 実装からの切り離し用ヘルパ。

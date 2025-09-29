@@ -89,72 +89,60 @@ impl LineEditor {
         write!(stdout, "{}", prompt)?;
         stdout.flush()?;
 
-        let mut buffer: Vec<char> = Vec::new();
-        let mut cursor: usize = 0;
-        let mut history_index = self.history.len();
-        let mut saved_current: Option<Vec<char>> = None;
-
         let stdin = io::stdin();
         let mut stdin = stdin.lock();
+        let mut session = EditorSession::new(&self.history);
         loop {
             let mut byte = [0u8; 1];
             if stdin.read(&mut byte)? == 0 {
                 return Ok(ReadResult::Eof);
             }
-            let b = byte[0];
-            match b {
-                b'\n' | b'\r' => {
+            match interpret_action(byte[0], &mut stdin)? {
+                EditAction::Submit => {
                     write!(stdout, "\r\n")?;
                     stdout.flush()?;
-                    let line: String = buffer.into_iter().collect();
-                    return Ok(ReadResult::Line(line));
+                    return Ok(ReadResult::Line(session.into_string()));
                 }
-                0x03 => {
+                EditAction::Interrupt => {
                     write!(stdout, "^C\r\n")?;
                     stdout.flush()?;
                     return Ok(ReadResult::Interrupted);
                 }
-                0x04 => {
-                    if buffer.is_empty() {
+                EditAction::Eof => {
+                    if session.is_empty() {
                         return Ok(ReadResult::Eof);
                     }
                 }
-                0x7f | 0x08 => {
-                    if cursor > 0 {
-                        cursor -= 1;
-                        buffer.remove(cursor);
-                        history_index = self.history.len();
-                        saved_current = None;
-                        refresh_line(&mut stdout, prompt, &buffer, cursor)?;
+                EditAction::DeleteLeft => {
+                    if session.delete_left() {
+                        refresh_line(&mut stdout, prompt, session.buffer(), session.cursor())?;
                     }
                 }
-                0x1b => {
-                    let context = EscapeContext {
-                        history: &self.history,
-                        history_index: &mut history_index,
-                        saved_current: &mut saved_current,
-                    };
-                    handle_escape(
-                        &mut stdin,
-                        &mut stdout,
-                        prompt,
-                        &mut buffer,
-                        &mut cursor,
-                        context,
-                    )?;
-                }
-                _ => {
-                    if let Some(ch) = read_utf8_char(b, &mut stdin)? {
-                        if ch.is_control() {
-                            continue;
-                        }
-                        buffer.insert(cursor, ch);
-                        cursor += 1;
-                        history_index = self.history.len();
-                        saved_current = None;
-                        refresh_line(&mut stdout, prompt, &buffer, cursor)?;
+                EditAction::MoveLeft => {
+                    if session.move_left() {
+                        refresh_line(&mut stdout, prompt, session.buffer(), session.cursor())?;
                     }
                 }
+                EditAction::MoveRight => {
+                    if session.move_right() {
+                        refresh_line(&mut stdout, prompt, session.buffer(), session.cursor())?;
+                    }
+                }
+                EditAction::HistoryPrev => {
+                    if session.history_prev() {
+                        refresh_line(&mut stdout, prompt, session.buffer(), session.cursor())?;
+                    }
+                }
+                EditAction::HistoryNext => {
+                    if session.history_next() {
+                        refresh_line(&mut stdout, prompt, session.buffer(), session.cursor())?;
+                    }
+                }
+                EditAction::InsertChar(ch) => {
+                    session.insert_char(ch);
+                    refresh_line(&mut stdout, prompt, session.buffer(), session.cursor())?;
+                }
+                EditAction::Ignore => {}
             }
         }
     }
@@ -181,82 +169,164 @@ fn read_utf8_char<R: Read>(first: u8, reader: &mut R) -> io::Result<Option<char>
 }
 
 #[cfg(unix)]
-/// エスケープシーケンス処理に必要な状態をまとめる。
-struct EscapeContext<'a> {
-    history: &'a History,
-    history_index: &'a mut usize,
-    saved_current: &'a mut Option<Vec<char>>,
+/// 読み取ったバイト列を編集アクションへ変換する。
+fn interpret_action<R: Read>(first: u8, reader: &mut R) -> io::Result<EditAction> {
+    match first {
+        b'\n' | b'\r' => Ok(EditAction::Submit),
+        0x03 => Ok(EditAction::Interrupt),
+        0x04 => Ok(EditAction::Eof),
+        0x7f | 0x08 => Ok(EditAction::DeleteLeft),
+        0x1b => {
+            let mut seq = [0u8; 2];
+            if reader.read_exact(&mut seq[..1]).is_err() {
+                return Ok(EditAction::Ignore);
+            }
+            if seq[0] != b'[' {
+                return Ok(EditAction::Ignore);
+            }
+            if reader.read_exact(&mut seq[1..2]).is_err() {
+                return Ok(EditAction::Ignore);
+            }
+            Ok(match seq[1] {
+                b'A' => EditAction::HistoryPrev,
+                b'B' => EditAction::HistoryNext,
+                b'C' => EditAction::MoveRight,
+                b'D' => EditAction::MoveLeft,
+                _ => EditAction::Ignore,
+            })
+        }
+        _ => {
+            if let Some(ch) = read_utf8_char(first, reader)? {
+                if ch.is_control() {
+                    Ok(EditAction::Ignore)
+                } else {
+                    Ok(EditAction::InsertChar(ch))
+                }
+            } else {
+                Ok(EditAction::Ignore)
+            }
+        }
+    }
 }
 
 #[cfg(unix)]
-/// 端末から届いたエスケープシーケンスを処理する。
-fn handle_escape<R: Read, W: Write>(
-    reader: &mut R,
-    writer: &mut W,
-    prompt: &str,
-    buffer: &mut Vec<char>,
-    cursor: &mut usize,
-    context: EscapeContext<'_>,
-) -> io::Result<()> {
-    let EscapeContext {
-        history,
-        history_index,
-        saved_current,
-    } = context;
-    let mut seq = [0u8; 2];
-    if reader.read_exact(&mut seq[..1]).is_err() {
-        return Ok(());
-    }
-    if seq[0] != b'[' {
-        return Ok(());
-    }
-    if reader.read_exact(&mut seq[1..2]).is_err() {
-        return Ok(());
-    }
-    match seq[1] {
-        b'A' => {
-            if *history_index > 0 {
-                if *history_index == history.len() {
-                    *saved_current = Some(buffer.clone());
-                }
-                *history_index -= 1;
-                if let Some(entry) = history.get(*history_index) {
-                    *buffer = entry.chars().collect();
-                    *cursor = buffer.len();
-                    refresh_line(writer, prompt, buffer, *cursor)?;
-                }
-            }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EditAction {
+    Submit,
+    Interrupt,
+    Eof,
+    DeleteLeft,
+    MoveLeft,
+    MoveRight,
+    HistoryPrev,
+    HistoryNext,
+    InsertChar(char),
+    Ignore,
+}
+
+#[cfg(unix)]
+struct EditorSession<'a> {
+    buffer: Vec<char>,
+    cursor: usize,
+    history_index: usize,
+    saved_current: Option<Vec<char>>,
+    history: &'a History,
+}
+
+#[cfg(unix)]
+impl<'a> EditorSession<'a> {
+    fn new(history: &'a History) -> Self {
+        Self {
+            buffer: Vec::new(),
+            cursor: 0,
+            history_index: history.len(),
+            saved_current: None,
+            history,
         }
-        b'B' => {
-            if *history_index < history.len() {
-                *history_index += 1;
-                let restored = if *history_index == history.len() {
-                    saved_current.clone().unwrap_or_default()
-                } else {
-                    history.get(*history_index).unwrap().chars().collect()
-                };
-                *buffer = restored;
-                *cursor = buffer.len();
-                refresh_line(writer, prompt, buffer, *cursor)?;
-            }
-        }
-        b'C' => {
-            if *cursor < buffer.len() {
-                *cursor += 1;
-                write!(writer, "\x1b[C")?;
-                writer.flush()?;
-            }
-        }
-        b'D' => {
-            if *cursor > 0 {
-                *cursor -= 1;
-                write!(writer, "\x1b[D")?;
-                writer.flush()?;
-            }
-        }
-        _ => {}
     }
-    Ok(())
+
+    fn buffer(&self) -> &[char] {
+        &self.buffer
+    }
+
+    fn cursor(&self) -> usize {
+        self.cursor
+    }
+
+    fn is_empty(&self) -> bool {
+        self.buffer.is_empty()
+    }
+
+    fn insert_char(&mut self, ch: char) {
+        self.buffer.insert(self.cursor, ch);
+        self.cursor += 1;
+        self.reset_history_cursor();
+    }
+
+    fn delete_left(&mut self) -> bool {
+        if self.cursor == 0 {
+            return false;
+        }
+        self.cursor -= 1;
+        self.buffer.remove(self.cursor);
+        self.reset_history_cursor();
+        true
+    }
+
+    fn move_left(&mut self) -> bool {
+        if self.cursor == 0 {
+            return false;
+        }
+        self.cursor -= 1;
+        true
+    }
+
+    fn move_right(&mut self) -> bool {
+        if self.cursor >= self.buffer.len() {
+            return false;
+        }
+        self.cursor += 1;
+        true
+    }
+
+    fn history_prev(&mut self) -> bool {
+        if self.history_index == 0 {
+            return false;
+        }
+        if self.history_index == self.history.len() {
+            self.saved_current = Some(self.buffer.clone());
+        }
+        self.history_index -= 1;
+        if let Some(entry) = self.history.get(self.history_index) {
+            self.buffer = entry.chars().collect();
+            self.cursor = self.buffer.len();
+            return true;
+        }
+        false
+    }
+
+    fn history_next(&mut self) -> bool {
+        if self.history_index >= self.history.len() {
+            return false;
+        }
+        self.history_index += 1;
+        if self.history_index == self.history.len() {
+            self.buffer = self.saved_current.clone().unwrap_or_default();
+        } else if let Some(entry) = self.history.get(self.history_index) {
+            self.buffer = entry.chars().collect();
+        }
+        self.cursor = self.buffer.len();
+        true
+    }
+
+    fn into_string(self) -> String {
+        self.buffer.into_iter().collect()
+    }
+
+    fn reset_history_cursor(&mut self) {
+        self.history_index = self.history.len();
+        self.saved_current = None;
+    }
 }
 
 #[cfg(unix)]
@@ -585,78 +655,39 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    /// エスケープシーケンスで履歴とカーソルが移動することを検証する。
-    fn handle_escape_navigates_history_and_cursor() {
-        use super::{handle_escape, EscapeContext};
+    /// エスケープシーケンスがアクションへ変換され、履歴・カーソル操作ができることを検証する。
+    fn interpret_action_and_session_navigation() {
+        use super::{interpret_action, EditAction, EditorSession};
 
         let history = History {
             entries: vec!["first".into(), "second".into()],
             path: None,
             max_entries: 10,
         };
-        let mut history_index = history.len();
-        let mut saved_current = None;
-        let mut buffer: Vec<char> = "tmp".chars().collect();
-        let mut cursor = buffer.len();
+        let mut session = EditorSession::new(&history);
+        for ch in "tmp".chars() {
+            session.insert_char(ch);
+        }
 
-        // Up arrow: recall last history entry
+        // Up arrow
         let mut reader = Cursor::new(vec![b'[', b'A']);
-        let mut writer: Vec<u8> = Vec::new();
-        handle_escape(
-            &mut reader,
-            &mut writer,
-            "> ",
-            &mut buffer,
-            &mut cursor,
-            EscapeContext {
-                history: &history,
-                history_index: &mut history_index,
-                saved_current: &mut saved_current,
-            },
-        )
-        .unwrap();
-        assert_eq!(buffer.iter().collect::<String>(), "second");
-        assert_eq!(cursor, buffer.len());
-        assert!(saved_current.is_some());
+        let action = interpret_action(0x1b, &mut reader).unwrap();
+        assert_eq!(action, EditAction::HistoryPrev);
+        assert!(session.history_prev());
+        assert_eq!(session.buffer().iter().collect::<String>(), "second");
 
-        // Down arrow: restore saved current input
+        // Down arrow restores saved current input
         let mut reader = Cursor::new(vec![b'[', b'B']);
-        handle_escape(
-            &mut reader,
-            &mut writer,
-            "> ",
-            &mut buffer,
-            &mut cursor,
-            EscapeContext {
-                history: &history,
-                history_index: &mut history_index,
-                saved_current: &mut saved_current,
-            },
-        )
-        .unwrap();
-        assert_eq!(buffer.iter().collect::<String>(), "tmp");
-        assert_eq!(cursor, buffer.len());
+        let action = interpret_action(0x1b, &mut reader).unwrap();
+        assert_eq!(action, EditAction::HistoryNext);
+        assert!(session.history_next());
+        assert_eq!(session.buffer().iter().collect::<String>(), "tmp");
 
-        // Left arrow: move cursor left when possible
-        buffer = "hi".chars().collect();
-        cursor = buffer.len();
+        // Left arrow moves cursor left
         let mut reader = Cursor::new(vec![b'[', b'D']);
-        handle_escape(
-            &mut reader,
-            &mut writer,
-            "> ",
-            &mut buffer,
-            &mut cursor,
-            EscapeContext {
-                history: &history,
-                history_index: &mut history_index,
-                saved_current: &mut saved_current,
-            },
-        )
-        .unwrap();
-        assert_eq!(cursor, buffer.len() - 1);
-        assert!(String::from_utf8(writer.clone())
-            .unwrap()
-            .contains("\x1b[D"));
+        let action = interpret_action(0x1b, &mut reader).unwrap();
+        assert_eq!(action, EditAction::MoveLeft);
+        assert!(session.move_left());
+        assert_eq!(session.cursor(), session.buffer().len() - 1);
     }
 }

@@ -1,54 +1,49 @@
 // パス: src/typesys.rs
-// 役割: Type representations, substitutions, and constraint utilities
-// 意図: Back inference, defaulting, and pretty-printing of types
+// 役割: 型表現・置換・制約操作など型システムの基盤を提供する
+// 意図: 型推論・デフォルト化・整形表示を支える共通ユーティリティを集約する
 // 関連ファイル: src/infer.rs, src/ast.rs, tests/typesys_additional.rs
-//! 型システム（typesys）
+//! 型システム基盤モジュール
 //!
-//! 目的:
-//! - 型表現（`Type`）と制約（`Constraint`）の操作、置換（`Subst`）、
-//!   一般化/インスタンス化、単一化（`unify`）といった基礎機能を提供する。
-//!
-//! 表示/ユーティリティ:
-//! - `pretty_qual` は制約の正規化と必要部分のみの表示を行い、実用的な型文字列を返す。
-//! - 既定化（表示用のみ）`apply_defaulting_simple` を提供。
+//! - `Type` や `Constraint` など、型推論で扱うコアデータ構造を定義する。
+//! - 置換操作・自由型変数計算・単一化といった基本演算を提供する。
+//! - 型の整形表示や単純なデフォルト化もこのモジュールで完結する。
 
 use std::collections::{HashMap, HashSet};
-// 不要な import を削除して警告抑制
 
+/// 型変数を一意に識別する ID コンテナ。
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-/// 型変数を一意に識別するための構造体。
 pub struct TVar {
     pub id: i64,
 }
 
+/// 型コンストラクタ名を保持するレコード。
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-/// 型コンストラクタの名前を表す構造体。
 pub struct TCon {
     pub name: String,
 }
 
+/// 型適用 `func arg` を記述するノード。
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-/// 型適用を表現する構造体。
 pub struct TApp {
     pub func: Box<Type>,
     pub arg: Box<Type>,
 }
 
+/// 関数型の引数・戻り値ペアを保持するノード。
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-/// 関数型の引数と戻り値を保持する構造体。
 pub struct TFun {
     pub arg: Box<Type>,
     pub ret: Box<Type>,
 }
 
+/// タプル型を構成する要素群を表すノード。
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-/// タプル型を構成する要素列を保持する構造体。
 pub struct TTuple {
     pub items: Vec<Type>,
 }
 
+/// 型システムで扱う各種型バリアント。
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-/// 型システムで利用する型バリアント。
 pub enum Type {
     TVar(TVar),
     TCon(TCon),
@@ -57,14 +52,15 @@ pub enum Type {
     TTuple(TTuple),
 }
 
-/// リスト型を構築する。
+/// `[]` コンストラクタを用いてリスト型を構築するヘルパー関数。
 pub fn t_list(elem: Type) -> Type {
     Type::TApp(TApp {
         func: Box::new(Type::TCon(TCon { name: "[]".into() })),
         arg: Box::new(elem),
     })
 }
-/// `String` を内部表現で生成する。
+
+/// `String` 型（`[Char]`）を構築するヘルパー関数。
 pub fn t_string() -> Type {
     t_list(Type::TCon(TCon {
         name: "Char".into(),
@@ -72,30 +68,29 @@ pub fn t_string() -> Type {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-/// 型クラスと対象型の組を表す制約。
+/// 型クラス名と対象型を関連付ける制約。
 pub struct Constraint {
     pub classname: String,
     pub r#type: Type,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-/// 制約付きの型（Qualified Type）。
+/// 制約と型本体を組み合わせた Qualified Type。
 pub struct QualType {
     pub constraints: Vec<Constraint>,
     pub r#type: Type,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-/// 全称型変数を含む型スキーム。
+/// 全称型変数を束縛する型スキーム。
 pub struct Scheme {
     pub vars: Vec<TVar>,
     pub qual: QualType,
 }
 
-// 置換
 pub type Subst = HashMap<i64, Type>;
 
-/// 型に含まれる自由型変数集合を求める。
+/// 与えられた型に現れる自由型変数 ID の集合を計算する。
 pub fn ftv(t: &Type) -> HashSet<i64> {
     match t {
         Type::TVar(TVar { id }) => HashSet::from([*id]),
@@ -120,7 +115,7 @@ pub fn ftv(t: &Type) -> HashSet<i64> {
     }
 }
 
-/// 型に置換を適用する。
+/// 単一の型へ置換マップを適用する。
 pub fn apply_subst_t(s: &Subst, t: &Type) -> Type {
     match t {
         Type::TVar(TVar { id }) => s.get(id).cloned().unwrap_or_else(|| t.clone()),
@@ -139,21 +134,21 @@ pub fn apply_subst_t(s: &Subst, t: &Type) -> Type {
     }
 }
 
-/// 制約に置換を適用する。
+/// 制約に置換を適用し、対象型を更新する。
 pub fn apply_subst_c(s: &Subst, c: &Constraint) -> Constraint {
     Constraint {
         classname: c.classname.clone(),
         r#type: apply_subst_t(s, &c.r#type),
     }
 }
-/// 制約付き型に置換を適用する。
+/// Qualified Type 全体に置換を適用する。
 pub fn apply_subst_q(s: &Subst, q: &QualType) -> QualType {
     QualType {
         constraints: q.constraints.iter().map(|c| apply_subst_c(s, c)).collect(),
         r#type: apply_subst_t(s, &q.r#type),
     }
 }
-/// スキームへ置換を適用する（束縛変数は除外）。
+/// 型スキームへ置換を適用する（束縛変数は除外する）。
 pub fn apply_subst_s(s: &Subst, sc: &Scheme) -> Scheme {
     let bound: HashSet<i64> = sc.vars.iter().map(|tv| tv.id).collect();
     let s2: Subst = s
@@ -169,7 +164,7 @@ pub fn apply_subst_s(s: &Subst, sc: &Scheme) -> Scheme {
 
 /// 2つの置換を合成する。
 pub fn compose(a: &Subst, b: &Subst) -> Subst {
-    // a ∘ b（先に b を適用してから a）
+    // a ∘ b（先に b を適用し、その結果に a を重ねる）
     let mut out: Subst = b.iter().map(|(k, v)| (*k, apply_subst_t(a, v))).collect();
     for (k, v) in a {
         out.insert(*k, v.clone());
@@ -182,7 +177,7 @@ pub fn compose(a: &Subst, b: &Subst) -> Subst {
 pub struct TypeEnv {
     pub env: HashMap<String, Scheme>,
 }
-/// TypeEnvに対する基本操作。
+/// `TypeEnv` を操作するための基本メソッド群。
 impl TypeEnv {
     /// 空の環境を生成する。
     pub fn new() -> Self {
@@ -206,15 +201,15 @@ impl TypeEnv {
     }
 }
 
-/// TypeEnvの既定実装。
+/// `TypeEnv` の `Default` 実装。
 impl Default for TypeEnv {
-    /// 既定で空の環境を返す。
+    /// 空の環境で初期化する。
     fn default() -> Self {
         Self::new()
     }
 }
 
-/// 型環境から自由型変数集合を抽出する。
+/// 型環境全体で自由な型変数 ID を収集する。
 fn env_ftv(env: &TypeEnv) -> HashSet<i64> {
     let mut s = HashSet::new();
     for sch in env.env.values() {
@@ -227,7 +222,7 @@ fn env_ftv(env: &TypeEnv) -> HashSet<i64> {
     s
 }
 
-/// 約束された制約と型本体を組み合わせる。
+/// 指定した制約と型本体から `QualType` を構築する。
 pub fn qualify(t: Type, constraints: Vec<Constraint>) -> QualType {
     QualType {
         constraints,
@@ -235,14 +230,14 @@ pub fn qualify(t: Type, constraints: Vec<Constraint>) -> QualType {
     }
 }
 
+/// 未使用の型変数 ID を順番に払い出す供給器。
 #[derive(Clone, Debug)]
-/// 新しい型変数番号を供給する構造体。
 pub struct TVarSupply {
     next: i64,
 }
-/// TVarSupplyの操作メソッド。
+/// `TVarSupply` の操作メソッド。
 impl TVarSupply {
-    /// カウンタを初期化する。
+    /// カウンタを 0 に初期化する。
     pub fn new() -> Self {
         Self { next: 0 }
     }
@@ -254,7 +249,7 @@ impl TVarSupply {
     }
 }
 
-/// TVarSupplyの既定実装。
+/// `TVarSupply` の `Default` 実装。
 impl Default for TVarSupply {
     /// `new` と同等に初期化する。
     fn default() -> Self {
@@ -285,7 +280,7 @@ pub fn instantiate(sc: &Scheme, supply: &mut TVarSupply) -> QualType {
 #[derive(Debug, Clone)]
 /// 単一化が失敗したときの情報。
 pub struct UnifyError {
-    pub code: &'static str, // TYPE001/TYPE002/TYPE090 など
+    pub code: &'static str, // 例: TYPE001/TYPE002/TYPE090
     pub message: String,
 }
 impl UnifyError {
@@ -356,8 +351,6 @@ pub fn bind(tv: TVar, t: Type) -> Result<Subst, UnifyError> {
     Ok(s)
 }
 
-// 型クラス環境（最小）
-
 #[derive(Clone, Debug, Default)]
 /// 型クラス階層とインスタンス集合を保持する。
 pub struct ClassEnv {
@@ -391,7 +384,6 @@ impl ClassEnv {
                     if self.has_instance(&c.classname, name) {
                         return true;
                     }
-                    // リスト型: [] a の Eq/Ord は要素の制約に委譲
                     if name == "[]" && (c.classname == "Eq" || c.classname == "Ord") {
                         return self.entails_one(&Constraint {
                             classname: c.classname.clone(),
@@ -402,7 +394,6 @@ impl ClassEnv {
                 false
             }
             Type::TTuple(tt) => {
-                // Eq/Ord は要素ごとの entail で判断
                 if c.classname == "Eq" || c.classname == "Ord" {
                     tt.items.iter().all(|t| {
                         self.entails_one(&Constraint {
@@ -418,8 +409,7 @@ impl ClassEnv {
         }
     }
 
-    // apply_defaulting_ambiguous は 0.1.0 時点で削除（未熟段階のため後方互換なし）。
-    /// インスタンス定義を再帰的に探索する。
+    /// インスタンス定義および上位クラスを再帰的に探索し、該当するものが存在するか調べる。
     fn has_instance(&self, cls: &str, tycon: &str) -> bool {
         if self
             .instances
@@ -435,8 +425,7 @@ impl ClassEnv {
     }
 }
 
-// 文字列表現（型変数の a,b,c… 割当を行う）
-/// 型をドキュメント向けに整形する補助関数。
+/// 型をドキュメント向けに整形する補助関数（型変数に a, b, c… を割り当てる）。
 fn pp_type(t: &Type, names: &mut HashMap<i64, String>) -> String {
     match t {
         Type::TVar(TVar { id }) => {
@@ -444,7 +433,6 @@ fn pp_type(t: &Type, names: &mut HashMap<i64, String>) -> String {
                 let ch = (b'a' + (names.len() as u8)) as char;
                 names.insert(*id, ch.to_string());
             }
-            // ここまでで `names` に必ず挿入済みのはず（直前で insert 済み）
             names
                 .get(id)
                 .cloned()
@@ -452,7 +440,6 @@ fn pp_type(t: &Type, names: &mut HashMap<i64, String>) -> String {
         }
         Type::TCon(TCon { name }) => name.clone(),
         Type::TApp(TApp { func, arg }) => {
-            // リスト
             if let Type::TCon(TCon { name }) = &**func {
                 if name == "[]" {
                     return format!("[{}]", pp_type(arg, names));
@@ -558,7 +545,6 @@ fn constraints_relevant_to_type(cs: &[Constraint], t: &Type) -> Vec<Constraint> 
 /// ```
 pub fn pretty_qual(q: &QualType) -> String {
     let mut names: HashMap<i64, String> = HashMap::new();
-    // 正規化 → 型変数を含むものに限定 → 戻り値型に関係するものに限定
     let cs = normalize_constraints(&q.constraints);
     let cs = constraints_with_typevars(&cs);
     let cs = constraints_relevant_to_type(&cs, &q.r#type);
@@ -568,8 +554,6 @@ pub fn pretty_qual(q: &QualType) -> String {
     s
 }
 
-// 簡易 defaulting: 曖昧で、戻り型に現れない数値型変数について
-// Fractional a => a を Double に、Num a => a を Integer に置換。
 /// 曖昧な数値型変数を簡易に既定化（`Fractional -> Double`, `Num -> Integer`）。
 /// 表示用のため、推論アルゴリズム自体の健全性には影響しません。
 ///
@@ -583,9 +567,9 @@ pub fn pretty_qual(q: &QualType) -> String {
 /// assert!(matches!(d.r#type, Type::TCon(TCon{ ref name }) if name == "Integer"));
 /// ```
 pub fn apply_defaulting_simple(q: &QualType) -> QualType {
-    // 簡易方針: トップレベル既定化として、戻り型に現れていても既定化を試みる
+    // 戻り値型を含め、曖昧さ解消のため積極的に既定化を試みる
     let mut sub: Subst = Subst::new();
-    // まず Fractional を優先して Double に既定化
+    // まず Fractional 制約を優先して Double に写像する
     for c in &q.constraints {
         if c.classname == "Fractional" {
             if let Type::TVar(TVar { id }) = &c.r#type {
@@ -598,7 +582,7 @@ pub fn apply_defaulting_simple(q: &QualType) -> QualType {
             }
         }
     }
-    // 次に残りの Num を Integer に既定化（未設定に限る）
+    // 続いて、未設定の Num 制約を Integer に写像する
     for c in &q.constraints {
         if c.classname == "Num" {
             if let Type::TVar(TVar { id }) = &c.r#type {

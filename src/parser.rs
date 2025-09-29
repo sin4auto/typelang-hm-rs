@@ -1,15 +1,12 @@
 // パス: src/parser.rs
-// 役割: Recursive-descent parser that converts tokens into AST nodes
-// 意図: Bridge lexical tokens to structures used by inference and evaluation
+// 役割: トークン列から AST を生成する再帰下降パーサを実装する
+// 意図: 字句解析結果を型推論・評価に直接渡せる構造へ変換する
 // 関連ファイル: src/lexer.rs, src/ast.rs, src/errors.rs
-//! 構文解析（parser）
+//! 構文解析モジュール
 //!
-//! 目的:
-//! - EBNFに基づきプログラム/式/型式を再帰下降で解析し、`ast` を生成する。
-//!
-//! 特記:
-//! - 演算子は結合規則と優先順位を手続き的に実装（cmp > add > mul > pow > app）。
-//! - 一部の糖衣（単項マイナス）は `0 - x` に変換し、意味の一貫性を保つ。
+//! - EBNF で定義された文法に従ってプログラム・式・型注釈を解析する。
+//! - 演算子の結合規則・優先順位は `cmp > add > mul > pow > app` の順でハンドコードする。
+//! - 単項マイナスなどの糖衣は `0 - x` など正規化した AST へ変換する。
 
 use crate::ast::{
     Constraint as AConstraint, Expr, IntBase, Program, SigmaType, TopLevel, TypeExpr,
@@ -17,15 +14,15 @@ use crate::ast::{
 use crate::errors::ParseError;
 use crate::lexer::{lex, Token, TokenKind};
 
-/// 再帰下降構文解析を行うための状態。
+/// 再帰下降パーサの進行状態を保持する構造体。
 pub struct Parser {
     ts: Vec<Token>,
     i: usize,
 }
 
-/// Parserの操作メソッド群。
+/// `Parser` が提供する各種解析メソッド。
 impl Parser {
-    /// トークン列からパーサを初期化する。
+    /// トークン列から新しいパーサインスタンスを構築する。
     pub fn new(tokens: Vec<Token>) -> Self {
         Self { ts: tokens, i: 0 }
     }
@@ -39,7 +36,7 @@ impl Parser {
         self.i += 1;
         t
     }
-    /// 期待する種別のトークンを消費する。
+    /// 指定した種別のトークンを期待しつつ消費する。
     fn pop(&mut self, kind: TokenKind) -> Result<Token, ParseError> {
         let t = self.peek().clone();
         if t.kind != kind {
@@ -54,7 +51,7 @@ impl Parser {
         self.i += 1;
         Ok(t)
     }
-    /// 指定したトークンがあれば受理して返す。
+    /// 指定した種別が先頭にあれば消費し、なければ `None` を返す。
     fn accept(&mut self, kind: TokenKind) -> Option<Token> {
         if self.peek().kind == kind {
             let t = self.pop_any();
@@ -64,10 +61,7 @@ impl Parser {
         }
     }
 
-    /// トップレベル定義の列を解析する。
-    /// program := { toplevel }
-    ///
-    /// 与えられたトークン列からプログラム全体を解析します。
+    /// プログラム全体（`program := { toplevel }`）を解析する。
     ///
     /// # Examples
     /// ```
@@ -113,16 +107,13 @@ impl Parser {
         Ok(Program { decls })
     }
 
-    /// 文末のセミコロンを任意で受理する。
+    /// 文末のセミコロンがあれば消費する（省略可）。
     fn _expect_semicolon_optional(&mut self) -> Result<(), ParseError> {
         self.accept(TokenKind::SEMI);
         Ok(())
     }
 
-    /// 型注釈を含む式を解析する。
-    /// expr := (lambda | let_in | if | infix_cmp) ['::' type]
-    ///
-    /// 単一の式を解析します（必要に応じて型注釈も受け付け）。
+    /// 型注釈を含む単一式（`expr := core_expr ['::' type]`）を解析する。
     ///
     /// # Examples
     /// ```
@@ -143,7 +134,7 @@ impl Parser {
         }
     }
 
-    /// 型注釈を除いた式を解析する。
+    /// 型注釈を除いた式（ラムダ/let-in/if/二項式）を解析する。
     fn parse_expr_no_annot(&mut self) -> Result<Expr, ParseError> {
         match self.peek().kind.clone() {
             TokenKind::LAMBDA => self.parse_lambda(),
@@ -153,7 +144,7 @@ impl Parser {
         }
     }
 
-    /// ラムダ式を解析する。
+    /// ラムダ式（`\ params -> expr`）を解析する。
     fn parse_lambda(&mut self) -> Result<Expr, ParseError> {
         self.pop(TokenKind::LAMBDA)?;
         let mut params: Vec<String> = Vec::new();
@@ -168,7 +159,7 @@ impl Parser {
         })
     }
 
-    /// let-in式を解析する。
+    /// `let ... in ...` 式を解析し、束縛を収集する。
     fn parse_let_in(&mut self) -> Result<Expr, ParseError> {
         self.pop(TokenKind::LET)?;
         let mut bindings: Vec<(String, Vec<String>, Expr)> = Vec::new();
@@ -193,7 +184,7 @@ impl Parser {
         })
     }
 
-    /// if式を解析する。
+    /// `if ... then ... else ...` 式を解析する。
     fn parse_if(&mut self) -> Result<Expr, ParseError> {
         self.pop(TokenKind::IF)?;
         let cond = self.parse_expr()?;
@@ -208,7 +199,7 @@ impl Parser {
         })
     }
 
-    /// 比較演算子を含む式を解析する。
+    /// 比較演算子レベル（非結合）の式を解析する。
     fn parse_infix_cmp(&mut self) -> Result<Expr, ParseError> {
         let left = self.parse_infix_add()?;
         match self.peek().kind {
@@ -230,7 +221,7 @@ impl Parser {
         }
     }
 
-    /// 加算・減算レベルの式を解析する。
+    /// 加算・減算レベル（左結合）の式を解析する。
     fn parse_infix_add(&mut self) -> Result<Expr, ParseError> {
         let mut left = self.parse_infix_mul()?;
         while let TokenKind::PLUS | TokenKind::MINUS = self.peek().kind {
@@ -245,7 +236,7 @@ impl Parser {
         Ok(left)
     }
 
-    /// 乗除レベルの式を解析する。
+    /// 乗除レベル（左結合）の式を解析する。
     fn parse_infix_mul(&mut self) -> Result<Expr, ParseError> {
         let mut left = self.parse_infix_pow()?;
         while let TokenKind::STAR | TokenKind::SLASH = self.peek().kind {
@@ -260,9 +251,9 @@ impl Parser {
         Ok(left)
     }
 
-    /// 累乗演算を右結合で解析する。
+    /// 累乗演算（右結合）を解析する。
     fn parse_infix_pow(&mut self) -> Result<Expr, ParseError> {
-        // 右結合: app ('^' | '**') infix_pow | app
+        // 文法: app ('^' | '**') infix_pow | app
         let left = self.parse_app()?;
         match self.peek().kind {
             TokenKind::CARET | TokenKind::DBLSTAR => {
@@ -278,7 +269,7 @@ impl Parser {
         }
     }
 
-    /// 関数適用を左結合で解析する。
+    /// 関数適用（左結合）を解析する。
     fn parse_app(&mut self) -> Result<Expr, ParseError> {
         let mut left = self.parse_atom()?;
         while let TokenKind::INT
@@ -305,7 +296,7 @@ impl Parser {
         Ok(left)
     }
 
-    /// 原子的な式を解析する。
+    /// リテラル・識別子・括弧を含む原子式を解析する。
     fn parse_atom(&mut self) -> Result<Expr, ParseError> {
         let t = self.peek().clone();
         match t.kind {
@@ -429,7 +420,7 @@ impl Parser {
     }
 
     // ===== 型式 =====
-    /// シグマ型（制約付き型式）を解析する。
+    /// 制約付きシグマ型（`context => type`）を解析する。
     pub fn parse_sigma_type(&mut self) -> Result<SigmaType, ParseError> {
         // 先読み context '=>'
         let mut constraints: Vec<AConstraint> = Vec::new();
@@ -449,7 +440,7 @@ impl Parser {
         })
     }
 
-    /// 制約コンテキストの有無を判定して解析する。
+    /// 制約コンテキストを先読みし、存在すれば解析して返す。
     fn try_parse_context(&mut self) -> Result<Option<Vec<AConstraint>>, ParseError> {
         match self.peek().kind {
             TokenKind::CONID => {
@@ -482,7 +473,7 @@ impl Parser {
         }
     }
 
-    /// 単一の型クラス制約を解析する。
+    /// `Class var` 形式の型クラス制約を解析する。
     fn parse_constraint(&mut self) -> Result<AConstraint, ParseError> {
         let cls = self.pop(TokenKind::CONID)?.value;
         let tv = self.pop(TokenKind::VARID)?.value;
@@ -492,7 +483,7 @@ impl Parser {
         })
     }
 
-    /// 関数型を含む型式を解析する。
+    /// 関数矢印を含む型式を解析する。
     pub fn parse_type(&mut self) -> Result<TypeExpr, ParseError> {
         let left = self.parse_type_app()?;
         if self.accept(TokenKind::ARROW).is_some() {
@@ -503,7 +494,7 @@ impl Parser {
         }
     }
 
-    /// 型適用を左結合で解析する。
+    /// 型適用（左結合）を解析する。
     fn parse_type_app(&mut self) -> Result<TypeExpr, ParseError> {
         let mut left = self.parse_type_atom()?;
         while let TokenKind::CONID | TokenKind::VARID | TokenKind::LPAREN | TokenKind::LBRACK =
@@ -515,7 +506,7 @@ impl Parser {
         Ok(left)
     }
 
-    /// 型式の原子要素を解析する。
+    /// 型式の原子要素（変数・コンストラクタ・タプル・リスト）を解析する。
     fn parse_type_atom(&mut self) -> Result<TypeExpr, ParseError> {
         let t = self.peek().clone();
         match t.kind {
@@ -560,7 +551,7 @@ impl Parser {
 }
 
 // ===== ユーティリティ =====
-/// 文字列リテラルをアンエスケープする。
+/// ソース上の文字列リテラルをアンエスケープし、内容だけを返す。
 fn decode_string(quoted: &str) -> Result<String, ParseError> {
     // quoted には "..." を含む
     if !quoted.starts_with('"') || !quoted.ends_with('"') {
@@ -571,7 +562,7 @@ fn decode_string(quoted: &str) -> Result<String, ParseError> {
     let mut chars = s.chars();
     while let Some(ch) = chars.next() {
         if ch == '\\' {
-            // エスケープ
+            // エスケープシーケンスを復号する
             let Some(e) = chars.next() else {
                 return Err(ParseError::new("PAR202", "末尾のバックスラッシュ", None));
             };
@@ -591,7 +582,7 @@ fn decode_string(quoted: &str) -> Result<String, ParseError> {
     Ok(out)
 }
 
-/// 文字リテラルをアンエスケープする。
+/// ソース上の文字リテラルをアンエスケープして単一文字を返す。
 fn decode_char(quoted: &str) -> Result<char, ParseError> {
     if !quoted.starts_with('\'') || !quoted.ends_with('\'') {
         return Err(ParseError::new("PAR204", "文字リテラルが不正", None));
@@ -617,12 +608,12 @@ fn decode_char(quoted: &str) -> Result<char, ParseError> {
 }
 
 // エントリヘルパ
-/// ソースコード全体を解析してプログラムを得る。
+/// ソース文字列を完全に解析し、`Program` を返す高水準 API。
 pub fn parse_program(src: &str) -> Result<Program, ParseError> {
     let ts = lex(src).map_err(|e| ParseError::new("PAR100", format!("lex error: {}", e), None))?;
     Parser::new(ts).parse_program()
 }
-/// 単一の式を解析する。
+/// ソース文字列から単一の式を解析する高水準 API。
 pub fn parse_expr(src: &str) -> Result<Expr, ParseError> {
     let ts = lex(src).map_err(|e| ParseError::new("PAR100", format!("lex error: {}", e), None))?;
     let mut p = Parser::new(ts);

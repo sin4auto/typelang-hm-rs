@@ -1,26 +1,30 @@
 // パス: src/errors.rs
-// 役割: Shared error types and message formatting helpers
-// 意図: Keep diagnostics uniform for lexer, parser, and runtime layers
+// 役割: 共通エラー型とメッセージ整形ロジックを集約する
+// 意図: 字句・構文・型・評価を横断して一貫した診断を提供する
 // 関連ファイル: src/lexer.rs, src/parser.rs, src/evaluator.rs
-//! エラー型の定義（共通フォーマット: \[CODE\] メッセージ @line:col / @pos）。
+//! エラー表現モジュール
+//!
+//! - 共有フォーマットの `ErrorInfo` を中心にメタデータを保持する。
+//! - 各レイヤー向けの軽量な新種エラー型を薄いラッパーとして公開する。
+//! - 位置情報とスニペットつきメッセージの整形を一箇所で実装する。
 
 use std::error::Error as StdError;
 use std::fmt::{self, Display, Formatter};
 
 #[derive(Debug, Clone)]
-/// エラーコードと位置情報を保持する構造体。
+/// エラーコード・本文・位置メタデータを保持する基礎構造体。
 pub struct ErrorInfo {
     pub code: &'static str,
     pub msg: String,
-    pub pos: Option<usize>,      // バイトオフセット（任意）
-    pub line: Option<usize>,     // 1-origin（任意）
-    pub col: Option<usize>,      // 1-origin（任意）
-    pub snippet: Option<String>, // エラー行のスニペット（任意）
+    pub pos: Option<usize>,      // 原文バイトオフセット
+    pub line: Option<usize>,     // 1 始まりの行番号
+    pub col: Option<usize>,      // 1 始まりの列番号
+    pub snippet: Option<String>, // 問題行の抜粋文字列
 }
 
-/// ErrorInfoに対する補助メソッド群。
+/// `ErrorInfo` 生成を簡潔にするためのファクトリ群。
 impl ErrorInfo {
-    /// コードとメッセージからエラー情報を生成する。
+    /// コードと本文だけでエラー情報を初期化する。
     pub fn new(code: &'static str, msg: impl Into<String>, pos: Option<usize>) -> Self {
         Self {
             code,
@@ -31,7 +35,7 @@ impl ErrorInfo {
             snippet: None,
         }
     }
-    /// 行・列などの位置情報を含めてエラー情報を構築する。
+    /// 行・列などの位置情報を付与してエラー情報を構築する。
     pub fn at(
         code: &'static str,
         msg: impl Into<String>,
@@ -48,18 +52,18 @@ impl ErrorInfo {
             snippet: None,
         }
     }
-    /// エラー発生行のスニペットを付与して返す。
+    /// エラー周辺の抜粋を追加してチェーン可能にする。
     pub fn with_snippet(mut self, snippet: impl Into<String>) -> Self {
         self.snippet = Some(snippet.into());
         self
     }
 }
 
-/// ErrorInfoを`Display`として整形する実装。
+/// `ErrorInfo` の整形ルールを `Display` 経由で提供する。
 impl Display for ErrorInfo {
-    /// 整形済みのエラーメッセージを書式化する。
+    /// `[CODE] message @line=..` の形式で文字列化する。
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        // 1行目: ヘッダ
+        // 1 行目: 位置情報の有無で出力を切り替える
         match (self.line, self.col, self.pos) {
             (Some(l), Some(c), Some(p)) => write!(
                 f,
@@ -72,7 +76,7 @@ impl Display for ErrorInfo {
             (_, _, Some(p)) => write!(f, "[{}] {} @pos={}", self.code, self.msg, p)?,
             _ => write!(f, "[{}] {}", self.code, self.msg)?,
         }
-        // 2行目以降: スニペット
+        // 2 行目以降: caret 付きスニペットを描画する
         if let (Some(s), Some(c)) = (&self.snippet, self.col) {
             let caret = if c > 1 {
                 " ".repeat(c - 1) + "^"
@@ -86,15 +90,15 @@ impl Display for ErrorInfo {
 }
 
 #[derive(Debug, Clone)]
-/// 字句解析時のエラーを表すラッパー。
+/// 字句解析で報告されるエラー型。
 pub struct LexerError(pub ErrorInfo);
-/// LexerErrorの生成ヘルパー。
+/// `LexerError` を生成するためのラッパー関数群。
 impl LexerError {
-    /// コードと位置を指定して字句解析エラーを生成する。
+    /// コードと位置を指定して字句解析エラーを作成する。
     pub fn new(code: &'static str, msg: impl Into<String>, pos: Option<usize>) -> Self {
         Self(ErrorInfo::new(code, msg, pos))
     }
-    /// 行・列を含めた字句解析エラーを生成する。
+    /// 行・列を含めた字句解析エラーを作成する。
     pub fn at(
         code: &'static str,
         msg: impl Into<String>,
@@ -104,7 +108,7 @@ impl LexerError {
     ) -> Self {
         Self(ErrorInfo::at(code, msg, pos, line, col))
     }
-    /// スニペット付きの字句解析エラーを生成する。
+    /// スニペット付きの字句解析エラーを作成する。
     pub fn at_with_snippet(
         code: &'static str,
         msg: impl Into<String>,
@@ -118,15 +122,15 @@ impl LexerError {
 }
 
 #[derive(Debug, Clone)]
-/// 構文解析時のエラーを表すラッパー。
+/// 構文解析で用いるエラー型。
 pub struct ParseError(pub ErrorInfo);
-/// ParseErrorの生成ヘルパー。
+/// `ParseError` を構築するヘルパーメソッド集。
 impl ParseError {
-    /// コードとメッセージだけで構文解析エラーを生成する。
+    /// コードと本文だけで構文解析エラーを作成する。
     pub fn new(code: &'static str, msg: impl Into<String>, pos: Option<usize>) -> Self {
         Self(ErrorInfo::new(code, msg, pos))
     }
-    /// 位置情報付きの構文解析エラーを生成する。
+    /// 位置情報付きの構文解析エラーを作成する。
     pub fn at(
         code: &'static str,
         msg: impl Into<String>,
@@ -139,15 +143,15 @@ impl ParseError {
 }
 
 #[derive(Debug, Clone)]
-/// 型推論・型検査のエラーを表すラッパー。
+/// 型推論や型検査で利用するエラー型。
 pub struct TypeError(pub ErrorInfo);
-/// TypeErrorの生成ヘルパー。
+/// `TypeError` 向けの生成ショートカット。
 impl TypeError {
-    /// コードのみを指定して型エラーを生成する。
+    /// コードのみを指定して型エラーを作成する。
     pub fn new(code: &'static str, msg: impl Into<String>, pos: Option<usize>) -> Self {
         Self(ErrorInfo::new(code, msg, pos))
     }
-    /// 位置情報付きの型エラーを生成する。
+    /// 位置情報付きの型エラーを作成する。
     pub fn at(
         code: &'static str,
         msg: impl Into<String>,
@@ -157,7 +161,7 @@ impl TypeError {
     ) -> Self {
         Self(ErrorInfo::at(code, msg, pos, line, col))
     }
-    /// スニペットを添えて型エラーを生成する。
+    /// スニペットを添えて型エラーを作成する。
     pub fn at_with_snippet(
         code: &'static str,
         msg: impl Into<String>,
@@ -171,15 +175,15 @@ impl TypeError {
 }
 
 #[derive(Debug, Clone)]
-/// 評価器で生じたエラーを表すラッパー。
+/// 評価器で発生するエラー型。
 pub struct EvalError(pub ErrorInfo);
-/// EvalErrorの生成ヘルパー。
+/// `EvalError` を作成するヘルパメソッド。
 impl EvalError {
-    /// 評価時の汎用エラーを生成する。
+    /// 評価時の汎用エラーを作成する。
     pub fn new(code: &'static str, msg: impl Into<String>, pos: Option<usize>) -> Self {
         Self(ErrorInfo::new(code, msg, pos))
     }
-    /// 位置情報付きの評価エラーを生成する。
+    /// 位置情報付きの評価エラーを作成する。
     pub fn at(
         code: &'static str,
         msg: impl Into<String>,
@@ -191,36 +195,36 @@ impl EvalError {
     }
 }
 
-/// LexerErrorを`Display`として委譲する実装。
+/// `Display` 実装を `ErrorInfo` へ委譲する。
 impl Display for LexerError {
-    /// 内部のエラー情報をそのまま整形する。
+    /// 内部の `ErrorInfo` をそのまま整形する。
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         Display::fmt(&self.0, f)
     }
 }
 impl StdError for LexerError {}
 
-/// ParseErrorを`Display`として委譲する実装。
+/// `ParseError` の表示実装を `ErrorInfo` に委譲する。
 impl Display for ParseError {
-    /// 内部のエラー情報をそのまま整形する。
+    /// `ErrorInfo` をそのまま書式化する。
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         Display::fmt(&self.0, f)
     }
 }
 impl StdError for ParseError {}
 
-/// TypeErrorを`Display`として委譲する実装。
+/// `TypeError` の表示実装を `ErrorInfo` に委譲する。
 impl Display for TypeError {
-    /// 内部のエラー情報をそのまま整形する。
+    /// `ErrorInfo` をそのまま書式化する。
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         Display::fmt(&self.0, f)
     }
 }
 impl StdError for TypeError {}
 
-/// EvalErrorを`Display`として委譲する実装。
+/// `EvalError` の表示実装を `ErrorInfo` に委譲する。
 impl Display for EvalError {
-    /// 内部のエラー情報をそのまま整形する。
+    /// `ErrorInfo` をそのまま書式化する。
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         Display::fmt(&self.0, f)
     }

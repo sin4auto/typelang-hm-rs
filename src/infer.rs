@@ -1,40 +1,36 @@
 // パス: src/infer.rs
-// 役割: Hindley–Milner inference engine with lightweight class constraints
-// 意図: Deduce principal types for expressions and REPL operations
+// 役割: Hindley–Milner 型推論とクラス制約管理を実装する
+// 意図: 式の主型を算出し REPL へフィードバックできるようにする
 // 関連ファイル: src/typesys.rs, src/ast.rs, src/evaluator.rs
-//! 型推論（infer）
+//! 型推論モジュール
 //!
-//! 目的:
-//! - Algorithm W をベースに、最小限の型クラス制約を加えた推論を提供する。
-//!
-//! 概要:
-//! - `initial_env` に基本演算子のスキームを定義。
-//! - 制約は `typesys::Constraint` を蓄積し、表示時に必要最小に整形する。
-//! - `(^)` の負指数は Float へフォールバックする特例を設け、直感的な挙動を維持。
+//! - Algorithm W を基盤にしつつ、最小限の型クラス制約を扱う。
+//! - 初期環境には演算子や `show` などのスキームを登録し、推論時に再利用する。
+//! - `(^)` など特殊挙動を持つ演算子には直感的な型選択（Double へのフォールバック）を提供する。
 
 use crate::ast as A;
 use crate::errors::TypeError;
 use crate::typesys::*;
 
 #[derive(Clone, Debug)]
-/// 型推論で使う型変数サプライと置換を保持する状態。
+/// 型変数供給源と置換テーブルを束ねる推論ステート。
 pub struct InferState {
     pub supply: TVarSupply,
     pub subst: Subst,
 }
 
-// UnifyError はコード付きのため、そのまま TypeError へ移送
+// `typesys::UnifyError` は既にコードを持つため TypeError へそのまま転送する
 
-/// 標準の型クラス階層を初期化する。
+/// 標準的な型クラス階層を生成する。
 pub fn initial_class_env() -> ClassEnv {
     let mut ce = ClassEnv::default();
-    // クラス階層
+    // クラス階層を宣言
     ce.add_class("Eq", std::iter::empty::<&str>());
     ce.add_class("Ord", ["Eq"]);
     ce.add_class("Show", std::iter::empty::<&str>());
     ce.add_class("Num", std::iter::empty::<&str>());
     ce.add_class("Fractional", ["Num"]);
-    // インスタンス
+    // 代表的なインスタンスを登録
     for ty in ["Int", "Integer", "Double", "Char", "Bool"] {
         ce.add_instance("Eq", ty);
         ce.add_instance("Ord", ty);
@@ -51,12 +47,12 @@ pub fn initial_class_env() -> ClassEnv {
     ce
 }
 
-/// 初期の型環境を構築する。
+/// 演算子などの既定スキームを備えた型環境を生成する。
 pub fn initial_env() -> TypeEnv {
     let mut env = TypeEnv::new();
     let mut s = TVarSupply::new();
     // (+), (-), (*) :: Num a => a -> a -> a
-    /// 二項演算子用の型スキームを生成する。
+    /// 数値クラス制約を持つ二項演算子スキームを構築する。
     fn binop_scheme(cls: &str, s: &mut TVarSupply) -> Scheme {
         let a = Type::TVar(s.fresh());
         let ty = Type::TFun(TFun {
@@ -82,7 +78,7 @@ pub fn initial_env() -> TypeEnv {
             qual: q,
         }
     }
-    /// Fractional制約を持つ演算子の型スキームを生成する。
+    /// `Fractional` 制約を課す演算子スキームを構築する。
     fn frlop_scheme(s: &mut TVarSupply) -> Scheme {
         let a = Type::TVar(s.fresh());
         let ty = Type::TFun(TFun {
@@ -108,7 +104,7 @@ pub fn initial_env() -> TypeEnv {
             qual: q,
         }
     }
-    /// 整数累乗演算の型スキームを生成する。
+    /// 整数指数を扱う `(^)` 用のスキームを構築する。
     fn intpow_scheme(s: &mut TVarSupply) -> Scheme {
         // (^) :: Num a => a -> Int -> a
         let a = Type::TVar(s.fresh());
@@ -143,7 +139,7 @@ pub fn initial_env() -> TypeEnv {
     env.extend("^", intpow_scheme(&mut s));
     env.extend("**", frlop_scheme(&mut s));
     // 比較演算: Eq/Ord a => a -> a -> Bool
-    /// 比較演算子用の型スキームを生成する。
+    /// `Eq`/`Ord` 制約を持つ比較演算子スキームを構築する。
     fn pred_scheme(cls: &str, s: &mut TVarSupply) -> Scheme {
         let a = Type::TVar(s.fresh());
         let ty = Type::TFun(TFun {
@@ -203,291 +199,357 @@ pub fn initial_env() -> TypeEnv {
     env
 }
 
-/// 式の主型と制約を推論する。
+/// 式の主型と制約集合を返すトップレベルの推論関数。
 pub fn infer_expr(
     env: &TypeEnv,
-    _ce: &ClassEnv,
+    ce: &ClassEnv,
     st: &mut InferState,
     e: &A::Expr,
 ) -> Result<(Subst, QualType), TypeError> {
-    match e {
-        A::Expr::Var { name } => {
-            if name == "_" || name.starts_with('?') {
-                let a = Type::TVar(st.supply.fresh());
-                Ok((st.subst.clone(), qualify(a, vec![])))
-            } else if let Some(sch) = env.lookup(name) {
-                let q = instantiate(sch, &mut st.supply);
-                Ok((st.subst.clone(), apply_subst_q(&st.subst, &q)))
-            } else {
-                Err(TypeError::new(
-                    "TYPE010",
-                    format!("未束縛変数: {name}"),
-                    None,
-                ))
-            }
+    let mut ctx = InferCtx { _ce: ce, state: st };
+    ctx.infer(env, e)
+}
+
+struct InferCtx<'a> {
+    _ce: &'a ClassEnv,
+    state: &'a mut InferState,
+}
+
+impl<'a> InferCtx<'a> {
+    fn infer(&mut self, env: &TypeEnv, expr: &A::Expr) -> Result<(Subst, QualType), TypeError> {
+        match expr {
+            A::Expr::Var { name } => self.infer_var(env, name),
+            A::Expr::IntLit { .. } => self.infer_constrained_literal("Num"),
+            A::Expr::FloatLit { .. } => self.infer_constrained_literal("Fractional"),
+            A::Expr::CharLit { .. } => self.infer_concrete_type(Type::TCon(TCon {
+                name: "Char".into(),
+            })),
+            A::Expr::StringLit { .. } => self.infer_concrete_type(t_string()),
+            A::Expr::BoolLit { .. } => self.infer_concrete_type(Type::TCon(TCon {
+                name: "Bool".into(),
+            })),
+            A::Expr::ListLit { items } => self.infer_list(env, items),
+            A::Expr::TupleLit { items } => self.infer_tuple(env, items),
+            A::Expr::Lambda { params, body } => self.infer_lambda(env, params, body),
+            A::Expr::LetIn { bindings, body } => self.infer_let(env, bindings, body),
+            A::Expr::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => self.infer_if(env, cond, then_branch, else_branch),
+            A::Expr::App { func, arg } => self.infer_app(env, func, arg),
+            A::Expr::BinOp { op, left, right } => self.infer_binop(env, op, left, right),
+            A::Expr::Annot { expr, type_expr } => self.infer_annot(env, expr, type_expr),
         }
-        A::Expr::IntLit { .. } => {
-            let a = Type::TVar(st.supply.fresh());
-            Ok((
-                st.subst.clone(),
-                qualify(
-                    a.clone(),
-                    vec![Constraint {
-                        classname: "Num".into(),
-                        r#type: a,
-                    }],
-                ),
-            ))
+    }
+
+    fn infer_var(&mut self, env: &TypeEnv, name: &str) -> Result<(Subst, QualType), TypeError> {
+        if name == "_" || name.starts_with('?') {
+            let a = Type::TVar(self.state.supply.fresh());
+            return Ok((self.state.subst.clone(), qualify(a, vec![])));
         }
-        A::Expr::FloatLit { .. } => {
-            let a = Type::TVar(st.supply.fresh());
-            Ok((
-                st.subst.clone(),
-                qualify(
-                    a.clone(),
-                    vec![Constraint {
-                        classname: "Fractional".into(),
-                        r#type: a,
-                    }],
-                ),
-            ))
+
+        if let Some(sch) = env.lookup(name) {
+            let q = instantiate(sch, &mut self.state.supply);
+            return Ok((
+                self.state.subst.clone(),
+                apply_subst_q(&self.state.subst, &q),
+            ));
         }
-        A::Expr::CharLit { .. } => Ok((
-            st.subst.clone(),
+
+        Err(TypeError::new(
+            "TYPE010",
+            format!("未束縛変数: {name}"),
+            None,
+        ))
+    }
+
+    fn infer_constrained_literal(
+        &mut self,
+        classname: &str,
+    ) -> Result<(Subst, QualType), TypeError> {
+        let a = Type::TVar(self.state.supply.fresh());
+        Ok((
+            self.state.subst.clone(),
             qualify(
-                Type::TCon(TCon {
-                    name: "Char".into(),
-                }),
-                vec![],
+                a.clone(),
+                vec![Constraint {
+                    classname: classname.into(),
+                    r#type: a,
+                }],
             ),
-        )),
-        A::Expr::StringLit { .. } => Ok((st.subst.clone(), qualify(t_string(), vec![]))),
-        A::Expr::BoolLit { .. } => Ok((
-            st.subst.clone(),
-            qualify(
-                Type::TCon(TCon {
-                    name: "Bool".into(),
-                }),
-                vec![],
-            ),
-        )),
-        A::Expr::ListLit { items } => {
-            let a = Type::TVar(st.supply.fresh());
-            let mut s = st.subst.clone();
-            for it in items {
-                st.subst = s.clone();
-                let (s_new, q) = infer_expr(env, _ce, st, it)?;
-                s = s_new;
-                let s2 = unify(apply_subst_t(&s, &a), apply_subst_t(&s, &q.r#type))
-                    .map_err(|e| TypeError::new(e.code, e.message, None))?;
-                s = compose(&s2, &s);
-            }
-            Ok((s.clone(), qualify(t_list(apply_subst_t(&s, &a)), vec![])))
+        ))
+    }
+
+    fn infer_concrete_type(&self, ty: Type) -> Result<(Subst, QualType), TypeError> {
+        Ok((self.state.subst.clone(), qualify(ty, vec![])))
+    }
+
+    fn infer_list(
+        &mut self,
+        env: &TypeEnv,
+        items: &[A::Expr],
+    ) -> Result<(Subst, QualType), TypeError> {
+        let elem = Type::TVar(self.state.supply.fresh());
+        let mut s_acc = self.state.subst.clone();
+        for item in items {
+            self.state.subst = s_acc.clone();
+            let (s_new, q) = self.infer(env, item)?;
+            s_acc = s_new;
+            let s2 = unify(
+                apply_subst_t(&s_acc, &elem),
+                apply_subst_t(&s_acc, &q.r#type),
+            )
+            .map_err(|e| TypeError::new(e.code, e.message, None))?;
+            s_acc = compose(&s2, &s_acc);
         }
-        A::Expr::TupleLit { items } => {
-            let mut s = st.subst.clone();
-            let mut tys: Vec<Type> = Vec::new();
-            for it in items {
-                st.subst = s.clone();
-                let (s_new, q) = infer_expr(env, _ce, st, it)?;
-                s = s_new;
-                tys.push(apply_subst_t(&s, &q.r#type));
-            }
-            Ok((
-                s.clone(),
-                qualify(Type::TTuple(TTuple { items: tys }), vec![]),
-            ))
+        let ty = t_list(apply_subst_t(&s_acc, &elem));
+        Ok((s_acc.clone(), qualify(ty, vec![])))
+    }
+
+    fn infer_tuple(
+        &mut self,
+        env: &TypeEnv,
+        items: &[A::Expr],
+    ) -> Result<(Subst, QualType), TypeError> {
+        let mut s_acc = self.state.subst.clone();
+        let mut tys = Vec::with_capacity(items.len());
+        for item in items {
+            self.state.subst = s_acc.clone();
+            let (s_new, q) = self.infer(env, item)?;
+            s_acc = s_new;
+            tys.push(apply_subst_t(&s_acc, &q.r#type));
         }
-        A::Expr::Lambda { params, body } => {
-            let mut s = st.subst.clone();
-            let mut arg_tys: Vec<Type> = Vec::new();
-            let mut env2 = env.clone_env();
-            for _ in params {
-                let tv = Type::TVar(st.supply.fresh());
-                env2.extend(
-                    format!("$p{}", arg_tys.len()),
+        Ok((
+            s_acc.clone(),
+            qualify(Type::TTuple(TTuple { items: tys }), vec![]),
+        ))
+    }
+
+    fn infer_lambda(
+        &mut self,
+        env: &TypeEnv,
+        params: &[String],
+        body: &A::Expr,
+    ) -> Result<(Subst, QualType), TypeError> {
+        let mut s_acc = self.state.subst.clone();
+        let mut arg_tys: Vec<Type> = Vec::with_capacity(params.len());
+        let mut env2 = env.clone_env();
+
+        for _ in params {
+            let tv = Type::TVar(self.state.supply.fresh());
+            env2.extend(
+                format!("$p{}", arg_tys.len()),
+                Scheme {
+                    vars: vec![],
+                    qual: qualify(tv.clone(), vec![]),
+                },
+            );
+            arg_tys.push(tv);
+        }
+
+        for (idx, name) in params.iter().enumerate() {
+            if let Type::TVar(tv) = &arg_tys[idx] {
+                env2.env.insert(
+                    name.clone(),
                     Scheme {
                         vars: vec![],
-                        qual: qualify(tv.clone(), vec![]),
+                        qual: qualify(Type::TVar(tv.clone()), vec![]),
                     },
                 );
-                arg_tys.push(tv);
             }
-            // env2 に本来はパラメータ名で束縛する
-            for (idx, name) in params.iter().enumerate() {
-                if let Type::TVar(tv) = &arg_tys[idx] {
-                    env2.env.insert(
-                        name.clone(),
-                        Scheme {
-                            vars: vec![],
-                            qual: qualify(Type::TVar(tv.clone()), vec![]),
-                        },
-                    );
+        }
+
+        self.state.subst = s_acc.clone();
+        let (s_body, q_body) = self.infer(&env2, body)?;
+        s_acc = s_body;
+        let mut ty = q_body.r#type.clone();
+        for arg in arg_tys.iter().rev() {
+            ty = Type::TFun(TFun {
+                arg: Box::new(apply_subst_t(&s_acc, arg)),
+                ret: Box::new(ty),
+            });
+        }
+        Ok((
+            s_acc.clone(),
+            qualify(apply_subst_t(&s_acc, &ty), q_body.constraints.clone()),
+        ))
+    }
+
+    fn infer_let(
+        &mut self,
+        env: &TypeEnv,
+        bindings: &[(String, Vec<String>, A::Expr)],
+        body: &A::Expr,
+    ) -> Result<(Subst, QualType), TypeError> {
+        let mut s_acc = self.state.subst.clone();
+        let mut env2 = env.clone_env();
+        for (name, params, rhs) in bindings {
+            let rhs_expr = if params.is_empty() {
+                rhs.clone()
+            } else {
+                A::Expr::Lambda {
+                    params: params.clone(),
+                    body: Box::new(rhs.clone()),
                 }
-            }
-            st.subst = s.clone();
-            let (s2, q_body) = infer_expr(&env2, _ce, st, body)?;
-            s = s2;
-            let mut t = q_body.r#type.clone();
-            for t_arg in arg_tys.iter().rev() {
-                t = Type::TFun(TFun {
-                    arg: Box::new(apply_subst_t(&s, t_arg)),
-                    ret: Box::new(t),
-                });
-            }
-            Ok((
-                s.clone(),
-                qualify(apply_subst_t(&s, &t), q_body.constraints.clone()),
-            ))
-        }
-        A::Expr::LetIn { bindings, body } => {
-            let mut s = st.subst.clone();
-            let mut env2 = env.clone_env();
-            for (name, params, rhs) in bindings {
-                let rhs_expr = if params.is_empty() {
-                    rhs.clone()
-                } else {
-                    A::Expr::Lambda {
-                        params: params.clone(),
-                        body: Box::new(rhs.clone()),
-                    }
-                };
-                st.subst = s.clone();
-                let (s_new, q_rhs) = infer_expr(&env2, _ce, st, &rhs_expr)?;
-                s = s_new;
-                let sch = generalize(&env2, apply_subst_q(&s, &q_rhs));
-                env2.extend(name.clone(), sch);
-            }
-            st.subst = s.clone();
-            let (s_body, q_body) = infer_expr(&env2, _ce, st, body)?;
-            s = s_body;
-            Ok((s.clone(), apply_subst_q(&s, &q_body)))
-        }
-        A::Expr::If {
-            cond,
-            then_branch,
-            else_branch,
-        } => {
-            let (s1, q_c) = infer_expr(env, _ce, st, cond)?;
-            let s = s1; // cond
-            let s2 = unify(
-                apply_subst_t(&s, &q_c.r#type),
-                Type::TCon(TCon {
-                    name: "Bool".into(),
-                }),
-            )
-            .map_err(|e| TypeError::new(e.code, e.message, None))?;
-            let mut s = compose(&s2, &s);
-            st.subst = s.clone();
-            let (s_t, q_t) = infer_expr(env, _ce, st, then_branch)?;
-            s = s_t;
-            st.subst = s.clone();
-            let (s_e, q_e) = infer_expr(env, _ce, st, else_branch)?;
-            s = s_e;
-            let s3 = unify(
-                apply_subst_t(&s, &q_t.r#type),
-                apply_subst_t(&s, &q_e.r#type),
-            )
-            .map_err(|e| TypeError::new(e.code, e.message, None))?;
-            let s = compose(&s3, &s);
-            let mut cs = apply_subst_q(&s, &q_t).constraints;
-            cs.extend(apply_subst_q(&s, &q_e).constraints);
-            Ok((
-                s.clone(),
-                QualType {
-                    constraints: cs,
-                    r#type: apply_subst_t(&s, &q_t.r#type),
-                },
-            ))
-        }
-        A::Expr::App { func, arg } => {
-            let (s_f, q_f) = infer_expr(env, _ce, st, func)?;
-            let mut s = s_f;
-            st.subst = s.clone();
-            let (s_x, q_x) = infer_expr(env, _ce, st, arg)?;
-            s = s_x;
-            let a = Type::TVar(st.supply.fresh());
-            let s2 = unify(
-                apply_subst_t(&s, &q_f.r#type),
-                Type::TFun(TFun {
-                    arg: Box::new(apply_subst_t(&s, &q_x.r#type)),
-                    ret: Box::new(a.clone()),
-                }),
-            )
-            .map_err(|e| TypeError::new(e.code, e.message, None))?;
-            let s = compose(&s2, &s);
-            let mut cs = apply_subst_q(&s, &q_f).constraints;
-            cs.extend(apply_subst_q(&s, &q_x).constraints);
-            Ok((
-                s.clone(),
-                QualType {
-                    constraints: cs,
-                    r#type: apply_subst_t(&s, &a),
-                },
-            ))
-        }
-        A::Expr::BinOp { op, left, right } => {
-            // 負の指数の場合: '^' は Double にフォールバック
-            if op == "^" {
-                // 右辺が -n の糖衣（0 - n）かどうかを判定
-                let is_neg = matches!(
-                    &**right,
-                    A::Expr::BinOp { op: op2, left: l2, right: r2 }
-                        if op2 == "-"
-                        && matches!((&**l2, &**r2), (
-                            A::Expr::IntLit { value: 0, .. },
-                            A::Expr::IntLit { .. }
-                        ))
-                );
-                if is_neg {
-                    // 左辺の型を推論し、Fractional 制約を付与して戻り型 Double とする
-                    let (s_l, q_l) = infer_expr(env, _ce, st, left)?;
-                    let s = s_l;
-                    let tl = apply_subst_t(&s, &q_l.r#type);
-                    let mut cs = apply_subst_q(&s, &q_l).constraints;
-                    cs.push(Constraint {
-                        classname: "Fractional".into(),
-                        r#type: tl,
-                    });
-                    return Ok((
-                        s,
-                        QualType {
-                            constraints: cs,
-                            r#type: Type::TCon(TCon {
-                                name: "Double".into(),
-                            }),
-                        },
-                    ));
-                }
-            }
-            let f = A::Expr::App {
-                func: Box::new(A::Expr::App {
-                    func: Box::new(A::Expr::Var { name: op.clone() }),
-                    arg: left.clone(),
-                }),
-                arg: right.clone(),
             };
-            infer_expr(env, _ce, st, &f)
+            self.state.subst = s_acc.clone();
+            let (s_new, q_rhs) = self.infer(&env2, &rhs_expr)?;
+            s_acc = s_new;
+            let sch = generalize(&env2, apply_subst_q(&s_acc, &q_rhs));
+            env2.extend(name.clone(), sch);
         }
-        A::Expr::Annot { expr, type_expr } => {
-            let (s0, q) = infer_expr(env, _ce, st, expr)?;
-            let s = s0;
-            let ty_anno = type_from_texpr(type_expr);
-            let s2 = unify(apply_subst_t(&s, &q.r#type), ty_anno.clone())
-                .map_err(|e| TypeError::new(e.code, e.message, None))?;
-            let s = compose(&s2, &s);
-            Ok((
-                s.clone(),
+        self.state.subst = s_acc.clone();
+        let (s_body, q_body) = self.infer(&env2, body)?;
+        s_acc = s_body;
+        Ok((s_acc.clone(), apply_subst_q(&s_acc, &q_body)))
+    }
+
+    fn infer_if(
+        &mut self,
+        env: &TypeEnv,
+        cond: &A::Expr,
+        then_branch: &A::Expr,
+        else_branch: &A::Expr,
+    ) -> Result<(Subst, QualType), TypeError> {
+        let (s_cond, q_cond) = self.infer(env, cond)?;
+        let s_bool = unify(
+            apply_subst_t(&s_cond, &q_cond.r#type),
+            Type::TCon(TCon {
+                name: "Bool".into(),
+            }),
+        )
+        .map_err(|e| TypeError::new(e.code, e.message, None))?;
+        let mut s_acc = compose(&s_bool, &s_cond);
+
+        self.state.subst = s_acc.clone();
+        let (s_then, q_then) = self.infer(env, then_branch)?;
+        s_acc = s_then;
+
+        self.state.subst = s_acc.clone();
+        let (s_else, q_else) = self.infer(env, else_branch)?;
+        s_acc = s_else;
+
+        let s_merge = unify(
+            apply_subst_t(&s_acc, &q_then.r#type),
+            apply_subst_t(&s_acc, &q_else.r#type),
+        )
+        .map_err(|e| TypeError::new(e.code, e.message, None))?;
+        let s_acc = compose(&s_merge, &s_acc);
+
+        let mut cs = apply_subst_q(&s_acc, &q_then).constraints;
+        cs.extend(apply_subst_q(&s_acc, &q_else).constraints);
+        Ok((
+            s_acc.clone(),
+            QualType {
+                constraints: cs,
+                r#type: apply_subst_t(&s_acc, &q_then.r#type),
+            },
+        ))
+    }
+
+    fn infer_app(
+        &mut self,
+        env: &TypeEnv,
+        func: &A::Expr,
+        arg: &A::Expr,
+    ) -> Result<(Subst, QualType), TypeError> {
+        let (s_func, q_func) = self.infer(env, func)?;
+        let mut s_acc = s_func;
+        self.state.subst = s_acc.clone();
+        let (s_arg, q_arg) = self.infer(env, arg)?;
+        s_acc = s_arg;
+        let result_ty = Type::TVar(self.state.supply.fresh());
+        let s_fun = unify(
+            apply_subst_t(&s_acc, &q_func.r#type),
+            Type::TFun(TFun {
+                arg: Box::new(apply_subst_t(&s_acc, &q_arg.r#type)),
+                ret: Box::new(result_ty.clone()),
+            }),
+        )
+        .map_err(|e| TypeError::new(e.code, e.message, None))?;
+        let s_acc = compose(&s_fun, &s_acc);
+        let mut cs = apply_subst_q(&s_acc, &q_func).constraints;
+        cs.extend(apply_subst_q(&s_acc, &q_arg).constraints);
+        Ok((
+            s_acc.clone(),
+            QualType {
+                constraints: cs,
+                r#type: apply_subst_t(&s_acc, &result_ty),
+            },
+        ))
+    }
+
+    fn infer_binop(
+        &mut self,
+        env: &TypeEnv,
+        op: &str,
+        left: &A::Expr,
+        right: &A::Expr,
+    ) -> Result<(Subst, QualType), TypeError> {
+        if op == "^" && self.is_negative_exponent(right) {
+            let (s_left, q_left) = self.infer(env, left)?;
+            let tl = apply_subst_t(&s_left, &q_left.r#type);
+            let mut cs = apply_subst_q(&s_left, &q_left).constraints;
+            cs.push(Constraint {
+                classname: "Fractional".into(),
+                r#type: tl,
+            });
+            return Ok((
+                s_left,
                 QualType {
-                    constraints: apply_subst_q(&s, &q).constraints,
-                    r#type: apply_subst_t(&s, &ty_anno),
+                    constraints: cs,
+                    r#type: Type::TCon(TCon {
+                        name: "Double".into(),
+                    }),
                 },
-            ))
+            ));
         }
+
+        let applied = A::Expr::App {
+            func: Box::new(A::Expr::App {
+                func: Box::new(A::Expr::Var {
+                    name: op.to_string(),
+                }),
+                arg: Box::new(left.clone()),
+            }),
+            arg: Box::new(right.clone()),
+        };
+        self.infer(env, &applied)
+    }
+
+    fn infer_annot(
+        &mut self,
+        env: &TypeEnv,
+        expr: &A::Expr,
+        type_expr: &A::TypeExpr,
+    ) -> Result<(Subst, QualType), TypeError> {
+        let (s_base, q_base) = self.infer(env, expr)?;
+        let ty_anno = type_from_texpr(type_expr);
+        let s_eq = unify(apply_subst_t(&s_base, &q_base.r#type), ty_anno.clone())
+            .map_err(|e| TypeError::new(e.code, e.message, None))?;
+        let s_acc = compose(&s_eq, &s_base);
+        Ok((
+            s_acc.clone(),
+            QualType {
+                constraints: apply_subst_q(&s_acc, &q_base).constraints,
+                r#type: apply_subst_t(&s_acc, &ty_anno),
+            },
+        ))
+    }
+
+    fn is_negative_exponent(&mut self, right: &A::Expr) -> bool {
+        matches!(
+            right,
+            A::Expr::BinOp { op, left, right }
+                if op == "-"
+                    && matches!(**left, A::Expr::IntLit { value: 0, .. })
+                    && matches!(**right, A::Expr::IntLit { .. })
+        )
     }
 }
 
-/// 構文木上の型式を内部の型表現へ変換する。
+/// 構文木上の型式を内部の `Type` へ変換する。
 pub fn type_from_texpr(te: &A::TypeExpr) -> Type {
     match te {
         A::TypeExpr::TEVar(name) => {
@@ -521,7 +583,7 @@ pub fn type_from_texpr(te: &A::TypeExpr) -> Type {
     }
 }
 
-/// 型変数名から安定したハッシュ値を生成する。
+/// 型変数名を安定した整数 ID に写像する。
 fn hash_str(s: &str) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -529,7 +591,7 @@ fn hash_str(s: &str) -> u64 {
     h.finish()
 }
 
-/// 単一の式に対する推論結果を文字列で返す。
+/// 単一の式に対する推論結果を文字列表現で返す。
 pub fn infer_type_str(expr: &A::Expr) -> Result<String, TypeError> {
     let env = initial_env();
     let ce = initial_class_env();
@@ -541,7 +603,7 @@ pub fn infer_type_str(expr: &A::Expr) -> Result<String, TypeError> {
     Ok(pretty_qual(&q))
 }
 
-/// 既定化の有無を切替ながら推論結果を整形する。
+/// 既定化のオン/オフを切り替えて推論結果を整形する。
 pub fn infer_type_str_with_defaulting(
     expr: &A::Expr,
     defaulting_on: bool,
