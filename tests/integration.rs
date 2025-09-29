@@ -9,6 +9,7 @@ const BASICS_TL: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/examp
 const ADVANCED_TL: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/examples/advanced.tl"));
 
+/// テキストを解析して型環境・値環境へロードするヘルパ。
 fn load_program(src: &str) -> (TypeEnv, evaluator::Env, Vec<String>) {
     let prog = parser::parse_program(src).expect("parse program");
     let mut type_env = infer::initial_env();
@@ -21,6 +22,7 @@ fn load_program(src: &str) -> (TypeEnv, evaluator::Env, Vec<String>) {
 }
 
 #[test]
+/// サンプルプログラムが想定する名前をエクスポートするか検証する。
 fn load_examples_program_exports_expected_names() {
     let (_tenv, _venv, loaded) = load_program(BASICS_TL);
     assert!(loaded.contains(&"id".to_owned()));
@@ -28,6 +30,7 @@ fn load_examples_program_exports_expected_names() {
 }
 
 #[test]
+/// 基本例の型スナップショットが期待通りか検証する。
 fn examples_basics_types_snapshot() {
     let (type_env, _value_env, _) = load_program(BASICS_TL);
     let id = type_env.lookup("id").unwrap().qual.clone();
@@ -37,6 +40,7 @@ fn examples_basics_types_snapshot() {
 }
 
 #[test]
+/// 応用例の型スナップショットが期待通りか検証する。
 fn examples_advanced_types_snapshot() {
     let (type_env, _value_env, _) = load_program(ADVANCED_TL);
     let inv2 = type_env.lookup("inv2").unwrap().qual.clone();
@@ -46,6 +50,7 @@ fn examples_advanced_types_snapshot() {
 }
 
 #[test]
+/// ロードした環境での累乗計算が期待値になるか確認する。
 fn examples_eval_pow_through_loaded_env() {
     let (_type_env, mut value_env, _) = load_program(BASICS_TL);
     let expr = parser::parse_expr("2 ** -1").unwrap();
@@ -57,6 +62,7 @@ fn examples_eval_pow_through_loaded_env() {
 }
 
 #[test]
+/// 未束縛変数を含む定義がエラーになることを確認する。
 fn repl_load_program_unbound_name_returns_err() {
     let src = "let x = y"; // y が未定義
     let prog = parser::parse_program(src).unwrap();

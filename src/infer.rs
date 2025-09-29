@@ -17,6 +17,7 @@ use crate::errors::TypeError;
 use crate::typesys::*;
 
 #[derive(Clone, Debug)]
+/// 型推論で使う型変数サプライと置換を保持する状態。
 pub struct InferState {
     pub supply: TVarSupply,
     pub subst: Subst,
@@ -24,6 +25,7 @@ pub struct InferState {
 
 // UnifyError はコード付きのため、そのまま TypeError へ移送
 
+/// 標準の型クラス階層を初期化する。
 pub fn initial_class_env() -> ClassEnv {
     let mut ce = ClassEnv::default();
     // クラス階層
@@ -49,10 +51,12 @@ pub fn initial_class_env() -> ClassEnv {
     ce
 }
 
+/// 初期の型環境を構築する。
 pub fn initial_env() -> TypeEnv {
     let mut env = TypeEnv::new();
     let mut s = TVarSupply::new();
     // (+), (-), (*) :: Num a => a -> a -> a
+    /// 二項演算子用の型スキームを生成する。
     fn binop_scheme(cls: &str, s: &mut TVarSupply) -> Scheme {
         let a = Type::TVar(s.fresh());
         let ty = Type::TFun(TFun {
@@ -78,6 +82,7 @@ pub fn initial_env() -> TypeEnv {
             qual: q,
         }
     }
+    /// Fractional制約を持つ演算子の型スキームを生成する。
     fn frlop_scheme(s: &mut TVarSupply) -> Scheme {
         let a = Type::TVar(s.fresh());
         let ty = Type::TFun(TFun {
@@ -103,6 +108,7 @@ pub fn initial_env() -> TypeEnv {
             qual: q,
         }
     }
+    /// 整数累乗演算の型スキームを生成する。
     fn intpow_scheme(s: &mut TVarSupply) -> Scheme {
         // (^) :: Num a => a -> Int -> a
         let a = Type::TVar(s.fresh());
@@ -137,6 +143,7 @@ pub fn initial_env() -> TypeEnv {
     env.extend("^", intpow_scheme(&mut s));
     env.extend("**", frlop_scheme(&mut s));
     // 比較演算: Eq/Ord a => a -> a -> Bool
+    /// 比較演算子用の型スキームを生成する。
     fn pred_scheme(cls: &str, s: &mut TVarSupply) -> Scheme {
         let a = Type::TVar(s.fresh());
         let ty = Type::TFun(TFun {
@@ -196,6 +203,7 @@ pub fn initial_env() -> TypeEnv {
     env
 }
 
+/// 式の主型と制約を推論する。
 pub fn infer_expr(
     env: &TypeEnv,
     _ce: &ClassEnv,
@@ -479,6 +487,7 @@ pub fn infer_expr(
     }
 }
 
+/// 構文木上の型式を内部の型表現へ変換する。
 pub fn type_from_texpr(te: &A::TypeExpr) -> Type {
     match te {
         A::TypeExpr::TEVar(name) => {
@@ -512,6 +521,7 @@ pub fn type_from_texpr(te: &A::TypeExpr) -> Type {
     }
 }
 
+/// 型変数名から安定したハッシュ値を生成する。
 fn hash_str(s: &str) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -519,6 +529,7 @@ fn hash_str(s: &str) -> u64 {
     h.finish()
 }
 
+/// 単一の式に対する推論結果を文字列で返す。
 pub fn infer_type_str(expr: &A::Expr) -> Result<String, TypeError> {
     let env = initial_env();
     let ce = initial_class_env();
@@ -530,6 +541,7 @@ pub fn infer_type_str(expr: &A::Expr) -> Result<String, TypeError> {
     Ok(pretty_qual(&q))
 }
 
+/// 既定化の有無を切替ながら推論結果を整形する。
 pub fn infer_type_str_with_defaulting(
     expr: &A::Expr,
     defaulting_on: bool,

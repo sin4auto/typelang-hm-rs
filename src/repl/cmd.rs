@@ -18,6 +18,7 @@ use super::loader::load_program_into_env;
 use super::printer::{print_help, print_value};
 use super::util::normalize_expr;
 
+/// REPLのメインループを開始する。
 /// 対話環境を起動する。
 ///
 /// # Examples
@@ -116,6 +117,7 @@ pub fn run_repl() {
 }
 
 // 未閉括弧などの簡易判定（多行入力継続）
+/// 入力が継続行を必要とするか判定する。
 fn needs_more_input(src: &str) -> bool {
     // コマンドは多行にしない
     let s = src.trim_start();
@@ -166,6 +168,7 @@ fn needs_more_input(src: &str) -> bool {
 }
 
 #[derive(Clone)]
+/// REPL の型環境・値環境などを束ねる状態。
 pub(crate) struct ReplState {
     pub type_env: crate::typesys::TypeEnv,
     pub class_env: crate::typesys::ClassEnv,
@@ -174,6 +177,7 @@ pub(crate) struct ReplState {
     pub defaulting_on: bool,
 }
 
+/// REPL が発行するメッセージ種別。
 pub(crate) enum ReplMsg {
     Out(String),
     Err(String),
@@ -181,16 +185,20 @@ pub(crate) enum ReplMsg {
 }
 
 pub(crate) trait ReplIo {
+    /// パスで指定されたファイルを読み込む。
     fn read_to_string(&self, path: &str) -> Result<String, String>;
 }
 
+/// ファイルシステムからソースを読み込む実装。
 pub(crate) struct FsIo;
 impl ReplIo for FsIo {
+    /// ファイルシステムからソースを読み込む。
     fn read_to_string(&self, path: &str) -> Result<String, String> {
         std::fs::read_to_string(path).map_err(|e| format!("エラー: ファイルを開けません: {}", e))
     }
 }
 
+/// コマンドを解析してREPL状態を更新する。
 pub(crate) fn handle_command<I: ReplIo>(
     state: &mut ReplState,
     cmd: ReplCommand,
@@ -405,6 +413,7 @@ pub(crate) fn handle_command<I: ReplIo>(
 /// REPL 実装からの切り離し用ヘルパ。
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// REPL が解釈できるコマンド列挙体。
 pub(crate) enum ReplCommand {
     Help,
     Quit,
@@ -424,6 +433,7 @@ pub(crate) enum ReplCommand {
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
+/// 生入力をREPLコマンド列挙体へ変換する。
 pub(crate) fn parse_repl_command(input: &str) -> ReplCommand {
     let s = input.trim();
     if s.is_empty() {
@@ -484,6 +494,7 @@ pub(crate) fn parse_repl_command(input: &str) -> ReplCommand {
     ReplCommand::Eval(s.to_string())
 }
 
+/// `:let` コマンドの負荷を正規化された `let` 群へ直す。
 /// `:let` のペイロード（定義群）を `let` 付きの正規化済みソースへ変換する。
 pub(crate) fn normalize_let_payload(payload: &str) -> String {
     if payload.contains(';') {
@@ -518,6 +529,7 @@ pub(crate) fn normalize_let_payload(payload: &str) -> String {
     }
 }
 // :t 用の型表示（正規化 + defaulting + フォールバック評価）
+/// 現在の環境を使って型文字列を構築する。
 fn type_string_in_current_env(
     type_env: &crate::typesys::TypeEnv,
     class_env: &crate::typesys::ClassEnv,
@@ -556,6 +568,7 @@ fn type_string_in_current_env(
 }
 
 // REPL用: 現在の型/値環境で推論し、it 用の Scheme と Value を返す
+/// 式を評価・推論し `it` として束縛する。
 fn infer_and_generalize_for_repl(
     type_env: &crate::typesys::TypeEnv,
     class_env: &crate::typesys::ClassEnv,
@@ -605,6 +618,7 @@ mod tests {
     use crate::{evaluator, infer};
 
     #[test]
+    /// 括弧や角括弧の継続判定を検証する。
     fn needs_more_input_balancing_paren_bracket() {
         assert!(needs_more_input("(1 + 2"));
         assert!(!needs_more_input("(1 + 2)"));
@@ -613,6 +627,7 @@ mod tests {
     }
 
     #[test]
+    /// 文字列・文字リテラルでの継続判定を検証する。
     fn needs_more_input_strings_and_chars() {
         assert!(needs_more_input("\"abc"));
         assert!(!needs_more_input("\"abc\""));
@@ -624,6 +639,7 @@ mod tests {
     }
 
     #[test]
+    /// コマンド入力が単行扱いになることを検証する。
     fn needs_more_input_commands_do_not_continue() {
         // コマンドは先頭 ':' で常に単行扱い
         assert!(!needs_more_input(":t ("));
@@ -631,6 +647,7 @@ mod tests {
     }
 
     #[test]
+    /// `:let` 正規化の各パターンを検証する。
     fn normalize_let_payload_single_and_multi() {
         assert_eq!(normalize_let_payload("f x = x"), "let f x = x");
         assert_eq!(
@@ -641,6 +658,7 @@ mod tests {
     }
 
     #[test]
+    /// REPLコマンドの解析結果を網羅的に確認する。
     fn parse_repl_command_variants() {
         assert_eq!(parse_repl_command(":help"), ReplCommand::Help);
         assert_eq!(parse_repl_command(":q"), ReplCommand::Quit);
@@ -680,6 +698,7 @@ mod tests {
     }
 
     #[test]
+    /// 無効なコマンドが `Invalid` になることを検証する。
     fn parse_repl_command_invalid_variants() {
         match parse_repl_command(":set default maybe") {
             ReplCommand::Invalid(src) => assert_eq!(src, ":set default maybe"),
@@ -691,13 +710,16 @@ mod tests {
         }
     }
 
+    /// 読み込みを行わないテスト用I/O。
     struct NoopIo;
     impl ReplIo for NoopIo {
+        /// 常に失敗を返す。
         fn read_to_string(&self, _path: &str) -> Result<String, String> {
             Err("unexpected io".into())
         }
     }
 
+    /// テスト用の初期状態を構築する。
     fn mk_state() -> ReplState {
         ReplState {
             type_env: TypeEnv::new(),
@@ -709,6 +731,7 @@ mod tests {
     }
 
     #[test]
+    /// ブラウズ・default設定・unsetのコマンド挙動を検証する。
     fn handle_browse_and_set_default_and_unset() {
         let mut state = mk_state();
         // 2 つの定義を型環境に追加
@@ -757,8 +780,10 @@ mod tests {
         assert!(matches!(msgs[0], ReplMsg::Err(ref s) if s.contains("未定義")));
     }
 
+    /// パスごとに結果を保持するテスト用I/O。
     struct MapIo(std::collections::HashMap<String, Result<String, String>>);
     impl ReplIo for MapIo {
+        /// 事前に登録された結果を返す。
         fn read_to_string(&self, path: &str) -> Result<String, String> {
             self.0
                 .get(path)
@@ -768,6 +793,7 @@ mod tests {
     }
 
     #[test]
+    /// :load と :reload の成功ケースを検証する。
     fn handle_load_success_and_reload_paths() {
         let mut state = mk_state();
         let prog = "let x = 1;".to_string();
@@ -804,6 +830,7 @@ mod tests {
     }
 
     #[test]
+    /// 読み込み失敗および履歴なしの :reload を検証する。
     fn handle_load_error_and_reload_without_history() {
         let mut state = mk_state();
         // 読み込み失敗
@@ -819,6 +846,7 @@ mod tests {
     }
 
     #[test]
+    /// :t・式評価・:let の流れを検証する。
     fn handle_typeof_eval_and_let_flow() {
         let mut state = mk_state();
         let msgs = handle_command(&mut state, ReplCommand::TypeOf("1".into()), &NoopIo);

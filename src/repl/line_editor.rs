@@ -14,17 +14,21 @@ pub enum ReadResult {
     Interrupted,
 }
 
+/// 履歴管理付きの行入力処理を担う構造体。
 pub struct LineEditor {
     history: History,
 }
 
+/// LineEditor の操作メソッド。
 impl LineEditor {
+    /// 履歴を読み込んで新しいエディタを生成する。
     pub fn new() -> Self {
         Self {
             history: History::load(),
         }
     }
 
+    /// プロンプト付きで1行入力を読み取る。
     pub fn read_line(&mut self, prompt: &str) -> io::Result<ReadResult> {
         #[cfg(unix)]
         {
@@ -36,15 +40,18 @@ impl LineEditor {
         }
     }
 
+    /// 入力行を履歴へ追加する。
     pub fn add_history(&mut self, entry: &str) {
         self.history.add(entry);
     }
 
+    /// 履歴を永続化する。
     pub fn save_history(&self) -> io::Result<()> {
         self.history.save()
     }
 }
 
+/// 既定値として `new` を利用する。
 impl Default for LineEditor {
     fn default() -> Self {
         Self::new()
@@ -53,6 +60,7 @@ impl Default for LineEditor {
 
 #[cfg(not(unix))]
 impl LineEditor {
+    /// UNIX以外の環境向けに行入力を読む。
     fn read_line_fallback(&mut self, prompt: &str) -> io::Result<ReadResult> {
         let mut stdout = io::stdout();
         write!(stdout, "{}", prompt)?;
@@ -74,6 +82,7 @@ impl LineEditor {
 
 #[cfg(unix)]
 impl LineEditor {
+    /// UNIX環境で端末をRawモードにして読み取る。
     fn read_line_unix(&mut self, prompt: &str) -> io::Result<ReadResult> {
         let _raw = RawMode::new()?;
         let mut stdout = io::stdout();
@@ -151,6 +160,7 @@ impl LineEditor {
     }
 }
 
+/// UTF-8の先頭バイト列から文字を復元する。
 fn read_utf8_char<R: Read>(first: u8, reader: &mut R) -> io::Result<Option<char>> {
     let width = match first {
         0x00..=0x7f => 1,
@@ -171,6 +181,7 @@ fn read_utf8_char<R: Read>(first: u8, reader: &mut R) -> io::Result<Option<char>
 }
 
 #[cfg(unix)]
+/// エスケープシーケンス処理に必要な状態をまとめる。
 struct EscapeContext<'a> {
     history: &'a History,
     history_index: &'a mut usize,
@@ -178,6 +189,7 @@ struct EscapeContext<'a> {
 }
 
 #[cfg(unix)]
+/// 端末から届いたエスケープシーケンスを処理する。
 fn handle_escape<R: Read, W: Write>(
     reader: &mut R,
     writer: &mut W,
@@ -248,6 +260,7 @@ fn handle_escape<R: Read, W: Write>(
 }
 
 #[cfg(unix)]
+/// 1行分の表示を再描画する。
 fn refresh_line<W: Write>(
     writer: &mut W,
     prompt: &str,
@@ -265,6 +278,7 @@ fn refresh_line<W: Write>(
     writer.flush()
 }
 
+/// 入力履歴を保持・永続化する構造体。
 struct History {
     entries: Vec<String>,
     path: Option<PathBuf>,
@@ -272,6 +286,7 @@ struct History {
 }
 
 impl History {
+    /// 保存済みの履歴を読み込む。
     fn load() -> Self {
         let path = history_path();
         let entries = path
@@ -286,6 +301,7 @@ impl History {
         }
     }
 
+    /// 履歴に項目を追加する。
     fn add(&mut self, entry: &str) {
         let trimmed = entry.trim();
         if trimmed.is_empty() {
@@ -300,14 +316,17 @@ impl History {
         self.entries.push(trimmed.to_string());
     }
 
+    /// 登録済みの履歴数を返す。
     fn len(&self) -> usize {
         self.entries.len()
     }
 
+    /// 履歴の特定位置を参照する。
     fn get(&self, idx: usize) -> Option<&str> {
         self.entries.get(idx).map(|s| s.as_str())
     }
 
+    /// 履歴をファイルに保存する。
     fn save(&self) -> io::Result<()> {
         let Some(path) = &self.path else {
             return Ok(());
@@ -323,6 +342,7 @@ impl History {
     }
 }
 
+/// 履歴ファイルの探索および環境変数の優先順位を決める。
 fn history_path() -> Option<PathBuf> {
     if let Some(path) = env::var_os("TYPELANG_HISTORY_FILE") {
         return Some(PathBuf::from(path));
@@ -334,12 +354,14 @@ fn history_path() -> Option<PathBuf> {
 }
 
 #[cfg(unix)]
+/// 端末設定をRawモードへ切り替えるためのガード。
 struct RawMode {
     original: Termios,
 }
 
 #[cfg(unix)]
 impl RawMode {
+    /// 標準入力をRawモードへ切り替える。
     fn new() -> io::Result<Self> {
         let fd = 0; // stdin
         let mut termios = Termios::default();
@@ -360,6 +382,7 @@ impl RawMode {
 
 #[cfg(unix)]
 impl Drop for RawMode {
+    /// スコープ終了時に元の端末設定へ戻す。
     fn drop(&mut self) {
         let fd = 0;
         unsafe {
@@ -374,6 +397,7 @@ const TCSANOW: i32 = 0;
 #[cfg(unix)]
 #[repr(C)]
 #[derive(Clone, Copy)]
+/// 端末属性を保持するための構造体。
 struct Termios {
     c_iflag: u32,
     c_oflag: u32,
@@ -387,6 +411,7 @@ struct Termios {
 
 #[cfg(unix)]
 impl Default for Termios {
+    /// すべてのフィールドをゼロ初期化する。
     fn default() -> Self {
         Self {
             c_iflag: 0,
@@ -427,8 +452,11 @@ const NCCS: usize = 32;
 
 #[cfg(unix)]
 extern "C" {
+    /// POSIX の `tcgetattr` を呼び出す。
     fn tcgetattr(fd: i32, termios: *mut Termios) -> i32;
+    /// POSIX の `tcsetattr` を呼び出す。
     fn tcsetattr(fd: i32, optional_actions: i32, termios: *const Termios) -> i32;
+    /// POSIX の `cfmakeraw` を呼び出す。
     fn cfmakeraw(termios: *mut Termios);
 }
 
@@ -441,6 +469,7 @@ mod tests {
     use std::sync::{Mutex, OnceLock};
 
     #[test]
+    /// 重複した履歴が追加されないことを確認する。
     fn history_add_deduplicates() {
         let mut history = History {
             entries: Vec::new(),
@@ -454,6 +483,7 @@ mod tests {
     }
 
     #[test]
+    /// 空入力や末尾空白が除外されることを確認する。
     fn history_add_skips_empty_and_trims() {
         let mut history = History {
             entries: Vec::new(),
@@ -468,6 +498,7 @@ mod tests {
     }
 
     #[test]
+    /// 履歴サイズが上限を超えないことを確認する。
     fn history_respects_max_entries() {
         let mut history = History {
             entries: vec!["0".into(), "1".into(), "2".into()],
@@ -478,6 +509,7 @@ mod tests {
         assert_eq!(history.entries, vec!["1", "2", "3"]);
     }
 
+    /// テストで環境変数を直列化するヘルパ。
     fn with_env_lock<T>(f: impl FnOnce() -> T) -> T {
         static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
         let lock = GUARD.get_or_init(|| Mutex::new(()));
@@ -485,7 +517,9 @@ mod tests {
         f()
     }
 
+    #[cfg_attr(miri, ignore = "Miri isolation blocks directory creation APIs")]
     #[test]
+    /// 履歴の保存と再読込が正しく行われるか検証する。
     fn history_save_and_load_roundtrip() {
         with_env_lock(|| {
             let dir = env::temp_dir().join("typelang_history_tests");
@@ -517,6 +551,7 @@ mod tests {
     }
 
     #[test]
+    /// 履歴ファイルパスが環境変数を優先することを確認する。
     fn history_path_prefers_env_variable() {
         with_env_lock(|| {
             let dir = env::temp_dir();
@@ -529,6 +564,7 @@ mod tests {
     }
 
     #[test]
+    /// UTF-8の複数バイト文字を読めることを検証する。
     fn read_utf8_char_handles_multibyte() {
         let mut cursor = Cursor::new(vec![0x81, 0x82]);
         let ch = read_utf8_char(0xe3, &mut cursor).unwrap().unwrap();
@@ -537,6 +573,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    /// 行再描画時にカーソルが戻ることを確認する。
     fn refresh_line_repositions_cursor() {
         let mut buffer: Vec<u8> = Vec::new();
         super::refresh_line(&mut buffer, ":: ", &['a', 'b', 'c'], 1).unwrap();
@@ -548,6 +585,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    /// エスケープシーケンスで履歴とカーソルが移動することを検証する。
     fn handle_escape_navigates_history_and_cursor() {
         use super::{handle_escape, EscapeContext};
 

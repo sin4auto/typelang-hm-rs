@@ -6,6 +6,7 @@ use typelang::errors::ErrorInfo;
 use typelang::{infer, lexer, parser, typesys};
 
 #[test]
+/// エラー表示に行・列・位置・スニペットが含まれることを確認する。
 fn error_display_line_col_pos_and_snippet() {
     let msg = ErrorInfo::at("E001", "msg", Some(12), Some(3), Some(5))
         .with_snippet("abcdef")
@@ -14,24 +15,28 @@ fn error_display_line_col_pos_and_snippet() {
 }
 
 #[test]
+/// 行と列のみが表示されるケースを検証する。
 fn error_display_line_col_only() {
     let msg = ErrorInfo::at("E002", "msg", None, Some(2), Some(1)).to_string();
     assert_eq!(msg, "[E002] msg @line=2,col=1");
 }
 
 #[test]
+/// 位置情報のみ表示されるケースを検証する。
 fn error_display_pos_only() {
     let msg = ErrorInfo::new("E003", "msg", Some(7)).to_string();
     assert_eq!(msg, "[E003] msg @pos=7");
 }
 
 #[test]
+/// 追加情報なしの表示を検証する。
 fn error_display_plain() {
     let msg = ErrorInfo::new("E004", "plain", None).to_string();
     assert_eq!(msg, "[E004] plain");
 }
 
 #[test]
+/// ブロックコメント未閉鎖のエラーメッセージを検証する。
 fn lexer_error_unclosed_block_comment_message() {
     let err = lexer::lex("{- never closed").expect_err("block comment error");
     let s = err.to_string();
@@ -40,6 +45,7 @@ fn lexer_error_unclosed_block_comment_message() {
 }
 
 #[test]
+/// 文字列リテラル未閉鎖のエラーメッセージを検証する。
 fn lexer_error_unclosed_string_message() {
     let err = lexer::lex("\"abc").expect_err("unclosed string error");
     let s = err.to_string();
@@ -48,6 +54,7 @@ fn lexer_error_unclosed_string_message() {
 }
 
 #[test]
+/// 余分なトークンが指摘されることを検証する。
 fn parser_error_extra_tokens_message() {
     let err = parser::parse_expr("1; 2").expect_err("extra tokens");
     let s = err.to_string();
@@ -56,11 +63,13 @@ fn parser_error_extra_tokens_message() {
 }
 
 #[test]
+/// 括弧閉じ忘れがエラーになることを確認する。
 fn parse_error_unclosed_paren() {
     assert!(parser::parse_expr("(1 + 2").is_err());
 }
 
 #[test]
+/// if 条件が Bool でない場合に型エラーとなることを検証する。
 fn type_error_if_condition_not_bool() {
     let expr = parser::parse_expr("if 'a' then 2 else 3").unwrap();
     let env = infer::initial_env();

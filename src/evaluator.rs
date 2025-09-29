@@ -18,6 +18,7 @@ use crate::ast as A;
 use crate::errors::EvalError;
 
 #[derive(Clone, Debug)]
+/// 評価器が扱う値のバリアント集合。
 pub enum Value {
     Int(i64),
     Double(f64),
@@ -36,16 +37,20 @@ pub enum Value {
 }
 
 #[derive(Clone, Debug)]
+/// 2 引数プリミティブをカリー化して保持するラッパー。
 pub struct Prim2 {
     pub f: fn(Value, Value) -> Result<Value, EvalError>,
     pub a: Option<Box<Value>>,
 }
 
+/// 評価環境として使う名前と値のマップ。
 pub type Env = HashMap<String, Value>;
 
+/// REPL とテストで利用するプリミティブを登録した初期環境を構築する。
 pub fn initial_env() -> Env {
     let mut env: Env = HashMap::new();
     // show
+    /// 値を Python 風の文字列表現へ変換する。
     fn py_show(v: Value) -> Result<Value, EvalError> {
         Ok(Value::String(match v {
             Value::Int(i) => i.to_string(),
@@ -65,6 +70,7 @@ pub fn initial_env() -> Env {
     env.insert("show".into(), Value::Prim1(py_show));
 
     // 二項演算（カリー化）
+    /// 2 引数プリミティブを部分適用可能な値に包む。
     fn prim2(f: fn(Value, Value) -> Result<Value, EvalError>) -> Value {
         Value::Prim2(Prim2 { f, a: None })
     }
@@ -85,6 +91,7 @@ pub fn initial_env() -> Env {
         prim2(|a, b| Ok(Value::Double(to_double(&a)? / to_double(&b)?))),
     );
     // (^) と (**) の仕様
+    /// 整数指数を優先して扱うべきべき乗計算を実装する。
     fn powi(a: Value, b: Value) -> Result<Value, EvalError> {
         match (a, b) {
             (Value::Int(x), Value::Int(y)) if y >= 0 => {
@@ -99,12 +106,14 @@ pub fn initial_env() -> Env {
             (x, y) => Ok(Value::Double(to_double(&x)?.powf(to_double(&y)?))),
         }
     }
+    /// 常に浮動小数でべき乗を計算する。
     fn powf(a: Value, b: Value) -> Result<Value, EvalError> {
         Ok(Value::Double(to_double(&a)?.powf(to_double(&b)?)))
     }
     env.insert("^".into(), prim2(powi));
     env.insert("**".into(), prim2(powf));
     // 比較演算（Eq/Ord 相当）
+    /// 型ごとの等価性を比較し、再帰的にリスト/タプルを評価する。
     fn eqv(a: &Value, b: &Value) -> Result<bool, EvalError> {
         Ok(match (a, b) {
             (Value::Int(x), Value::Int(y)) => x == y,
@@ -148,6 +157,7 @@ pub fn initial_env() -> Env {
         })
     }
     use std::cmp::Ordering;
+    /// 辞書式で大小比較を行い、必要に応じて部分比較を再帰する。
     fn compare(a: &Value, b: &Value) -> Result<Ordering, EvalError> {
         match (a, b) {
             (Value::Int(x), Value::Int(y)) => Ok(x.cmp(y)),
@@ -221,6 +231,7 @@ pub fn initial_env() -> Env {
     env
 }
 
+/// Value を関数とみなし、引数を適用して評価する。
 fn apply(f: &Value, x: Value) -> Result<Value, EvalError> {
     match f {
         Value::Prim1(g) => g(x),
@@ -258,6 +269,7 @@ fn apply(f: &Value, x: Value) -> Result<Value, EvalError> {
     }
 }
 
+/// Value から整数値を抽出し、必要に応じて Double を丸める。
 fn to_int(v: &Value) -> Result<i64, EvalError> {
     match v {
         Value::Int(i) => Ok(*i),
@@ -265,6 +277,7 @@ fn to_int(v: &Value) -> Result<i64, EvalError> {
         _ => Err(EvalError::new("EVAL050", "Int 変換に失敗", None)),
     }
 }
+/// Value から浮動小数を抽出し、整数なら安全に変換する。
 fn to_double(v: &Value) -> Result<f64, EvalError> {
     match v {
         Value::Double(d) => Ok(*d),
@@ -273,6 +286,7 @@ fn to_double(v: &Value) -> Result<f64, EvalError> {
     }
 }
 
+/// 抽象構文木の式を評価し、値へ還元するメインルーチン。
 pub fn eval_expr(e: &A::Expr, env: &mut Env) -> Result<Value, EvalError> {
     use A::Expr::*;
     match e {

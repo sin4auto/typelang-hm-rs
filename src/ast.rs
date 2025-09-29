@@ -16,6 +16,7 @@ use std::fmt;
 
 // 式ノード
 #[derive(Clone, Debug, PartialEq)]
+/// 言語の式を表す抽象構文木。
 pub enum Expr {
     Var {
         name: String,
@@ -71,6 +72,7 @@ pub enum Expr {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// 整数リテラルの基数を識別する。
 pub enum IntBase {
     Dec,
     Hex,
@@ -80,6 +82,7 @@ pub enum IntBase {
 
 // 型式（パーサ用）
 #[derive(Clone, Debug, PartialEq, Eq)]
+/// パーサが扱う型式のバリアント。
 pub enum TypeExpr {
     TEVar(String),
     TECon(String),
@@ -91,12 +94,14 @@ pub enum TypeExpr {
 
 // 制約と多相型（シグマ）
 #[derive(Clone, Debug, PartialEq, Eq)]
+/// 型クラス制約を表現する構造体。
 pub struct Constraint {
     pub classname: String,
     pub typevar: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+/// 制約付き多相型（シグマ型）を表す構造体。
 pub struct SigmaType {
     pub constraints: Vec<Constraint>,
     pub r#type: TypeExpr,
@@ -104,6 +109,7 @@ pub struct SigmaType {
 
 // トップレベル定義とプログラム
 #[derive(Clone, Debug, PartialEq)]
+/// トップレベル関数定義を保持する構造体。
 pub struct TopLevel {
     pub name: String,
     pub params: Vec<String>,
@@ -112,11 +118,14 @@ pub struct TopLevel {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+/// 複数のトップレベル定義から成るプログラム。
 pub struct Program {
     pub decls: Vec<TopLevel>,
 }
 
+/// 抽象構文木を文字列化する。
 impl fmt::Display for Expr {
+    /// 人が読める形で式を整形する。
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Expr::Var { name } => write!(f, "{name}"),

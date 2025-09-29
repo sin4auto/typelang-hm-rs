@@ -15,6 +15,7 @@
 use crate::errors::LexerError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// 字句解析で得られたトークンを表す構造体。
 pub struct Token {
     pub kind: TokenKind,
     pub value: String,
@@ -24,6 +25,7 @@ pub struct Token {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// 字句解析が生成するトークン種別。
 pub enum TokenKind {
     EOF,
     // 記号/演算子
@@ -73,34 +75,43 @@ pub enum TokenKind {
     FALSE,
 }
 
+/// 空白文字かどうかを判定する。
 fn is_whitespace(c: char) -> bool {
     matches!(c, ' ' | '\t' | '\r' | '\n')
 }
+/// 10進数字かどうかを判定する。
 fn is_digit(c: char) -> bool {
     c.is_ascii_digit()
 }
+/// 16進数字かどうかを判定する。
 fn is_hexdigit(c: char) -> bool {
     c.is_ascii_hexdigit()
 }
+/// 8進数字かどうかを判定する。
 fn is_octdigit(c: char) -> bool {
     matches!(c, '0'..='7')
 }
+/// 2進数字かどうかを判定する。
 fn is_bindigit(c: char) -> bool {
     matches!(c, '0' | '1')
 }
+/// 先頭に使える識別子文字かどうかを判定する。
 fn is_letter(c: char) -> bool {
     c.is_ascii_alphabetic() || c == '_'
 }
+/// 識別子の後続文字として許可されるか判定する。
 fn is_ident_rest(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_' || c == '\''
 }
 
+/// ソースコードをトークン列に分割する。
 pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
     let mut toks: Vec<Token> = Vec::new();
     let mut i = 0usize;
     let bytes = src.as_bytes();
     let n = bytes.len();
     let next_char = |i: usize| -> Option<char> { src[i..].chars().next() };
+    /// 指定バイト位置に対応する行・桁を計算する。
     fn line_col_at(src: &str, pos: usize) -> (usize, usize) {
         let mut line = 1usize;
         let mut col = 1usize;
@@ -117,6 +128,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
         }
         (line, col)
     }
+    /// 指定した行の文字列を取得する。
     fn line_text_at(src: &str, line: usize) -> String {
         src.lines()
             .nth(line.saturating_sub(1))

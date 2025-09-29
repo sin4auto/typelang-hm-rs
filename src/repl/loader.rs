@@ -10,7 +10,6 @@ use crate::infer::{infer_expr, type_from_texpr, InferState};
 use crate::typesys::{generalize, unify, TVarSupply};
 
 use super::util::normalize_expr;
-
 /// REPL/テスト共用: プログラムを型/値環境にロードする。
 ///
 /// # 仕様

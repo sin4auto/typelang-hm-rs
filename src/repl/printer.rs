@@ -5,7 +5,6 @@
 //! REPL の表示系
 
 use crate::evaluator::Value;
-
 /// ヘルプメッセージを表示する。
 pub(crate) fn print_help() {
     println!("利用可能なコマンド:");
@@ -27,7 +26,6 @@ pub(crate) fn print_help() {
     println!("  > 1 + 2                 -- 3 を表示、直近結果は it で参照可");
     println!("  > it * 10               -- 30");
 }
-
 /// 値を REPL 用に表示する。
 pub(crate) fn print_value(v: &Value) {
     match v {
@@ -46,6 +44,7 @@ mod tests {
     use crate::evaluator::Value;
 
     #[test]
+    /// 値の表示分岐がパニックしないことを確認する。
     fn print_value_variants_execute() {
         // 期待出力の厳密比較は行わず、分岐実行のみでカバレッジを稼ぐ
         print_value(&Value::String("s".into()));
