@@ -1,6 +1,5 @@
 # directories
 target/
-.serena/
 
 # files
 **/*.rs.bk

@@ -6,7 +6,8 @@
 # TypeLang HM (Rust) Overview
 
 - TypeLang HM は Hindley–Milner 型推論をコアに据えた教育向け関数型言語処理系です。Rust 標準ライブラリのみで構築し、読みやすさと壊しにくさを重視しています。
-- Codexを利用したAIエージェントによる開発の参考になるかもしれません。プログラミング言語開発はE2Eテスト不要で`BNF≒仕様書`のため、仕様書駆動開発のテストケースとしても有用かと思います。
+- Codex を活用した AI エージェント利用開発のリファレンスとしても役立ちます。プログラミング言語開発は E2E テストに依存せず、`BNF≒仕様書` とした仕様駆動開発の一例として参考にしてください。
+- 独自のMakefileを作成しています。
 
 ## 特徴ハイライト
 - Algorithm W をベースにした HM 型推論と単一化エンジン
@@ -32,6 +33,7 @@ Loaded 5 def(s)
 `Ctrl+C` で現在の入力をキャンセル、`Ctrl+D` で REPL を終了できます。継続行は `.. ` プロンプトで示されます。
 
 ## ディレクトリガイド
+- **`EBNF.md` — 言語仕様の正準 EBNF**
 - `src/ast.rs` — 抽象構文木の定義と表示補助
 - `src/lexer.rs` / `src/parser.rs` — UTF-8 対応の字句/構文解析
 - `src/typesys.rs` / `src/infer.rs` — 型表現、制約解決、defaulting
@@ -39,7 +41,6 @@ Loaded 5 def(s)
 - `src/repl/` — コマンド、レンダラ、履歴管理
 - `examples/*.tl` — 段階別の教材スクリプト
 - `tests/` — lexer / parser / infer / evaluator / repl の回帰テスト群
-- `EBNF.md` — 言語仕様の正準 EBNF
 
 ## 学習ロードマップ
 1. `examples/step1_numbers.tl` で数値演算とリテラルに慣れる。
@@ -51,11 +52,12 @@ Loaded 5 def(s)
 | フェーズ | コマンド | 目的 |
 | --- | --- | --- |
 | 日常開発 | `make check` | `cargo fmt` → `cargo clippy -D warnings` → `cargo test` を一括実行 |
+| CI 確認 | `make ci` | `clean` → `fmt-check` → `clippy` → `test` → `release` を `cargo build/test --frozen --locked` 付きで再現性チェック |
 | リリース前整備 | `make full_local` | クリーンビルド・テスト・ドキュメント・監査までを包括実行 |
 | カバレッジ | `make coverage` | `cargo llvm-cov` による HTML/JSON/LCOV 出力 |
 
 ## 開発ポリシー
-- 運用上の詳細は `AGENTS.md` に集約されています（Quickstart, チェックリスト等）。
+- 運用上の詳細は `AGENTS.md` に集約されています（クイックスタート, チェックリスト等）。
 - コメント・ドキュメントは日本語で、識別子は英語で統一します。
 
 ## ドキュメントリソース
@@ -69,8 +71,7 @@ Loaded 5 def(s)
 | REPL が固まる | `Ctrl+C` で現在の入力を一旦破棄し、多行入力が継続していないか確認。 |
 | 推論結果が意図しない | `:t` で型を確認し、`Num` / `Fractional` 制約の残り具合をチェック。 |
 
-## コミュニティ & ライセンス
-- 質問・提案は GitHub Issue へ。発生手順、期待値と実際の結果、使用環境（OS・Rust 版）を添えてください。
+## ライセンス
 - ライセンスは MIT（`LICENSE` を確認）。
 
 Happy hacking!
