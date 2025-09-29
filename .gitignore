@@ -1,6 +1,5 @@
 # directories
-target/
-# allow tracking of generated Rust docs
+target/*
 !target/doc/
 !target/doc/**
 
