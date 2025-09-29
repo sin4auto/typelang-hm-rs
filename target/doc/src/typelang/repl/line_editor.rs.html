@@ -7,28 +7,28 @@
 <a href=#7 id=7 data-nosnippet>7</a><span class="kw">use </span>std::io::{<span class="self">self</span>, Read, Write};
 <a href=#8 id=8 data-nosnippet>8</a><span class="kw">use </span>std::path::PathBuf;
 <a href=#9 id=9 data-nosnippet>9</a>
-<a href=#10 id=10 data-nosnippet>10</a><span class="doccomment">/// 行入力の結果種別。
+<a href=#10 id=10 data-nosnippet>10</a><span class="doccomment">/// 行入力が返す 3 種類の結果を表す列挙体。
 <a href=#11 id=11 data-nosnippet>11</a></span><span class="kw">pub enum </span>ReadResult {
 <a href=#12 id=12 data-nosnippet>12</a>    Line(String),
 <a href=#13 id=13 data-nosnippet>13</a>    Eof,
 <a href=#14 id=14 data-nosnippet>14</a>    Interrupted,
 <a href=#15 id=15 data-nosnippet>15</a>}
 <a href=#16 id=16 data-nosnippet>16</a>
-<a href=#17 id=17 data-nosnippet>17</a><span class="doccomment">/// 履歴管理付きの行入力処理を担う構造体。
+<a href=#17 id=17 data-nosnippet>17</a><span class="doccomment">/// 履歴付きの行編集を提供する簡易ラインエディタ。
 <a href=#18 id=18 data-nosnippet>18</a></span><span class="kw">pub struct </span>LineEditor {
 <a href=#19 id=19 data-nosnippet>19</a>    history: History,
 <a href=#20 id=20 data-nosnippet>20</a>}
 <a href=#21 id=21 data-nosnippet>21</a>
-<a href=#22 id=22 data-nosnippet>22</a><span class="doccomment">/// LineEditor の操作メソッド。
+<a href=#22 id=22 data-nosnippet>22</a><span class="doccomment">/// `LineEditor` のパブリックな操作群をまとめた実装。
 <a href=#23 id=23 data-nosnippet>23</a></span><span class="kw">impl </span>LineEditor {
-<a href=#24 id=24 data-nosnippet>24</a>    <span class="doccomment">/// 履歴を読み込んで新しいエディタを生成する。
+<a href=#24 id=24 data-nosnippet>24</a>    <span class="doccomment">/// 保存済みの履歴を読み込み、新しいエディタを構築する。
 <a href=#25 id=25 data-nosnippet>25</a>    </span><span class="kw">pub fn </span>new() -&gt; <span class="self">Self </span>{
 <a href=#26 id=26 data-nosnippet>26</a>        <span class="self">Self </span>{
 <a href=#27 id=27 data-nosnippet>27</a>            history: History::load(),
 <a href=#28 id=28 data-nosnippet>28</a>        }
 <a href=#29 id=29 data-nosnippet>29</a>    }
 <a href=#30 id=30 data-nosnippet>30</a>
-<a href=#31 id=31 data-nosnippet>31</a>    <span class="doccomment">/// プロンプト付きで1行入力を読み取る。
+<a href=#31 id=31 data-nosnippet>31</a>    <span class="doccomment">/// プロンプトを出力し、1 行分の入力または制御シグナルを取得する。
 <a href=#32 id=32 data-nosnippet>32</a>    </span><span class="kw">pub fn </span>read_line(<span class="kw-2">&amp;mut </span><span class="self">self</span>, prompt: <span class="kw-2">&amp;</span>str) -&gt; io::Result&lt;ReadResult&gt; {
 <a href=#33 id=33 data-nosnippet>33</a>        <span class="attr">#[cfg(unix)]
 <a href=#34 id=34 data-nosnippet>34</a>        </span>{
@@ -40,18 +40,18 @@
 <a href=#40 id=40 data-nosnippet>40</a>        }
 <a href=#41 id=41 data-nosnippet>41</a>    }
 <a href=#42 id=42 data-nosnippet>42</a>
-<a href=#43 id=43 data-nosnippet>43</a>    <span class="doccomment">/// 入力行を履歴へ追加する。
+<a href=#43 id=43 data-nosnippet>43</a>    <span class="doccomment">/// 入力文字列を履歴へ追加し、重複や空行を除外する。
 <a href=#44 id=44 data-nosnippet>44</a>    </span><span class="kw">pub fn </span>add_history(<span class="kw-2">&amp;mut </span><span class="self">self</span>, entry: <span class="kw-2">&amp;</span>str) {
 <a href=#45 id=45 data-nosnippet>45</a>        <span class="self">self</span>.history.add(entry);
 <a href=#46 id=46 data-nosnippet>46</a>    }
 <a href=#47 id=47 data-nosnippet>47</a>
-<a href=#48 id=48 data-nosnippet>48</a>    <span class="doccomment">/// 履歴を永続化する。
+<a href=#48 id=48 data-nosnippet>48</a>    <span class="doccomment">/// 現在の履歴内容を永続ストレージへ書き出す。
 <a href=#49 id=49 data-nosnippet>49</a>    </span><span class="kw">pub fn </span>save_history(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; io::Result&lt;()&gt; {
 <a href=#50 id=50 data-nosnippet>50</a>        <span class="self">self</span>.history.save()
 <a href=#51 id=51 data-nosnippet>51</a>    }
 <a href=#52 id=52 data-nosnippet>52</a>}
 <a href=#53 id=53 data-nosnippet>53</a>
-<a href=#54 id=54 data-nosnippet>54</a><span class="doccomment">/// 既定値として `new` を利用する。
+<a href=#54 id=54 data-nosnippet>54</a><span class="doccomment">/// 既定の初期化は `new` を呼び出して共通化する。
 <a href=#55 id=55 data-nosnippet>55</a></span><span class="kw">impl </span>Default <span class="kw">for </span>LineEditor {
 <a href=#56 id=56 data-nosnippet>56</a>    <span class="kw">fn </span>default() -&gt; <span class="self">Self </span>{
 <a href=#57 id=57 data-nosnippet>57</a>        <span class="self">Self</span>::new()
@@ -60,7 +60,7 @@
 <a href=#60 id=60 data-nosnippet>60</a>
 <a href=#61 id=61 data-nosnippet>61</a><span class="attr">#[cfg(not(unix))]
 <a href=#62 id=62 data-nosnippet>62</a></span><span class="kw">impl </span>LineEditor {
-<a href=#63 id=63 data-nosnippet>63</a>    <span class="doccomment">/// UNIX以外の環境向けに行入力を読む。
+<a href=#63 id=63 data-nosnippet>63</a>    <span class="doccomment">/// Raw モードが利用できない環境向けのフォールバック読み取り。
 <a href=#64 id=64 data-nosnippet>64</a>    </span><span class="kw">fn </span>read_line_fallback(<span class="kw-2">&amp;mut </span><span class="self">self</span>, prompt: <span class="kw-2">&amp;</span>str) -&gt; io::Result&lt;ReadResult&gt; {
 <a href=#65 id=65 data-nosnippet>65</a>        <span class="kw">let </span><span class="kw-2">mut </span>stdout = io::stdout();
 <a href=#66 id=66 data-nosnippet>66</a>        <span class="macro">write!</span>(stdout, <span class="string">"{}"</span>, prompt)<span class="question-mark">?</span>;
@@ -82,7 +82,7 @@
 <a href=#82 id=82 data-nosnippet>82</a>
 <a href=#83 id=83 data-nosnippet>83</a><span class="attr">#[cfg(unix)]
 <a href=#84 id=84 data-nosnippet>84</a></span><span class="kw">impl </span>LineEditor {
-<a href=#85 id=85 data-nosnippet>85</a>    <span class="doccomment">/// UNIX環境で端末をRawモードにして読み取る。
+<a href=#85 id=85 data-nosnippet>85</a>    <span class="doccomment">/// UNIX 端末を Raw モードに切り替えて対話入力を処理する。
 <a href=#86 id=86 data-nosnippet>86</a>    </span><span class="kw">fn </span>read_line_unix(<span class="kw-2">&amp;mut </span><span class="self">self</span>, prompt: <span class="kw-2">&amp;</span>str) -&gt; io::Result&lt;ReadResult&gt; {
 <a href=#87 id=87 data-nosnippet>87</a>        <span class="kw">let </span>_raw = RawMode::new()<span class="question-mark">?</span>;
 <a href=#88 id=88 data-nosnippet>88</a>        <span class="kw">let </span><span class="kw-2">mut </span>stdout = io::stdout();
@@ -148,7 +148,7 @@
 <a href=#148 id=148 data-nosnippet>148</a>    }
 <a href=#149 id=149 data-nosnippet>149</a>}
 <a href=#150 id=150 data-nosnippet>150</a>
-<a href=#151 id=151 data-nosnippet>151</a><span class="doccomment">/// UTF-8の先頭バイト列から文字を復元する。
+<a href=#151 id=151 data-nosnippet>151</a><span class="doccomment">/// 先頭バイトと後続バイトから UTF-8 の 1 文字を復元する。
 <a href=#152 id=152 data-nosnippet>152</a></span><span class="kw">fn </span>read_utf8_char&lt;R: Read&gt;(first: u8, reader: <span class="kw-2">&amp;mut </span>R) -&gt; io::Result&lt;<span class="prelude-ty">Option</span>&lt;char&gt;&gt; {
 <a href=#153 id=153 data-nosnippet>153</a>    <span class="kw">let </span>width = <span class="kw">match </span>first {
 <a href=#154 id=154 data-nosnippet>154</a>        <span class="number">0x00</span>..=<span class="number">0x7f </span>=&gt; <span class="number">1</span>,
@@ -169,7 +169,7 @@
 <a href=#169 id=169 data-nosnippet>169</a>}
 <a href=#170 id=170 data-nosnippet>170</a>
 <a href=#171 id=171 data-nosnippet>171</a><span class="attr">#[cfg(unix)]
-<a href=#172 id=172 data-nosnippet>172</a></span><span class="doccomment">/// 読み取ったバイト列を編集アクションへ変換する。
+<a href=#172 id=172 data-nosnippet>172</a></span><span class="doccomment">/// 読み取った制御シーケンスを内部の編集操作へ写像する。
 <a href=#173 id=173 data-nosnippet>173</a></span><span class="kw">fn </span>interpret_action&lt;R: Read&gt;(first: u8, reader: <span class="kw-2">&amp;mut </span>R) -&gt; io::Result&lt;EditAction&gt; {
 <a href=#174 id=174 data-nosnippet>174</a>    <span class="kw">match </span>first {
 <a href=#175 id=175 data-nosnippet>175</a>        <span class="string">b'\n' </span>| <span class="string">b'\r' </span>=&gt; <span class="prelude-val">Ok</span>(EditAction::Submit),
@@ -330,7 +330,7 @@
 <a href=#330 id=330 data-nosnippet>330</a>}
 <a href=#331 id=331 data-nosnippet>331</a>
 <a href=#332 id=332 data-nosnippet>332</a><span class="attr">#[cfg(unix)]
-<a href=#333 id=333 data-nosnippet>333</a></span><span class="doccomment">/// 1行分の表示を再描画する。
+<a href=#333 id=333 data-nosnippet>333</a></span><span class="doccomment">/// バッファとカーソル位置に合わせて行全体を再描画する。
 <a href=#334 id=334 data-nosnippet>334</a></span><span class="kw">fn </span>refresh_line&lt;W: Write&gt;(
 <a href=#335 id=335 data-nosnippet>335</a>    writer: <span class="kw-2">&amp;mut </span>W,
 <a href=#336 id=336 data-nosnippet>336</a>    prompt: <span class="kw-2">&amp;</span>str,
@@ -348,7 +348,7 @@
 <a href=#348 id=348 data-nosnippet>348</a>    writer.flush()
 <a href=#349 id=349 data-nosnippet>349</a>}
 <a href=#350 id=350 data-nosnippet>350</a>
-<a href=#351 id=351 data-nosnippet>351</a><span class="doccomment">/// 入力履歴を保持・永続化する構造体。
+<a href=#351 id=351 data-nosnippet>351</a><span class="doccomment">/// 入力履歴の保持と永続化を司る補助構造体。
 <a href=#352 id=352 data-nosnippet>352</a></span><span class="kw">struct </span>History {
 <a href=#353 id=353 data-nosnippet>353</a>    entries: Vec&lt;String&gt;,
 <a href=#354 id=354 data-nosnippet>354</a>    path: <span class="prelude-ty">Option</span>&lt;PathBuf&gt;,
@@ -356,7 +356,7 @@
 <a href=#356 id=356 data-nosnippet>356</a>}
 <a href=#357 id=357 data-nosnippet>357</a>
 <a href=#358 id=358 data-nosnippet>358</a><span class="kw">impl </span>History {
-<a href=#359 id=359 data-nosnippet>359</a>    <span class="doccomment">/// 保存済みの履歴を読み込む。
+<a href=#359 id=359 data-nosnippet>359</a>    <span class="doccomment">/// 過去の履歴ファイルを読み込み、`History` を初期化する。
 <a href=#360 id=360 data-nosnippet>360</a>    </span><span class="kw">fn </span>load() -&gt; <span class="self">Self </span>{
 <a href=#361 id=361 data-nosnippet>361</a>        <span class="kw">let </span>path = history_path();
 <a href=#362 id=362 data-nosnippet>362</a>        <span class="kw">let </span>entries = path
@@ -371,7 +371,7 @@
 <a href=#371 id=371 data-nosnippet>371</a>        }
 <a href=#372 id=372 data-nosnippet>372</a>    }
 <a href=#373 id=373 data-nosnippet>373</a>
-<a href=#374 id=374 data-nosnippet>374</a>    <span class="doccomment">/// 履歴に項目を追加する。
+<a href=#374 id=374 data-nosnippet>374</a>    <span class="doccomment">/// 新しい入力を追加し、空行と直前の重複をスキップする。
 <a href=#375 id=375 data-nosnippet>375</a>    </span><span class="kw">fn </span>add(<span class="kw-2">&amp;mut </span><span class="self">self</span>, entry: <span class="kw-2">&amp;</span>str) {
 <a href=#376 id=376 data-nosnippet>376</a>        <span class="kw">let </span>trimmed = entry.trim();
 <a href=#377 id=377 data-nosnippet>377</a>        <span class="kw">if </span>trimmed.is_empty() {
@@ -386,17 +386,17 @@
 <a href=#386 id=386 data-nosnippet>386</a>        <span class="self">self</span>.entries.push(trimmed.to_string());
 <a href=#387 id=387 data-nosnippet>387</a>    }
 <a href=#388 id=388 data-nosnippet>388</a>
-<a href=#389 id=389 data-nosnippet>389</a>    <span class="doccomment">/// 登録済みの履歴数を返す。
+<a href=#389 id=389 data-nosnippet>389</a>    <span class="doccomment">/// 登録されている履歴件数を返す。
 <a href=#390 id=390 data-nosnippet>390</a>    </span><span class="kw">fn </span>len(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
 <a href=#391 id=391 data-nosnippet>391</a>        <span class="self">self</span>.entries.len()
 <a href=#392 id=392 data-nosnippet>392</a>    }
 <a href=#393 id=393 data-nosnippet>393</a>
-<a href=#394 id=394 data-nosnippet>394</a>    <span class="doccomment">/// 履歴の特定位置を参照する。
+<a href=#394 id=394 data-nosnippet>394</a>    <span class="doccomment">/// 指定インデックスの履歴エントリを参照する。
 <a href=#395 id=395 data-nosnippet>395</a>    </span><span class="kw">fn </span>get(<span class="kw-2">&amp;</span><span class="self">self</span>, idx: usize) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>str&gt; {
 <a href=#396 id=396 data-nosnippet>396</a>        <span class="self">self</span>.entries.get(idx).map(|s| s.as_str())
 <a href=#397 id=397 data-nosnippet>397</a>    }
 <a href=#398 id=398 data-nosnippet>398</a>
-<a href=#399 id=399 data-nosnippet>399</a>    <span class="doccomment">/// 履歴をファイルに保存する。
+<a href=#399 id=399 data-nosnippet>399</a>    <span class="doccomment">/// 現在の履歴をファイルへ書き出す。
 <a href=#400 id=400 data-nosnippet>400</a>    </span><span class="kw">fn </span>save(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; io::Result&lt;()&gt; {
 <a href=#401 id=401 data-nosnippet>401</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(path) = <span class="kw-2">&amp;</span><span class="self">self</span>.path <span class="kw">else </span>{
 <a href=#402 id=402 data-nosnippet>402</a>            <span class="kw">return </span><span class="prelude-val">Ok</span>(());
@@ -412,7 +412,7 @@
 <a href=#412 id=412 data-nosnippet>412</a>    }
 <a href=#413 id=413 data-nosnippet>413</a>}
 <a href=#414 id=414 data-nosnippet>414</a>
-<a href=#415 id=415 data-nosnippet>415</a><span class="doccomment">/// 履歴ファイルの探索および環境変数の優先順位を決める。
+<a href=#415 id=415 data-nosnippet>415</a><span class="doccomment">/// 履歴ファイルの保存場所を環境変数とユーザーのホームから決定する。
 <a href=#416 id=416 data-nosnippet>416</a></span><span class="kw">fn </span>history_path() -&gt; <span class="prelude-ty">Option</span>&lt;PathBuf&gt; {
 <a href=#417 id=417 data-nosnippet>417</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(path) = env::var_os(<span class="string">"TYPELANG_HISTORY_FILE"</span>) {
 <a href=#418 id=418 data-nosnippet>418</a>        <span class="kw">return </span><span class="prelude-val">Some</span>(PathBuf::from(path));
@@ -424,22 +424,22 @@
 <a href=#424 id=424 data-nosnippet>424</a>}
 <a href=#425 id=425 data-nosnippet>425</a>
 <a href=#426 id=426 data-nosnippet>426</a><span class="attr">#[cfg(unix)]
-<a href=#427 id=427 data-nosnippet>427</a></span><span class="doccomment">/// 端末設定をRawモードへ切り替えるためのガード。
+<a href=#427 id=427 data-nosnippet>427</a></span><span class="doccomment">/// Raw モードへの切り替えと復帰を担う RAII ガード。
 <a href=#428 id=428 data-nosnippet>428</a></span><span class="kw">struct </span>RawMode {
 <a href=#429 id=429 data-nosnippet>429</a>    original: Termios,
 <a href=#430 id=430 data-nosnippet>430</a>}
 <a href=#431 id=431 data-nosnippet>431</a>
 <a href=#432 id=432 data-nosnippet>432</a><span class="attr">#[cfg(unix)]
 <a href=#433 id=433 data-nosnippet>433</a></span><span class="kw">impl </span>RawMode {
-<a href=#434 id=434 data-nosnippet>434</a>    <span class="doccomment">/// 標準入力をRawモードへ切り替える。
+<a href=#434 id=434 data-nosnippet>434</a>    <span class="doccomment">/// 標準入力の termios 設定を Raw モードへ変更する。
 <a href=#435 id=435 data-nosnippet>435</a>    </span><span class="kw">fn </span>new() -&gt; io::Result&lt;<span class="self">Self</span>&gt; {
-<a href=#436 id=436 data-nosnippet>436</a>        <span class="kw">let </span>fd = <span class="number">0</span>; <span class="comment">// stdin
+<a href=#436 id=436 data-nosnippet>436</a>        <span class="kw">let </span>fd = <span class="number">0</span>; <span class="comment">// 標準入力のファイルディスクリプタ
 <a href=#437 id=437 data-nosnippet>437</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>termios = Termios::default();
 <a href=#438 id=438 data-nosnippet>438</a>        <span class="kw">if unsafe </span>{ tcgetattr(fd, <span class="kw-2">&amp;mut </span>termios <span class="kw">as </span><span class="kw-2">*mut </span><span class="kw">_</span>) } != <span class="number">0 </span>{
 <a href=#439 id=439 data-nosnippet>439</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(io::Error::last_os_error());
 <a href=#440 id=440 data-nosnippet>440</a>        }
 <a href=#441 id=441 data-nosnippet>441</a>        <span class="kw">let </span><span class="kw-2">mut </span>raw = termios;
-<a href=#442 id=442 data-nosnippet>442</a>        <span class="comment">// `cfmakeraw` に任せることで OS ごとの差分を吸収して Raw モードへ移行する。
+<a href=#442 id=442 data-nosnippet>442</a>        <span class="comment">// OS ごとの差分は `cfmakeraw` に任せて Raw モードへ移行する。
 <a href=#443 id=443 data-nosnippet>443</a>        </span><span class="kw">unsafe </span>{
 <a href=#444 id=444 data-nosnippet>444</a>            cfmakeraw(<span class="kw-2">&amp;mut </span>raw <span class="kw">as </span><span class="kw-2">*mut </span><span class="kw">_</span>);
 <a href=#445 id=445 data-nosnippet>445</a>        }
@@ -452,7 +452,7 @@
 <a href=#452 id=452 data-nosnippet>452</a>
 <a href=#453 id=453 data-nosnippet>453</a><span class="attr">#[cfg(unix)]
 <a href=#454 id=454 data-nosnippet>454</a></span><span class="kw">impl </span>Drop <span class="kw">for </span>RawMode {
-<a href=#455 id=455 data-nosnippet>455</a>    <span class="doccomment">/// スコープ終了時に元の端末設定へ戻す。
+<a href=#455 id=455 data-nosnippet>455</a>    <span class="doccomment">/// スコープ終了時に取得済みの termios 設定へ戻す。
 <a href=#456 id=456 data-nosnippet>456</a>    </span><span class="kw">fn </span>drop(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
 <a href=#457 id=457 data-nosnippet>457</a>        <span class="kw">let </span>fd = <span class="number">0</span>;
 <a href=#458 id=458 data-nosnippet>458</a>        <span class="kw">unsafe </span>{
@@ -467,7 +467,7 @@
 <a href=#467 id=467 data-nosnippet>467</a><span class="attr">#[cfg(unix)]
 <a href=#468 id=468 data-nosnippet>468</a>#[repr(C)]
 <a href=#469 id=469 data-nosnippet>469</a>#[derive(Clone, Copy)]
-<a href=#470 id=470 data-nosnippet>470</a></span><span class="doccomment">/// 端末属性を保持するための構造体。
+<a href=#470 id=470 data-nosnippet>470</a></span><span class="doccomment">/// POSIX 端末属性 (`termios`) を Rust 表現に写した構造体。
 <a href=#471 id=471 data-nosnippet>471</a></span><span class="kw">struct </span>Termios {
 <a href=#472 id=472 data-nosnippet>472</a>    c_iflag: u32,
 <a href=#473 id=473 data-nosnippet>473</a>    c_oflag: u32,
@@ -481,7 +481,7 @@
 <a href=#481 id=481 data-nosnippet>481</a>
 <a href=#482 id=482 data-nosnippet>482</a><span class="attr">#[cfg(unix)]
 <a href=#483 id=483 data-nosnippet>483</a></span><span class="kw">impl </span>Default <span class="kw">for </span>Termios {
-<a href=#484 id=484 data-nosnippet>484</a>    <span class="doccomment">/// すべてのフィールドをゼロ初期化する。
+<a href=#484 id=484 data-nosnippet>484</a>    <span class="doccomment">/// ゼロ初期化された `Termios` を構築する。
 <a href=#485 id=485 data-nosnippet>485</a>    </span><span class="kw">fn </span>default() -&gt; <span class="self">Self </span>{
 <a href=#486 id=486 data-nosnippet>486</a>        <span class="self">Self </span>{
 <a href=#487 id=487 data-nosnippet>487</a>            c_iflag: <span class="number">0</span>,
@@ -522,11 +522,11 @@
 <a href=#522 id=522 data-nosnippet>522</a>
 <a href=#523 id=523 data-nosnippet>523</a><span class="attr">#[cfg(unix)]
 <a href=#524 id=524 data-nosnippet>524</a></span><span class="kw">extern </span><span class="string">"C" </span>{
-<a href=#525 id=525 data-nosnippet>525</a>    <span class="doccomment">/// POSIX の `tcgetattr` を呼び出す。
+<a href=#525 id=525 data-nosnippet>525</a>    <span class="doccomment">/// libc の `tcgetattr` を直接呼び出す。
 <a href=#526 id=526 data-nosnippet>526</a>    </span><span class="kw">fn </span>tcgetattr(fd: i32, termios: <span class="kw-2">*mut </span>Termios) -&gt; i32;
-<a href=#527 id=527 data-nosnippet>527</a>    <span class="doccomment">/// POSIX の `tcsetattr` を呼び出す。
+<a href=#527 id=527 data-nosnippet>527</a>    <span class="doccomment">/// libc の `tcsetattr` を直接呼び出す。
 <a href=#528 id=528 data-nosnippet>528</a>    </span><span class="kw">fn </span>tcsetattr(fd: i32, optional_actions: i32, termios: <span class="kw-2">*const </span>Termios) -&gt; i32;
-<a href=#529 id=529 data-nosnippet>529</a>    <span class="doccomment">/// POSIX の `cfmakeraw` を呼び出す。
+<a href=#529 id=529 data-nosnippet>529</a>    <span class="doccomment">/// libc の `cfmakeraw` を実行する。
 <a href=#530 id=530 data-nosnippet>530</a>    </span><span class="kw">fn </span>cfmakeraw(termios: <span class="kw-2">*mut </span>Termios);
 <a href=#531 id=531 data-nosnippet>531</a>}
 <a href=#532 id=532 data-nosnippet>532</a>
@@ -539,7 +539,7 @@
 <a href=#539 id=539 data-nosnippet>539</a>    <span class="kw">use </span>std::sync::{Mutex, OnceLock};
 <a href=#540 id=540 data-nosnippet>540</a>
 <a href=#541 id=541 data-nosnippet>541</a>    <span class="attr">#[test]
-<a href=#542 id=542 data-nosnippet>542</a>    </span><span class="doccomment">/// 重複した履歴が追加されないことを確認する。
+<a href=#542 id=542 data-nosnippet>542</a>    </span><span class="doccomment">/// 同じ入力が連続しても履歴に重複登録されないことを確かめる。
 <a href=#543 id=543 data-nosnippet>543</a>    </span><span class="kw">fn </span>history_add_deduplicates() {
 <a href=#544 id=544 data-nosnippet>544</a>        <span class="kw">let </span><span class="kw-2">mut </span>history = History {
 <a href=#545 id=545 data-nosnippet>545</a>            entries: Vec::new(),
@@ -553,7 +553,7 @@
 <a href=#553 id=553 data-nosnippet>553</a>    }
 <a href=#554 id=554 data-nosnippet>554</a>
 <a href=#555 id=555 data-nosnippet>555</a>    <span class="attr">#[test]
-<a href=#556 id=556 data-nosnippet>556</a>    </span><span class="doccomment">/// 空入力や末尾空白が除外されることを確認する。
+<a href=#556 id=556 data-nosnippet>556</a>    </span><span class="doccomment">/// 空行や末尾空白が履歴から取り除かれることを検証する。
 <a href=#557 id=557 data-nosnippet>557</a>    </span><span class="kw">fn </span>history_add_skips_empty_and_trims() {
 <a href=#558 id=558 data-nosnippet>558</a>        <span class="kw">let </span><span class="kw-2">mut </span>history = History {
 <a href=#559 id=559 data-nosnippet>559</a>            entries: Vec::new(),
@@ -568,7 +568,7 @@
 <a href=#568 id=568 data-nosnippet>568</a>    }
 <a href=#569 id=569 data-nosnippet>569</a>
 <a href=#570 id=570 data-nosnippet>570</a>    <span class="attr">#[test]
-<a href=#571 id=571 data-nosnippet>571</a>    </span><span class="doccomment">/// 履歴サイズが上限を超えないことを確認する。
+<a href=#571 id=571 data-nosnippet>571</a>    </span><span class="doccomment">/// 上限を超えた履歴が先頭から削除されることを確認する。
 <a href=#572 id=572 data-nosnippet>572</a>    </span><span class="kw">fn </span>history_respects_max_entries() {
 <a href=#573 id=573 data-nosnippet>573</a>        <span class="kw">let </span><span class="kw-2">mut </span>history = History {
 <a href=#574 id=574 data-nosnippet>574</a>            entries: <span class="macro">vec!</span>[<span class="string">"0"</span>.into(), <span class="string">"1"</span>.into(), <span class="string">"2"</span>.into()],
@@ -579,7 +579,7 @@
 <a href=#579 id=579 data-nosnippet>579</a>        <span class="macro">assert_eq!</span>(history.entries, <span class="macro">vec!</span>[<span class="string">"1"</span>, <span class="string">"2"</span>, <span class="string">"3"</span>]);
 <a href=#580 id=580 data-nosnippet>580</a>    }
 <a href=#581 id=581 data-nosnippet>581</a>
-<a href=#582 id=582 data-nosnippet>582</a>    <span class="doccomment">/// テストで環境変数を直列化するヘルパ。
+<a href=#582 id=582 data-nosnippet>582</a>    <span class="doccomment">/// 環境変数を書き換えるテストを直列化するためのヘルパ。
 <a href=#583 id=583 data-nosnippet>583</a>    </span><span class="kw">fn </span>with_env_lock&lt;T&gt;(f: <span class="kw">impl </span>FnOnce() -&gt; T) -&gt; T {
 <a href=#584 id=584 data-nosnippet>584</a>        <span class="kw">static </span>GUARD: OnceLock&lt;Mutex&lt;()&gt;&gt; = OnceLock::new();
 <a href=#585 id=585 data-nosnippet>585</a>        <span class="kw">let </span>lock = GUARD.get_or_init(|| Mutex::new(()));
@@ -589,7 +589,7 @@
 <a href=#589 id=589 data-nosnippet>589</a>
 <a href=#590 id=590 data-nosnippet>590</a>    <span class="attr">#[cfg_attr(miri, ignore = <span class="string">"Miri isolation blocks directory creation APIs"</span>)]
 <a href=#591 id=591 data-nosnippet>591</a>    #[test]
-<a href=#592 id=592 data-nosnippet>592</a>    </span><span class="doccomment">/// 履歴の保存と再読込が正しく行われるか検証する。
+<a href=#592 id=592 data-nosnippet>592</a>    </span><span class="doccomment">/// 履歴が保存・再読込で失われないことを検証する。
 <a href=#593 id=593 data-nosnippet>593</a>    </span><span class="kw">fn </span>history_save_and_load_roundtrip() {
 <a href=#594 id=594 data-nosnippet>594</a>        with_env_lock(|| {
 <a href=#595 id=595 data-nosnippet>595</a>            <span class="kw">let </span>dir = env::temp_dir().join(<span class="string">"typelang_history_tests"</span>);
@@ -621,7 +621,7 @@
 <a href=#621 id=621 data-nosnippet>621</a>    }
 <a href=#622 id=622 data-nosnippet>622</a>
 <a href=#623 id=623 data-nosnippet>623</a>    <span class="attr">#[test]
-<a href=#624 id=624 data-nosnippet>624</a>    </span><span class="doccomment">/// 履歴ファイルパスが環境変数を優先することを確認する。
+<a href=#624 id=624 data-nosnippet>624</a>    </span><span class="doccomment">/// 環境変数による履歴パス指定が優先されることを確認する。
 <a href=#625 id=625 data-nosnippet>625</a>    </span><span class="kw">fn </span>history_path_prefers_env_variable() {
 <a href=#626 id=626 data-nosnippet>626</a>        with_env_lock(|| {
 <a href=#627 id=627 data-nosnippet>627</a>            <span class="kw">let </span>dir = env::temp_dir();
@@ -634,7 +634,7 @@
 <a href=#634 id=634 data-nosnippet>634</a>    }
 <a href=#635 id=635 data-nosnippet>635</a>
 <a href=#636 id=636 data-nosnippet>636</a>    <span class="attr">#[test]
-<a href=#637 id=637 data-nosnippet>637</a>    </span><span class="doccomment">/// UTF-8の複数バイト文字を読めることを検証する。
+<a href=#637 id=637 data-nosnippet>637</a>    </span><span class="doccomment">/// 複数バイトの UTF-8 文字が正しく復元されるか検証する。
 <a href=#638 id=638 data-nosnippet>638</a>    </span><span class="kw">fn </span>read_utf8_char_handles_multibyte() {
 <a href=#639 id=639 data-nosnippet>639</a>        <span class="kw">let </span><span class="kw-2">mut </span>cursor = Cursor::new(<span class="macro">vec!</span>[<span class="number">0x81</span>, <span class="number">0x82</span>]);
 <a href=#640 id=640 data-nosnippet>640</a>        <span class="kw">let </span>ch = read_utf8_char(<span class="number">0xe3</span>, <span class="kw-2">&amp;mut </span>cursor).unwrap().unwrap();
@@ -643,7 +643,7 @@
 <a href=#643 id=643 data-nosnippet>643</a>
 <a href=#644 id=644 data-nosnippet>644</a>    <span class="attr">#[cfg(unix)]
 <a href=#645 id=645 data-nosnippet>645</a>    #[test]
-<a href=#646 id=646 data-nosnippet>646</a>    </span><span class="doccomment">/// 行再描画時にカーソルが戻ることを確認する。
+<a href=#646 id=646 data-nosnippet>646</a>    </span><span class="doccomment">/// 再描画後のカーソル位置が期待通り手前へ戻るか確認する。
 <a href=#647 id=647 data-nosnippet>647</a>    </span><span class="kw">fn </span>refresh_line_repositions_cursor() {
 <a href=#648 id=648 data-nosnippet>648</a>        <span class="kw">let </span><span class="kw-2">mut </span>buffer: Vec&lt;u8&gt; = Vec::new();
 <a href=#649 id=649 data-nosnippet>649</a>        <span class="kw">super</span>::refresh_line(<span class="kw-2">&amp;mut </span>buffer, <span class="string">":: "</span>, <span class="kw-2">&amp;</span>[<span class="string">'a'</span>, <span class="string">'b'</span>, <span class="string">'c'</span>], <span class="number">1</span>).unwrap();
@@ -655,7 +655,7 @@
 <a href=#655 id=655 data-nosnippet>655</a>
 <a href=#656 id=656 data-nosnippet>656</a>    <span class="attr">#[cfg(unix)]
 <a href=#657 id=657 data-nosnippet>657</a>    #[test]
-<a href=#658 id=658 data-nosnippet>658</a>    </span><span class="doccomment">/// エスケープシーケンスがアクションへ変換され、履歴・カーソル操作ができることを検証する。
+<a href=#658 id=658 data-nosnippet>658</a>    </span><span class="doccomment">/// エスケープシーケンスが履歴操作やカーソル移動のアクションへ変換されるかを検証する。
 <a href=#659 id=659 data-nosnippet>659</a>    </span><span class="kw">fn </span>interpret_action_and_session_navigation() {
 <a href=#660 id=660 data-nosnippet>660</a>        <span class="kw">use super</span>::{interpret_action, EditAction, EditorSession};
 <a href=#661 id=661 data-nosnippet>661</a>
@@ -669,21 +669,21 @@
 <a href=#669 id=669 data-nosnippet>669</a>            session.insert_char(ch);
 <a href=#670 id=670 data-nosnippet>670</a>        }
 <a href=#671 id=671 data-nosnippet>671</a>
-<a href=#672 id=672 data-nosnippet>672</a>        <span class="comment">// Up arrow
+<a href=#672 id=672 data-nosnippet>672</a>        <span class="comment">// 上矢印で過去の履歴を辿る。
 <a href=#673 id=673 data-nosnippet>673</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>reader = Cursor::new(<span class="macro">vec!</span>[<span class="string">b'['</span>, <span class="string">b'A'</span>]);
 <a href=#674 id=674 data-nosnippet>674</a>        <span class="kw">let </span>action = interpret_action(<span class="number">0x1b</span>, <span class="kw-2">&amp;mut </span>reader).unwrap();
 <a href=#675 id=675 data-nosnippet>675</a>        <span class="macro">assert_eq!</span>(action, EditAction::HistoryPrev);
 <a href=#676 id=676 data-nosnippet>676</a>        <span class="macro">assert!</span>(session.history_prev());
 <a href=#677 id=677 data-nosnippet>677</a>        <span class="macro">assert_eq!</span>(session.buffer().iter().collect::&lt;String&gt;(), <span class="string">"second"</span>);
 <a href=#678 id=678 data-nosnippet>678</a>
-<a href=#679 id=679 data-nosnippet>679</a>        <span class="comment">// Down arrow restores saved current input
+<a href=#679 id=679 data-nosnippet>679</a>        <span class="comment">// 下矢印で保存済みの入力へ戻る。
 <a href=#680 id=680 data-nosnippet>680</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>reader = Cursor::new(<span class="macro">vec!</span>[<span class="string">b'['</span>, <span class="string">b'B'</span>]);
 <a href=#681 id=681 data-nosnippet>681</a>        <span class="kw">let </span>action = interpret_action(<span class="number">0x1b</span>, <span class="kw-2">&amp;mut </span>reader).unwrap();
 <a href=#682 id=682 data-nosnippet>682</a>        <span class="macro">assert_eq!</span>(action, EditAction::HistoryNext);
 <a href=#683 id=683 data-nosnippet>683</a>        <span class="macro">assert!</span>(session.history_next());
 <a href=#684 id=684 data-nosnippet>684</a>        <span class="macro">assert_eq!</span>(session.buffer().iter().collect::&lt;String&gt;(), <span class="string">"tmp"</span>);
 <a href=#685 id=685 data-nosnippet>685</a>
-<a href=#686 id=686 data-nosnippet>686</a>        <span class="comment">// Left arrow moves cursor left
+<a href=#686 id=686 data-nosnippet>686</a>        <span class="comment">// 左矢印でカーソルを 1 文字戻す。
 <a href=#687 id=687 data-nosnippet>687</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>reader = Cursor::new(<span class="macro">vec!</span>[<span class="string">b'['</span>, <span class="string">b'D'</span>]);
 <a href=#688 id=688 data-nosnippet>688</a>        <span class="kw">let </span>action = interpret_action(<span class="number">0x1b</span>, <span class="kw-2">&amp;mut </span>reader).unwrap();
 <a href=#689 id=689 data-nosnippet>689</a>        <span class="macro">assert_eq!</span>(action, EditAction::MoveLeft);

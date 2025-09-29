@@ -2,10 +2,11 @@
 // 役割: Helpers for rendering REPL help and value output
 // 意図: Keep interactive messaging consistent across commands
 // 関連ファイル: src/repl/cmd.rs, src/evaluator.rs, src/repl/util.rs
-//! REPL の表示系
+//! REPL で用いるヘルプメッセージと値出力を集約したモジュール。
+//! 表示形式を一箇所にまとめ、対話時の出力を統一する。
 
 use crate::evaluator::Value;
-/// ヘルプメッセージを表示する。
+/// 利用可能な REPL コマンド一覧を標準出力へ表示する。
 pub(crate) fn print_help() {
     println!("利用可能なコマンド:");
     println!("  :help              ヘルプ（本メッセージ）");
@@ -26,7 +27,7 @@ pub(crate) fn print_help() {
     println!("  > 1 + 2                 -- 3 を表示、直近結果は it で参照可");
     println!("  > it * 10               -- 30");
 }
-/// 値を REPL 用に表示する。
+/// 評価結果を REPL 向けのフォーマットで出力する。
 pub(crate) fn print_value(v: &Value) {
     match v {
         Value::String(s) => println!("\"{}\"", s),
@@ -44,9 +45,9 @@ mod tests {
     use crate::evaluator::Value;
 
     #[test]
-    /// 値の表示分岐がパニックしないことを確認する。
+    /// 代表的な値種別が問題なくフォーマットされることを確認する。
     fn print_value_variants_execute() {
-        // 期待出力の厳密比較は行わず、分岐実行のみでカバレッジを稼ぐ
+        // 厳密な文字列比較ではなく分岐ごとの実行確認に留める。
         print_value(&Value::String("s".into()));
         print_value(&Value::Int(1));
         print_value(&Value::Double(1.5));

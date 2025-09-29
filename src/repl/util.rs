@@ -2,14 +2,14 @@
 // 役割: Expression normalization utilities for REPL workflows
 // 意図: Ensure inference and evaluation behave predictably on user input
 // 関連ファイル: src/repl/cmd.rs, src/infer.rs, src/ast.rs
-//! REPL 内部ユーティリティ
+//! REPL 内部で共有する式変換ユーティリティを提供するモジュール。
+//! 推論が安定するようユーザー入力を事前整形する。
 
 use crate::ast as A;
-/// (^) で右辺が負の整数のときに (** n.0) へ正規化して
-/// 型推論を安定化させる簡易変換。
+/// ユーザー入力の式を正規化し、負のべき乗などを推論しやすい形に直す。
 pub(crate) fn normalize_expr(e: &A::Expr) -> A::Expr {
     use A::Expr::*;
-    /// `0 - n` 形式の負整数を検出する。
+    /// `0 - n` 形式の負整数リテラルを検出する補助関数。
     fn neg_int(e: &A::Expr) -> Option<i64> {
         if let A::Expr::BinOp { op, left, right } = e {
             if op == "-" {
@@ -88,7 +88,7 @@ mod tests {
     use crate::ast as A;
 
     #[test]
-    /// 負の指数が `**` に変換されることを確認する。
+    /// 負の整数指数が `^` から `**` へ変換されることを確認する。
     fn normalize_pow_with_negative_int_exponent_changes_to_starstar() {
         let e = A::Expr::BinOp {
             op: "^".into(),
@@ -121,7 +121,7 @@ mod tests {
     }
 
     #[test]
-    /// 他の演算子が変換されないことを確認する。
+    /// 対象外の演算子がそのまま残ることを検証する。
     fn normalize_keeps_other_ops_untouched() {
         let e = A::Expr::BinOp {
             op: "+".into(),
@@ -142,9 +142,9 @@ mod tests {
     }
 
     #[test]
-    /// コレクション内も再帰的に正規化されることを確認する。
+    /// コレクション内部でも再帰的に正規化されることを確認する。
     fn normalize_recurse_into_collections() {
-        // [(2 ^ -1)] のような入れ子でも再帰的に正規化されること
+        // [(2 ^ -1)] のような入れ子でも再帰的に正規化されることを確認する
         let e = A::Expr::ListLit {
             items: vec![A::Expr::BinOp {
                 op: "^".into(),

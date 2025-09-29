@@ -2,7 +2,8 @@
 // 役割: Program loader that merges definitions into REPL environments
 // 意図: Safely import files with inference checks before evaluation
 // 関連ファイル: src/infer.rs, src/evaluator.rs, src/repl/util.rs
-//! プログラムのロード処理
+//! TypeLang のプログラム定義を REPL 環境へ読み込むための補助モジュール。
+//! 型推論・既定化・評価の順に処理し、安全に環境へ取り込む。
 
 use crate::ast as A;
 use crate::evaluator::{eval_expr, Value};
@@ -10,23 +11,13 @@ use crate::infer::{infer_expr, type_from_texpr, InferState};
 use crate::typesys::{generalize, unify, TVarSupply};
 
 use super::util::normalize_expr;
-/// REPL/テスト共用: プログラムを型/値環境にロードする。
+/// プログラムを型・クラス・値環境へ段階的に取り込む。
 ///
-/// # 仕様
-/// - 各定義を正規化（`^` の負指数を `**` へ）し、型推論→既定化→評価の順で取り込みます。
-/// - 型注釈が与えられている場合は単一化で検証します。
+/// 定義ごとに式を正規化し、型推論・defaulting・評価を組み合わせて環境を更新する。
+/// 型注釈が付いている場合は単一化で検証し、推論失敗時は評価結果から代表型を導出する。
 ///
-/// # Examples
-/// ```
-/// use typelang::{parser, infer};
-/// let src = "square :: Num a => a -> a;\nlet square x = x * x;";
-/// let prog = parser::parse_program(src).unwrap();
-/// let mut tenv = infer::initial_env();
-/// let cenv = infer::initial_class_env();
-/// let mut venv = typelang::evaluator::initial_env();
-/// let loaded = typelang::repl::load_program_into_env(&prog, &mut tenv, &cenv, &mut venv).unwrap();
-/// assert_eq!(loaded, vec!["square"]);
-/// ```
+/// # Errors
+/// 型推論や評価、ファイル読み込みに失敗した場合は文字列化したエラーメッセージを返す。
 pub fn load_program_into_env(
     prog: &A::Program,
     type_env: &mut crate::typesys::TypeEnv,
@@ -53,7 +44,7 @@ pub fn load_program_into_env(
         let (s, q_rhs0) = match infer_expr(&type_env_tmp, class_env, &mut st, &body) {
             Ok(ok) => ok,
             Err(_e) => {
-                // 推論失敗時は値を評価し、代表型で一般化
+                // 推論が失敗した場合は値を評価し、代表的な型を一般化して登録する。
                 let val = eval_expr(&body, &mut value_env_tmp).map_err(|e2| e2.to_string())?;
                 let sch = generalize(
                     &type_env_tmp,

@@ -2,13 +2,13 @@
 // 役割: REPL module facade and re-exports
 // 意図: Expose interactive entry points without leaking internals
 // 関連ファイル: src/repl/cmd.rs, src/repl/loader.rs, src/bin/typelang.rs
-//! REPL（対話環境）モジュール
+//! TypeLang の対話環境を構成するモジュール群をまとめたファサード。
 //!
-//! 入力受付・コマンド解釈・ファイルロード・表示などを薄く分割しています。
-//! - `cmd`: ユーザー入力の解釈とメインループ
-//! - `loader`: プログラムの型/値環境へのロード
-//! - `printer`: 値やヘルプの表示
-//! - `util`: REPL 内部で使う小さな正規化処理
+//! 入力・型推論・評価・表示を役割ごとに分け、外部には最小限の API のみを公開する。
+//! - `cmd`: メインループとコマンド解釈
+//! - `loader`: 定義のロードと環境更新
+//! - `printer`: ユーザー向けの表示ロジック
+//! - `util`: REPL 内部の軽量ユーティリティ
 
 pub mod cmd;
 mod line_editor;

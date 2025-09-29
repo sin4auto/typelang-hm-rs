@@ -2,14 +2,14 @@
 <a href=#2 id=2 data-nosnippet>2</a>// 役割: Expression normalization utilities for REPL workflows
 <a href=#3 id=3 data-nosnippet>3</a>// 意図: Ensure inference and evaluation behave predictably on user input
 <a href=#4 id=4 data-nosnippet>4</a>// 関連ファイル: src/repl/cmd.rs, src/infer.rs, src/ast.rs
-<a href=#5 id=5 data-nosnippet>5</a></span><span class="doccomment">//! REPL 内部ユーティリティ
-<a href=#6 id=6 data-nosnippet>6</a>
-<a href=#7 id=7 data-nosnippet>7</a></span><span class="kw">use </span><span class="kw">crate</span>::ast <span class="kw">as </span>A;
-<a href=#8 id=8 data-nosnippet>8</a><span class="doccomment">/// (^) で右辺が負の整数のときに (** n.0) へ正規化して
-<a href=#9 id=9 data-nosnippet>9</a>/// 型推論を安定化させる簡易変換。
+<a href=#5 id=5 data-nosnippet>5</a></span><span class="doccomment">//! REPL 内部で共有する式変換ユーティリティを提供するモジュール。
+<a href=#6 id=6 data-nosnippet>6</a>//! 推論が安定するようユーザー入力を事前整形する。
+<a href=#7 id=7 data-nosnippet>7</a>
+<a href=#8 id=8 data-nosnippet>8</a></span><span class="kw">use </span><span class="kw">crate</span>::ast <span class="kw">as </span>A;
+<a href=#9 id=9 data-nosnippet>9</a><span class="doccomment">/// ユーザー入力の式を正規化し、負のべき乗などを推論しやすい形に直す。
 <a href=#10 id=10 data-nosnippet>10</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>normalize_expr(e: <span class="kw-2">&amp;</span>A::Expr) -&gt; A::Expr {
 <a href=#11 id=11 data-nosnippet>11</a>    <span class="kw">use </span>A::Expr::<span class="kw-2">*</span>;
-<a href=#12 id=12 data-nosnippet>12</a>    <span class="doccomment">/// `0 - n` 形式の負整数を検出する。
+<a href=#12 id=12 data-nosnippet>12</a>    <span class="doccomment">/// `0 - n` 形式の負整数リテラルを検出する補助関数。
 <a href=#13 id=13 data-nosnippet>13</a>    </span><span class="kw">fn </span>neg_int(e: <span class="kw-2">&amp;</span>A::Expr) -&gt; <span class="prelude-ty">Option</span>&lt;i64&gt; {
 <a href=#14 id=14 data-nosnippet>14</a>        <span class="kw">if let </span>A::Expr::BinOp { op, left, right } = e {
 <a href=#15 id=15 data-nosnippet>15</a>            <span class="kw">if </span>op == <span class="string">"-" </span>{
@@ -88,7 +88,7 @@
 <a href=#88 id=88 data-nosnippet>88</a>    <span class="kw">use </span><span class="kw">crate</span>::ast <span class="kw">as </span>A;
 <a href=#89 id=89 data-nosnippet>89</a>
 <a href=#90 id=90 data-nosnippet>90</a>    <span class="attr">#[test]
-<a href=#91 id=91 data-nosnippet>91</a>    </span><span class="doccomment">/// 負の指数が `**` に変換されることを確認する。
+<a href=#91 id=91 data-nosnippet>91</a>    </span><span class="doccomment">/// 負の整数指数が `^` から `**` へ変換されることを確認する。
 <a href=#92 id=92 data-nosnippet>92</a>    </span><span class="kw">fn </span>normalize_pow_with_negative_int_exponent_changes_to_starstar() {
 <a href=#93 id=93 data-nosnippet>93</a>        <span class="kw">let </span>e = A::Expr::BinOp {
 <a href=#94 id=94 data-nosnippet>94</a>            op: <span class="string">"^"</span>.into(),
@@ -121,7 +121,7 @@
 <a href=#121 id=121 data-nosnippet>121</a>    }
 <a href=#122 id=122 data-nosnippet>122</a>
 <a href=#123 id=123 data-nosnippet>123</a>    <span class="attr">#[test]
-<a href=#124 id=124 data-nosnippet>124</a>    </span><span class="doccomment">/// 他の演算子が変換されないことを確認する。
+<a href=#124 id=124 data-nosnippet>124</a>    </span><span class="doccomment">/// 対象外の演算子がそのまま残ることを検証する。
 <a href=#125 id=125 data-nosnippet>125</a>    </span><span class="kw">fn </span>normalize_keeps_other_ops_untouched() {
 <a href=#126 id=126 data-nosnippet>126</a>        <span class="kw">let </span>e = A::Expr::BinOp {
 <a href=#127 id=127 data-nosnippet>127</a>            op: <span class="string">"+"</span>.into(),
@@ -142,9 +142,9 @@
 <a href=#142 id=142 data-nosnippet>142</a>    }
 <a href=#143 id=143 data-nosnippet>143</a>
 <a href=#144 id=144 data-nosnippet>144</a>    <span class="attr">#[test]
-<a href=#145 id=145 data-nosnippet>145</a>    </span><span class="doccomment">/// コレクション内も再帰的に正規化されることを確認する。
+<a href=#145 id=145 data-nosnippet>145</a>    </span><span class="doccomment">/// コレクション内部でも再帰的に正規化されることを確認する。
 <a href=#146 id=146 data-nosnippet>146</a>    </span><span class="kw">fn </span>normalize_recurse_into_collections() {
-<a href=#147 id=147 data-nosnippet>147</a>        <span class="comment">// [(2 ^ -1)] のような入れ子でも再帰的に正規化されること
+<a href=#147 id=147 data-nosnippet>147</a>        <span class="comment">// [(2 ^ -1)] のような入れ子でも再帰的に正規化されることを確認する
 <a href=#148 id=148 data-nosnippet>148</a>        </span><span class="kw">let </span>e = A::Expr::ListLit {
 <a href=#149 id=149 data-nosnippet>149</a>            items: <span class="macro">vec!</span>[A::Expr::BinOp {
 <a href=#150 id=150 data-nosnippet>150</a>                op: <span class="string">"^"</span>.into(),
