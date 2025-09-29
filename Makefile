@@ -10,10 +10,10 @@ SHELL := /usr/bin/bash
 .EXPORT_ALL_VARIABLES:
 
 .PHONY: \
-  help clean \
+  help add-tools clean \
   fmt fmt-check clippy \
   test build release \
-  doc doc-open coverage \
+  doc coverage \
   audit outdated udeps miri bench \
   check full_local ci
 
@@ -45,13 +45,6 @@ release: ## リリースビルド（ローカル用）
 
 doc: ## ドキュメント生成（警告=エラー）
 	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
-
-doc-open: doc ## 生成後にブラウザで開く
-	html="target/doc/index.html"; \
-	if command -v wslview >/dev/null 2>&1; then wslview "$$html"; \
-	elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$$html"; \
-	elif command -v open >/dev/null 2>&1; then open "$$html"; \
-	else echo "open $$html"; fi
 
 # ---- ツール導入（未導入時のみ） -----------------------------------------------
 add-tools: ## rustfmt/clippy/llvm-cov を未導入なら導入
