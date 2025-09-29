@@ -3,7 +3,7 @@
 -- 意図: 条件分岐と比較演算を紹介する
 -- 関連ファイル: examples/basics.tl, README.md
 
-absInt :: Int -> Int ;
+absInt :: (Num a, Ord a) => a -> a;
 let absInt n = if n < 0 then -n else n;
 
 let isTeenager age =
