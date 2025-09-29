@@ -1,3 +1,7 @@
+# ==============================================================================
+# Rust プロジェクト Makefile（変数なし・check→ci 順）
+# ==============================================================================
+
 .DEFAULT_GOAL := help
 
 SHELL := /usr/bin/bash
@@ -6,11 +10,12 @@ SHELL := /usr/bin/bash
 .EXPORT_ALL_VARIABLES:
 
 .PHONY: \
-  help clean add-tools \
-  fmt fmt-check clippy test build release \
-  doc coverage \
+  help clean \
+  fmt fmt-check clippy \
+  test build release \
+  doc doc-open coverage \
   audit outdated udeps miri bench \
-  check full_local ci \
+  check full_local ci
 
 help: ## このヘルプを表示
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -24,7 +29,7 @@ fmt: ## 整形を実行（ローカル用）
 	cargo fmt --all
 
 fmt-check: ## 整形済みかを検査（CI向け）
-	cargo fmt --all -- --check
+	cargo fmt --all --check
 
 clippy: ## Clippy（警告=エラー）
 	cargo clippy --workspace --all-targets --all-features -- -D warnings
@@ -41,13 +46,18 @@ release: ## リリースビルド（ローカル用）
 doc: ## ドキュメント生成（警告=エラー）
 	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
 
+doc-open: doc ## 生成後にブラウザで開く
+	html="target/doc/index.html"; \
+	if command -v wslview >/dev/null 2>&1; then wslview "$$html"; \
+	elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$$html"; \
+	elif command -v open >/dev/null 2>&1; then open "$$html"; \
+	else echo "open $$html"; fi
+
 # ---- ツール導入（未導入時のみ） -----------------------------------------------
-add-tools: ## llvm-cov/cargo-audit/cargo-outdated/cargo-udeps/miri を未導入なら導入
+add-tools: ## rustfmt/clippy/llvm-cov を未導入なら導入
+	command -v rustfmt >/dev/null 2>&1 || rustup component add rustfmt
+	command -v cargo-clippy >/dev/null 2>&1 || rustup component add clippy
 	command -v cargo-llvm-cov >/dev/null 2>&1 || { rustup component add llvm-tools-preview; cargo install cargo-llvm-cov --locked; }
-	command -v cargo-audit    >/dev/null 2>&1 || cargo install cargo-audit
-	command -v cargo-outdated >/dev/null 2>&1 || cargo install cargo-outdated
-	command -v cargo-udeps    >/dev/null 2>&1 || cargo +nightly install cargo-udeps
-	rustup +nightly component add miri
 
 # ---- カバレッジ ---------------------------------------------------------------
 coverage: ## カバレッジ (HTML, JSON, LCOV)
@@ -81,7 +91,7 @@ check: fmt clippy test ## フォーマット＋Lint＋テスト
 full_local: add-tools clean fmt clippy test release audit outdated udeps miri doc coverage ## フルローカルビルド
 	@echo "✅ フルローカルビルド (clean → fmt → clippy → test → release → audit → outdated → udeps → miri → doc → coverage) 完了"
 
-ci: clean fmt-check clippy test release ## CI: クリーンビルド + fmt-check + clippy + test + release
-	cargo build --workspace --all-features --frozen --locked --release
+ci: clean fmt-check clippy ## CI: クリーンビルド + fmt-check + clippy + test + release
 	cargo test  --workspace --all-features --frozen --locked --verbose
+	cargo build --workspace --all-features --frozen --locked --release
 	@echo "✅ CIフロー (clean → fmt-check → clippy → test → release) 完了"
