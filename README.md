@@ -19,7 +19,7 @@
 ## クイックスタート
 ```bash
 # REPL を起動
-cargo run typelang-repl
+cargo run
 
 # セッション例
 > :let inc n = n + 1
