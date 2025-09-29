@@ -679,6 +679,18 @@ mod tests {
         );
     }
 
+    #[test]
+    fn parse_repl_command_invalid_variants() {
+        match parse_repl_command(":set default maybe") {
+            ReplCommand::Invalid(src) => assert_eq!(src, ":set default maybe"),
+            other => panic!("expected invalid, got {:?}", other),
+        }
+        match parse_repl_command(":set other on") {
+            ReplCommand::Invalid(src) => assert_eq!(src, ":set other on"),
+            other => panic!("expected invalid, got {:?}", other),
+        }
+    }
+
     struct NoopIo;
     impl ReplIo for NoopIo {
         fn read_to_string(&self, _path: &str) -> Result<String, String> {
@@ -804,5 +816,24 @@ mod tests {
         assert!(msgs
             .iter()
             .any(|m| matches!(m, ReplMsg::Err(s) if s.contains("直近の :load"))));
+    }
+
+    #[test]
+    fn handle_typeof_eval_and_let_flow() {
+        let mut state = mk_state();
+        let msgs = handle_command(&mut state, ReplCommand::TypeOf("1".into()), &NoopIo);
+        assert!(matches!(msgs.first(), Some(ReplMsg::Out(s)) if s.starts_with("-- ")));
+
+        let msgs = handle_command(&mut state, ReplCommand::Eval("1 + 1".into()), &NoopIo);
+        assert!(matches!(msgs.first(), Some(ReplMsg::Value(_))));
+        assert!(state.value_env.contains_key("it"));
+        assert!(state.type_env.lookup("it").is_some());
+
+        let msgs = handle_command(&mut state, ReplCommand::Let("let two = 2".into()), &NoopIo);
+        assert!(msgs
+            .iter()
+            .any(|m| matches!(m, ReplMsg::Out(s) if s.contains("Defined two"))));
+        assert!(state.value_env.contains_key("two"));
+        assert!(state.type_env.lookup("two").is_some());
     }
 }

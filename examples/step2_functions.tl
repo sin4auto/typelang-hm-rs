@@ -11,4 +11,3 @@ let add x y = x + y;
 
 let addFive = add 5;
 let twentyFive = square (addFive 0);
-

@@ -13,4 +13,3 @@ let isTeenager age =
 
 let pickGreeting flag =
   if flag then "Hello, learner!" else "Keep practicing!";
-

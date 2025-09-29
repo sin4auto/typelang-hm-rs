@@ -13,4 +13,3 @@ let powf = 2 ** -1;
 
 -- タプル（型表示は簡略化される）
 let make_pair x y = (x, y);
-

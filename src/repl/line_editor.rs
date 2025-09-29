@@ -434,7 +434,11 @@ extern "C" {
 
 #[cfg(test)]
 mod tests {
-    use super::History;
+    use super::{history_path, read_utf8_char, History};
+    use std::env;
+    use std::fs;
+    use std::io::Cursor;
+    use std::sync::{Mutex, OnceLock};
 
     #[test]
     fn history_add_deduplicates() {
@@ -447,5 +451,174 @@ mod tests {
         history.add("foo");
         history.add("bar");
         assert_eq!(history.entries, vec!["foo", "bar"]);
+    }
+
+    #[test]
+    fn history_add_skips_empty_and_trims() {
+        let mut history = History {
+            entries: Vec::new(),
+            path: None,
+            max_entries: 3,
+        };
+        history.add("   ");
+        history.add(" foo ");
+        history.add("foo");
+        history.add("bar");
+        assert_eq!(history.entries, vec!["foo", "bar"]);
+    }
+
+    #[test]
+    fn history_respects_max_entries() {
+        let mut history = History {
+            entries: vec!["0".into(), "1".into(), "2".into()],
+            path: None,
+            max_entries: 3,
+        };
+        history.add("3");
+        assert_eq!(history.entries, vec!["1", "2", "3"]);
+    }
+
+    fn with_env_lock<T>(f: impl FnOnce() -> T) -> T {
+        static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
+        let lock = GUARD.get_or_init(|| Mutex::new(()));
+        let _guard = lock.lock().unwrap();
+        f()
+    }
+
+    #[test]
+    fn history_save_and_load_roundtrip() {
+        with_env_lock(|| {
+            let dir = env::temp_dir().join("typelang_history_tests");
+            fs::create_dir_all(&dir).unwrap();
+            let path = dir.join(format!(
+                "history_{}.txt",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+
+            let history = History {
+                entries: vec!["foo".into(), "bar".into()],
+                path: Some(path.clone()),
+                max_entries: 10,
+            };
+            history.save().unwrap();
+
+            env::set_var("TYPELANG_HISTORY_FILE", &path);
+            let loaded = History::load();
+            env::remove_var("TYPELANG_HISTORY_FILE");
+
+            assert_eq!(loaded.entries, vec!["foo", "bar"]);
+            assert_eq!(loaded.path.as_ref(), Some(&path));
+
+            fs::remove_file(path).unwrap();
+        });
+    }
+
+    #[test]
+    fn history_path_prefers_env_variable() {
+        with_env_lock(|| {
+            let dir = env::temp_dir();
+            let path = dir.join("typelang_history_env_test.txt");
+            env::set_var("TYPELANG_HISTORY_FILE", &path);
+            let resolved = history_path().unwrap();
+            assert!(resolved.ends_with("typelang_history_env_test.txt"));
+            env::remove_var("TYPELANG_HISTORY_FILE");
+        });
+    }
+
+    #[test]
+    fn read_utf8_char_handles_multibyte() {
+        let mut cursor = Cursor::new(vec![0x81, 0x82]);
+        let ch = read_utf8_char(0xe3, &mut cursor).unwrap().unwrap();
+        assert_eq!(ch, 'あ');
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refresh_line_repositions_cursor() {
+        let mut buffer: Vec<u8> = Vec::new();
+        super::refresh_line(&mut buffer, ":: ", &['a', 'b', 'c'], 1).unwrap();
+        let output = String::from_utf8(buffer).unwrap();
+        assert!(output.contains(":: abc"));
+        assert!(output.contains("\x1b[K"));
+        assert!(output.contains("\x1b[2D"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn handle_escape_navigates_history_and_cursor() {
+        use super::{handle_escape, EscapeContext};
+
+        let history = History {
+            entries: vec!["first".into(), "second".into()],
+            path: None,
+            max_entries: 10,
+        };
+        let mut history_index = history.len();
+        let mut saved_current = None;
+        let mut buffer: Vec<char> = "tmp".chars().collect();
+        let mut cursor = buffer.len();
+
+        // Up arrow: recall last history entry
+        let mut reader = Cursor::new(vec![b'[', b'A']);
+        let mut writer: Vec<u8> = Vec::new();
+        handle_escape(
+            &mut reader,
+            &mut writer,
+            "> ",
+            &mut buffer,
+            &mut cursor,
+            EscapeContext {
+                history: &history,
+                history_index: &mut history_index,
+                saved_current: &mut saved_current,
+            },
+        )
+        .unwrap();
+        assert_eq!(buffer.iter().collect::<String>(), "second");
+        assert_eq!(cursor, buffer.len());
+        assert!(saved_current.is_some());
+
+        // Down arrow: restore saved current input
+        let mut reader = Cursor::new(vec![b'[', b'B']);
+        handle_escape(
+            &mut reader,
+            &mut writer,
+            "> ",
+            &mut buffer,
+            &mut cursor,
+            EscapeContext {
+                history: &history,
+                history_index: &mut history_index,
+                saved_current: &mut saved_current,
+            },
+        )
+        .unwrap();
+        assert_eq!(buffer.iter().collect::<String>(), "tmp");
+        assert_eq!(cursor, buffer.len());
+
+        // Left arrow: move cursor left when possible
+        buffer = "hi".chars().collect();
+        cursor = buffer.len();
+        let mut reader = Cursor::new(vec![b'[', b'D']);
+        handle_escape(
+            &mut reader,
+            &mut writer,
+            "> ",
+            &mut buffer,
+            &mut cursor,
+            EscapeContext {
+                history: &history,
+                history_index: &mut history_index,
+                saved_current: &mut saved_current,
+            },
+        )
+        .unwrap();
+        assert_eq!(cursor, buffer.len() - 1);
+        assert!(String::from_utf8(writer.clone())
+            .unwrap()
+            .contains("\x1b[D"));
     }
 }

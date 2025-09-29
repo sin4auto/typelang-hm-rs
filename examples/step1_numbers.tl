@@ -7,4 +7,3 @@ let two = 2;
 let three = 3;
 let five = two + three;
 let half = 1 / 2;
-
