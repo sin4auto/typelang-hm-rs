@@ -16,6 +16,18 @@ fn infer_type_with_defaulting(src: &str, enable: bool) -> String {
     infer::infer_type_str_with_defaulting(&expr, enable).expect("infer")
 }
 
+/// 式を推論して `pretty_qual` の文字列表現を取得するヘルパ。
+fn infer_result(src: &str) -> Result<String, typelang::errors::TypeError> {
+    let expr = parser::parse_expr(src).expect("parse");
+    let env = infer::initial_env();
+    let ce = infer::initial_class_env();
+    let mut st = infer::InferState {
+        supply: typesys::TVarSupply::new(),
+        subst: Default::default(),
+    };
+    infer::infer_expr(&env, &ce, &mut st, &expr).map(|(_, q)| typesys::pretty_qual(&q))
+}
+
 #[test]
 /// 同一の関数型を単一化できることを検証する。
 fn unify_simple_fun_types() {
@@ -114,18 +126,10 @@ fn infer_add_without_defaulting_keeps_constraint() {
 #[test]
 /// `show` の defaulting 挙動を確認する。
 fn infer_defaulting_controls_show_constraints() {
-    let expr = parser::parse_expr("show 1").unwrap();
-    let env = infer::initial_env();
-    let ce = infer::initial_class_env();
-    let mut st = infer::InferState {
-        supply: typesys::TVarSupply::new(),
-        subst: Default::default(),
-    };
-    let (_, q) = infer::infer_expr(&env, &ce, &mut st, &expr).unwrap();
-    let txt = typesys::pretty_qual(&q);
+    let txt = infer_result("show 1").expect("infer show 1");
     assert!(txt.ends_with("[Char]") || txt.ends_with("String"));
 
-    let defaulted = infer::infer_type_str_with_defaulting(&expr, true).unwrap();
+    let defaulted = infer_type_with_defaulting("show 1", true);
     assert!(defaulted == "String" || defaulted == "[Char]");
 }
 
@@ -147,38 +151,17 @@ fn infer_let_polymorphism_eval_ok() {
 #[test]
 /// 未定義変数が型エラーになることを検証する。
 fn infer_unknown_variable_is_error() {
-    let expr = parser::parse_expr("foo").unwrap();
-    let env = infer::initial_env();
-    let ce = infer::initial_class_env();
-    let mut st = infer::InferState {
-        supply: typesys::TVarSupply::new(),
-        subst: Default::default(),
-    };
-    assert!(infer::infer_expr(&env, &ce, &mut st, &expr).is_err());
+    assert!(infer_result("foo").is_err());
 }
 
 #[test]
 /// if の分岐で型が一致しないとエラーになることを検証する。
 fn infer_if_branches_must_align() {
-    let expr = parser::parse_expr("if True then (1 :: Int) else ('a' :: Char)").unwrap();
-    let env = infer::initial_env();
-    let ce = infer::initial_class_env();
-    let mut st = infer::InferState {
-        supply: typesys::TVarSupply::new(),
-        subst: Default::default(),
-    };
-    assert!(infer::infer_expr(&env, &ce, &mut st, &expr).is_err());
+    assert!(infer_result("if True then (1 :: Int) else ('a' :: Char)").is_err());
 }
 
 #[test]
 /// if 条件が Bool でないとエラーになることを検証する。
 fn infer_if_condition_must_be_bool() {
-    let expr = parser::parse_expr("if 'a' then 2 else 3").unwrap();
-    let env = infer::initial_env();
-    let ce = infer::initial_class_env();
-    let mut st = infer::InferState {
-        supply: typesys::TVarSupply::new(),
-        subst: Default::default(),
-    };
-    assert!(infer::infer_expr(&env, &ce, &mut st, &expr).is_err());
+    assert!(infer_result("if 'a' then 2 else 3").is_err());
 }

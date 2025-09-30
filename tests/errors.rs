@@ -2,64 +2,98 @@
 // 役割: エラー表示と代表的な診断メッセージの安定性を検証
 // 意図: ユーザー向けのエラーテキストと失敗シナリオが回帰しないようにする
 // 関連ファイル: src/errors.rs, src/lexer.rs, src/parser.rs
+use std::fmt::Display;
+
 use typelang::errors::ErrorInfo;
 use typelang::{infer, lexer, parser, typesys};
+
+/// `ErrorInfo` から生成された文字列表現を検証するヘルパ。
+fn assert_error_display(info: ErrorInfo, expected: &str) {
+    let actual = info.to_string();
+    assert_eq!(actual, expected);
+}
+
+/// エラーメッセージに特定の断片が含まれることを検証するヘルパ。
+fn assert_err_fragments<T, E>(res: Result<T, E>, fragments: &[&str])
+where
+    E: Display,
+{
+    let rendered = match res {
+        Ok(_) => panic!("エラーが返ること"),
+        Err(err) => format!("{}", err),
+    };
+    for fragment in fragments {
+        assert!(
+            rendered.contains(fragment),
+            "期待する断片 `{fragment}` が含まれていません: {rendered}"
+        );
+    }
+}
 
 #[test]
 /// エラー表示に行・列・位置・スニペットが含まれることを確認する。
 fn error_display_line_col_pos_and_snippet() {
-    let msg = ErrorInfo::at("E001", "msg", Some(12), Some(3), Some(5))
-        .with_snippet("abcdef")
-        .to_string();
-    assert_eq!(msg, "[E001] msg @line=3,col=5 @pos=12\nabcdef\n    ^");
+    assert_error_display(
+        ErrorInfo::at("E001", "msg", Some(12), Some(3), Some(5)).with_snippet("abcdef"),
+        "[E001] msg @line=3,col=5 @pos=12\nabcdef\n    ^",
+    );
 }
 
 #[test]
 /// 行と列のみが表示されるケースを検証する。
 fn error_display_line_col_only() {
-    let msg = ErrorInfo::at("E002", "msg", None, Some(2), Some(1)).to_string();
-    assert_eq!(msg, "[E002] msg @line=2,col=1");
+    assert_error_display(
+        ErrorInfo::at("E002", "msg", None, Some(2), Some(1)),
+        "[E002] msg @line=2,col=1",
+    );
 }
 
 #[test]
 /// 位置情報のみ表示されるケースを検証する。
 fn error_display_pos_only() {
-    let msg = ErrorInfo::new("E003", "msg", Some(7)).to_string();
-    assert_eq!(msg, "[E003] msg @pos=7");
+    assert_error_display(ErrorInfo::new("E003", "msg", Some(7)), "[E003] msg @pos=7");
 }
 
 #[test]
 /// 追加情報なしの表示を検証する。
 fn error_display_plain() {
-    let msg = ErrorInfo::new("E004", "plain", None).to_string();
-    assert_eq!(msg, "[E004] plain");
+    assert_error_display(ErrorInfo::new("E004", "plain", None), "[E004] plain");
+}
+
+#[test]
+/// カラム位置が 1 のスニペットでもキャレットが正しく描画されることを検証する。
+fn error_display_snippet_column_one() {
+    assert_error_display(
+        ErrorInfo::at("E005", "caret", Some(5), Some(1), Some(1)).with_snippet("oops"),
+        "[E005] caret @line=1,col=1 @pos=5\noops\n^",
+    );
 }
 
 #[test]
 /// ブロックコメント未閉鎖のエラーメッセージを検証する。
 fn lexer_error_unclosed_block_comment_message() {
-    let err = lexer::lex("{- never closed").expect_err("block comment error");
-    let s = err.to_string();
-    assert!(s.contains("[LEX001]"));
-    assert!(s.contains("ブロックコメントが閉じていません"));
+    assert_err_fragments(
+        lexer::lex("{- never closed"),
+        &["[LEX001]", "ブロックコメントが閉じていません"],
+    );
 }
 
 #[test]
 /// 文字列リテラル未閉鎖のエラーメッセージを検証する。
 fn lexer_error_unclosed_string_message() {
-    let err = lexer::lex("\"abc").expect_err("unclosed string error");
-    let s = err.to_string();
-    assert!(s.contains("[LEX003]"));
-    assert!(s.contains("文字列リテラルが閉じていません"));
+    assert_err_fragments(
+        lexer::lex("\"abc"),
+        &["[LEX003]", "文字列リテラルが閉じていません"],
+    );
 }
 
 #[test]
 /// 余分なトークンが指摘されることを検証する。
 fn parser_error_extra_tokens_message() {
-    let err = parser::parse_expr("1; 2").expect_err("extra tokens");
-    let s = err.to_string();
-    assert!(s.contains("[PAR090]"));
-    assert!(s.contains("余分なトークンが残っています"));
+    assert_err_fragments(
+        parser::parse_expr("1; 2"),
+        &["[PAR090]", "余分なトークンが残っています"],
+    );
 }
 
 #[test]
