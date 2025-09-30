@@ -1,1 +1,0 @@
-searchState.loadedDescShard("typelang_repl", 0, "REPLを起動するエントリポイント。")

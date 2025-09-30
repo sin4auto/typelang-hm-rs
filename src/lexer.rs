@@ -71,6 +71,56 @@ pub enum TokenKind {
     FALSE,
 }
 
+#[derive(Debug)]
+/// 行頭オフセットを事前計算し、行・列情報を素早く算出するヘルパ。
+struct LineMap {
+    starts: Vec<usize>,
+}
+
+impl LineMap {
+    /// 入力全体を 1 度だけ走査して行頭インデックスを収集する。
+    fn new(src: &str) -> Self {
+        let mut starts = vec![0];
+        for (idx, ch) in src.char_indices() {
+            if ch == '\n' {
+                let next = idx + ch.len_utf8();
+                if next <= src.len() {
+                    starts.push(next);
+                }
+            }
+        }
+        Self { starts }
+    }
+
+    /// 指定バイト位置の行番号と桁位置を返す。
+    fn locate(&self, src: &str, pos: usize) -> (usize, usize) {
+        let idx = match self.starts.binary_search(&pos) {
+            Ok(i) => i,
+            Err(0) => 0,
+            Err(i) => i - 1,
+        };
+        let line = idx + 1;
+        let start = self.starts[idx];
+        let col = src[start..pos].chars().count() + 1;
+        (line, col)
+    }
+
+    /// 指定行に対応するテキスト断片を返す（改行は除去する）。
+    fn line_text<'a>(&self, src: &'a str, line: usize) -> &'a str {
+        if line == 0 {
+            return "";
+        }
+        let idx = line - 1;
+        if idx >= self.starts.len() {
+            return "";
+        }
+        let start = self.starts[idx];
+        let end = self.starts.get(idx + 1).copied().unwrap_or(src.len());
+        let slice = &src[start..end];
+        slice.strip_suffix('\n').unwrap_or(slice)
+    }
+}
+
 /// 空白文字かどうかを判定するユーティリティ。
 fn is_whitespace(c: char) -> bool {
     matches!(c, ' ' | '\t' | '\r' | '\n')
@@ -107,30 +157,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
     let bytes = src.as_bytes();
     let n = bytes.len();
     let next_char = |i: usize| -> Option<char> { src[i..].chars().next() };
-    /// 指定位置の行番号と桁位置を算出する。
-    fn line_col_at(src: &str, pos: usize) -> (usize, usize) {
-        let mut line = 1usize;
-        let mut col = 1usize;
-        for (bpos, ch) in src.char_indices() {
-            if bpos >= pos {
-                break;
-            }
-            if ch == '\n' {
-                line += 1;
-                col = 1;
-            } else {
-                col += 1;
-            }
-        }
-        (line, col)
-    }
-    /// 指定行のテキストを取得する。
-    fn line_text_at(src: &str, line: usize) -> String {
-        src.lines()
-            .nth(line.saturating_sub(1))
-            .unwrap_or("")
-            .to_string()
-    }
+    let line_map = LineMap::new(src);
     while i < n {
         let Some(c) = next_char(i) else { break };
         let c_next_idx = i + c.len_utf8();
@@ -158,14 +185,14 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                     i += next_char(i).map(|ch| ch.len_utf8()).unwrap_or(1);
                 }
                 if !closed {
-                    let (l, c) = line_col_at(src, i);
+                    let (l, c) = line_map.locate(src, i);
                     return Err(LexerError::at_with_snippet(
                         "LEX001",
                         "ブロックコメントが閉じていません",
                         Some(i),
                         Some(l),
                         Some(c),
-                        line_text_at(src, l),
+                        line_map.line_text(src, l).to_string(),
                     ));
                 }
                 continue;
@@ -193,7 +220,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
             if let Some(c2) = next_char(c_next_idx) {
                 match (c, c2) {
                     ('-', '>') => {
-                        let (l, c) = line_col_at(src, i);
+                        let (l, c) = line_map.locate(src, i);
                         toks.push(Token {
                             kind: TokenKind::ARROW,
                             value: "->".into(),
@@ -205,7 +232,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                         continue;
                     }
                     (':', ':') => {
-                        let (l, c) = line_col_at(src, i);
+                        let (l, c) = line_map.locate(src, i);
                         toks.push(Token {
                             kind: TokenKind::DCOLON,
                             value: "::".into(),
@@ -217,7 +244,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                         continue;
                     }
                     ('=', '>') => {
-                        let (l, c) = line_col_at(src, i);
+                        let (l, c) = line_map.locate(src, i);
                         toks.push(Token {
                             kind: TokenKind::DARROW,
                             value: "=>".into(),
@@ -229,7 +256,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                         continue;
                     }
                     ('<', '=') => {
-                        let (l, c) = line_col_at(src, i);
+                        let (l, c) = line_map.locate(src, i);
                         toks.push(Token {
                             kind: TokenKind::LE,
                             value: "<=".into(),
@@ -241,7 +268,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                         continue;
                     }
                     ('>', '=') => {
-                        let (l, c) = line_col_at(src, i);
+                        let (l, c) = line_map.locate(src, i);
                         toks.push(Token {
                             kind: TokenKind::GE,
                             value: ">=".into(),
@@ -253,7 +280,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                         continue;
                     }
                     ('=', '=') => {
-                        let (l, c) = line_col_at(src, i);
+                        let (l, c) = line_map.locate(src, i);
                         toks.push(Token {
                             kind: TokenKind::EQ,
                             value: "==".into(),
@@ -265,7 +292,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                         continue;
                     }
                     ('/', '=') => {
-                        let (l, c) = line_col_at(src, i);
+                        let (l, c) = line_map.locate(src, i);
                         toks.push(Token {
                             kind: TokenKind::NE,
                             value: "/=".into(),
@@ -277,7 +304,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                         continue;
                     }
                     ('*', '*') => {
-                        let (l, c) = line_col_at(src, i);
+                        let (l, c) = line_map.locate(src, i);
                         toks.push(Token {
                             kind: TokenKind::DBLSTAR,
                             value: "**".into(),
@@ -296,7 +323,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
         // 1 文字記号
         match c {
             '\\' => {
-                let (l, c) = line_col_at(src, i);
+                let (l, c) = line_map.locate(src, i);
                 toks.push(Token {
                     kind: TokenKind::LAMBDA,
                     value: "\\".into(),
@@ -308,7 +335,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                 continue;
             }
             '<' => {
-                let (l, c) = line_col_at(src, i);
+                let (l, c) = line_map.locate(src, i);
                 toks.push(Token {
                     kind: TokenKind::LT,
                     value: "<".into(),
@@ -320,7 +347,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                 continue;
             }
             '>' => {
-                let (l, c) = line_col_at(src, i);
+                let (l, c) = line_map.locate(src, i);
                 toks.push(Token {
                     kind: TokenKind::GT,
                     value: ">".into(),
@@ -332,7 +359,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                 continue;
             }
             '+' => {
-                let (l, c) = line_col_at(src, i);
+                let (l, c) = line_map.locate(src, i);
                 toks.push(Token {
                     kind: TokenKind::PLUS,
                     value: "+".into(),
@@ -344,7 +371,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                 continue;
             }
             '-' => {
-                let (l, c) = line_col_at(src, i);
+                let (l, c) = line_map.locate(src, i);
                 toks.push(Token {
                     kind: TokenKind::MINUS,
                     value: "-".into(),
@@ -356,7 +383,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                 continue;
             }
             '*' => {
-                let (l, c) = line_col_at(src, i);
+                let (l, c) = line_map.locate(src, i);
                 toks.push(Token {
                     kind: TokenKind::STAR,
                     value: "*".into(),
@@ -368,7 +395,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                 continue;
             }
             '/' => {
-                let (l, c) = line_col_at(src, i);
+                let (l, c) = line_map.locate(src, i);
                 toks.push(Token {
                     kind: TokenKind::SLASH,
                     value: "/".into(),
@@ -380,7 +407,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                 continue;
             }
             '^' => {
-                let (l, c) = line_col_at(src, i);
+                let (l, c) = line_map.locate(src, i);
                 toks.push(Token {
                     kind: TokenKind::CARET,
                     value: "^".into(),
@@ -392,7 +419,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                 continue;
             }
             '(' => {
-                let (l, c) = line_col_at(src, i);
+                let (l, c) = line_map.locate(src, i);
                 toks.push(Token {
                     kind: TokenKind::LPAREN,
                     value: "(".into(),
@@ -404,7 +431,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                 continue;
             }
             ')' => {
-                let (l, c) = line_col_at(src, i);
+                let (l, c) = line_map.locate(src, i);
                 toks.push(Token {
                     kind: TokenKind::RPAREN,
                     value: ")".into(),
@@ -416,7 +443,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                 continue;
             }
             '[' => {
-                let (l, c) = line_col_at(src, i);
+                let (l, c) = line_map.locate(src, i);
                 toks.push(Token {
                     kind: TokenKind::LBRACK,
                     value: "[".into(),
@@ -428,7 +455,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                 continue;
             }
             ']' => {
-                let (l, c) = line_col_at(src, i);
+                let (l, c) = line_map.locate(src, i);
                 toks.push(Token {
                     kind: TokenKind::RBRACK,
                     value: "]".into(),
@@ -440,7 +467,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                 continue;
             }
             ',' => {
-                let (l, c) = line_col_at(src, i);
+                let (l, c) = line_map.locate(src, i);
                 toks.push(Token {
                     kind: TokenKind::COMMA,
                     value: ",".into(),
@@ -452,7 +479,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                 continue;
             }
             ';' => {
-                let (l, c) = line_col_at(src, i);
+                let (l, c) = line_map.locate(src, i);
                 toks.push(Token {
                     kind: TokenKind::SEMI,
                     value: ";".into(),
@@ -464,7 +491,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                 continue;
             }
             '=' => {
-                let (l, c) = line_col_at(src, i);
+                let (l, c) = line_map.locate(src, i);
                 toks.push(Token {
                     kind: TokenKind::EQUAL,
                     value: "=".into(),
@@ -476,7 +503,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                 continue;
             }
             '?' => {
-                let (l, c) = line_col_at(src, i);
+                let (l, c) = line_map.locate(src, i);
                 toks.push(Token {
                     kind: TokenKind::QMARK,
                     value: "?".into(),
@@ -488,7 +515,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                 continue;
             }
             '_' => {
-                let (l, c) = line_col_at(src, i);
+                let (l, c) = line_map.locate(src, i);
                 toks.push(Token {
                     kind: TokenKind::UNDERSCORE,
                     value: "_".into(),
@@ -527,18 +554,18 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                     }
                 }
                 if !ok {
-                    let (l, c) = line_col_at(src, start);
+                    let (l, c) = line_map.locate(src, start);
                     return Err(LexerError::at_with_snippet(
                         "LEX002",
                         "文字リテラルが閉じていません",
                         Some(start),
                         Some(l),
                         Some(c),
-                        line_text_at(src, l),
+                        line_map.line_text(src, l).to_string(),
                     ));
                 }
                 let s = &src[start..i];
-                let (l, c) = line_col_at(src, start);
+                let (l, c) = line_map.locate(src, start);
                 toks.push(Token {
                     kind: TokenKind::CHAR,
                     value: s.into(),
@@ -575,18 +602,18 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                     }
                 }
                 if !ok {
-                    let (l, c) = line_col_at(src, start);
+                    let (l, c) = line_map.locate(src, start);
                     return Err(LexerError::at_with_snippet(
                         "LEX003",
                         "文字列リテラルが閉じていません",
                         Some(start),
                         Some(l),
                         Some(c),
-                        line_text_at(src, l),
+                        line_map.line_text(src, l).to_string(),
                     ));
                 }
                 let s = &src[start..i];
-                let (l, c) = line_col_at(src, start);
+                let (l, c) = line_map.locate(src, start);
                 toks.push(Token {
                     kind: TokenKind::STRING,
                     value: s.into(),
@@ -618,17 +645,17 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                         }
                     }
                     if cnt == 0 {
-                        let (l, c) = line_col_at(src, start);
+                        let (l, c) = line_map.locate(src, start);
                         return Err(LexerError::at_with_snippet(
                             "LEX010",
                             "16進数の桁がありません",
                             Some(start),
                             Some(l),
                             Some(c),
-                            line_text_at(src, l),
+                            line_map.line_text(src, l).to_string(),
                         ));
                     }
-                    let (l, c) = line_col_at(src, start);
+                    let (l, c) = line_map.locate(src, start);
                     toks.push(Token {
                         kind: TokenKind::HEX,
                         value: src[start..i].into(),
@@ -653,17 +680,17 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                         }
                     }
                     if cnt == 0 {
-                        let (l, c) = line_col_at(src, start);
+                        let (l, c) = line_map.locate(src, start);
                         return Err(LexerError::at_with_snippet(
                             "LEX011",
                             "8進数の桁がありません",
                             Some(start),
                             Some(l),
                             Some(c),
-                            line_text_at(src, l),
+                            line_map.line_text(src, l).to_string(),
                         ));
                     }
-                    let (l, c) = line_col_at(src, start);
+                    let (l, c) = line_map.locate(src, start);
                     toks.push(Token {
                         kind: TokenKind::OCT,
                         value: src[start..i].into(),
@@ -688,17 +715,17 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                         }
                     }
                     if cnt == 0 {
-                        let (l, c) = line_col_at(src, start);
+                        let (l, c) = line_map.locate(src, start);
                         return Err(LexerError::at_with_snippet(
                             "LEX012",
                             "2進数の桁がありません",
                             Some(start),
                             Some(l),
                             Some(c),
-                            line_text_at(src, l),
+                            line_map.line_text(src, l).to_string(),
                         ));
                     }
-                    let (l, c) = line_col_at(src, start);
+                    let (l, c) = line_map.locate(src, start);
                     toks.push(Token {
                         kind: TokenKind::BIN,
                         value: src[start..i].into(),
@@ -773,7 +800,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
             } else {
                 TokenKind::INT
             };
-            let (l, c) = line_col_at(src, start);
+            let (l, c) = line_map.locate(src, start);
             toks.push(Token {
                 kind,
                 value: s.into(),
@@ -798,55 +825,56 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
             }
             let s = &src[start..i];
             // 予約語かどうかを振り分ける
+            let (line, col) = line_map.locate(src, start);
             let token = match s {
                 "let" => Token {
                     kind: TokenKind::LET,
                     value: s.into(),
                     pos: start,
-                    line: line_col_at(src, start).0,
-                    col: line_col_at(src, start).1,
+                    line,
+                    col,
                 },
                 "in" => Token {
                     kind: TokenKind::IN,
                     value: s.into(),
                     pos: start,
-                    line: line_col_at(src, start).0,
-                    col: line_col_at(src, start).1,
+                    line,
+                    col,
                 },
                 "if" => Token {
                     kind: TokenKind::IF,
                     value: s.into(),
                     pos: start,
-                    line: line_col_at(src, start).0,
-                    col: line_col_at(src, start).1,
+                    line,
+                    col,
                 },
                 "then" => Token {
                     kind: TokenKind::THEN,
                     value: s.into(),
                     pos: start,
-                    line: line_col_at(src, start).0,
-                    col: line_col_at(src, start).1,
+                    line,
+                    col,
                 },
                 "else" => Token {
                     kind: TokenKind::ELSE,
                     value: s.into(),
                     pos: start,
-                    line: line_col_at(src, start).0,
-                    col: line_col_at(src, start).1,
+                    line,
+                    col,
                 },
                 "True" => Token {
                     kind: TokenKind::TRUE,
                     value: s.into(),
                     pos: start,
-                    line: line_col_at(src, start).0,
-                    col: line_col_at(src, start).1,
+                    line,
+                    col,
                 },
                 "False" => Token {
                     kind: TokenKind::FALSE,
                     value: s.into(),
                     pos: start,
-                    line: line_col_at(src, start).0,
-                    col: line_col_at(src, start).1,
+                    line,
+                    col,
                 },
                 _ => {
                     let first = s
@@ -858,16 +886,16 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                             kind: TokenKind::CONID,
                             value: s.into(),
                             pos: start,
-                            line: line_col_at(src, start).0,
-                            col: line_col_at(src, start).1,
+                            line,
+                            col,
                         }
                     } else {
                         Token {
                             kind: TokenKind::VARID,
                             value: s.into(),
                             pos: start,
-                            line: line_col_at(src, start).0,
-                            col: line_col_at(src, start).1,
+                            line,
+                            col,
                         }
                     }
                 }
@@ -876,17 +904,17 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
             continue;
         }
 
-        let (l, c2) = line_col_at(src, i);
+        let (l, c2) = line_map.locate(src, i);
         return Err(LexerError::at_with_snippet(
             "LEX090",
             format!("字句解析に失敗: {:?}", c),
             Some(i),
             Some(l),
             Some(c2),
-            line_text_at(src, l),
+            line_map.line_text(src, l).to_string(),
         ));
     }
-    let (l, c) = line_col_at(src, n);
+    let (l, c) = line_map.locate(src, n);
     toks.push(Token {
         kind: TokenKind::EOF,
         value: String::new(),
