@@ -195,33 +195,38 @@ fn skip_block_comment(
     if !src[*cursor..].starts_with("{-") {
         return Ok(false);
     }
-    let mut idx = *cursor + 2; // "{-"
-    let mut closed = false;
+    let mut idx = *cursor + 2; // consume "{-"
+    let mut depth = 1;
     while idx < src.len() {
         if src[idx..].starts_with("-}") {
+            depth -= 1;
             idx += 2;
-            closed = true;
-            break;
+            if depth == 0 {
+                *cursor = idx;
+                return Ok(true);
+            }
+            continue;
+        }
+        if src[idx..].starts_with("{-") {
+            depth += 1;
+            idx += 2;
+            continue;
         }
         let Some(ch) = src[idx..].chars().next() else {
             break;
         };
         idx += ch.len_utf8();
     }
-    if !closed {
-        let pos = idx.min(src.len());
-        let (line, col) = line_map.locate(src, pos);
-        return Err(LexerError::at_with_snippet(
-            "LEX001",
-            "ブロックコメントが閉じていません",
-            Some(pos),
-            Some(line),
-            Some(col),
-            line_map.line_text(src, line).to_string(),
-        ));
-    }
-    *cursor = idx;
-    Ok(true)
+    let pos = idx.min(src.len());
+    let (line, col) = line_map.locate(src, pos);
+    Err(LexerError::at_with_snippet(
+        "LEX001",
+        "ブロックコメントが閉じていません",
+        Some(pos),
+        Some(line),
+        Some(col),
+        line_map.line_text(src, line).to_string(),
+    ))
 }
 
 /// ソースコードを走査し、位置付きトークン列を返す。

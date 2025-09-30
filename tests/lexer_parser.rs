@@ -29,6 +29,15 @@ fn lexer_comments_and_strings() {
 }
 
 #[test]
+/// ブロックコメントが入れ子でも正しくスキップされることを確認する。
+fn lexer_nested_block_comments() {
+    let src = "{- outer {- inner -} still outer -} let x = 1;";
+    let toks = lex_ok(src);
+    assert!(toks.iter().any(|t| matches!(t.kind, TokenKind::LET)));
+    assert!(toks.iter().any(|t| matches!(t.kind, TokenKind::VARID)));
+}
+
+#[test]
 /// 基数プレフィックスを伴う整数リテラルを検証する。
 fn lexer_numeric_prefixes() {
     let toks = lex_ok("let a = 0x1f; let b = 0o77; let c = 0b1010;");
@@ -135,6 +144,34 @@ fn parser_let_in_multiple_bindings() {
 fn parser_question_variable_is_preserved() {
     let expr = parse_expr("?x");
     assert_eq!(format!("{}", expr), "?x");
+}
+
+#[test]
+/// 大文字で始まる型注釈が `::` 直後でも解釈できることを検証する。
+fn parser_accepts_capitalized_type_signature() {
+    let src = "foo :: Int -> Int;\nlet foo x = x;";
+    let prog = parser::parse_program(src).expect("parse capitalized signature");
+    assert_eq!(prog.decls.len(), 1);
+    let sig = prog.decls[0]
+        .signature
+        .as_ref()
+        .expect("signature should be present");
+    assert!(sig.constraints.is_empty());
+}
+
+#[test]
+/// 型クラス制約付きシグネチャが既存どおり解釈できることを確認する。
+fn parser_retains_constraint_type_signature() {
+    let src = "bar :: Num a => a -> a;\nlet bar x = x;";
+    let prog = parser::parse_program(src).expect("parse constrained signature");
+    assert_eq!(prog.decls.len(), 1);
+    let sig = prog.decls[0]
+        .signature
+        .as_ref()
+        .expect("signature should be present");
+    assert_eq!(sig.constraints.len(), 1);
+    assert_eq!(sig.constraints[0].classname, "Num");
+    assert_eq!(sig.constraints[0].typevar, "a");
 }
 
 #[test]

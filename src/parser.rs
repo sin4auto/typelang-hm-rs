@@ -80,6 +80,10 @@ impl Parser {
         self.i += 1;
         t
     }
+    /// 現在位置から任意のオフセットにあるトークン種別を先読みする。
+    fn peek_kind(&self, offset: usize) -> Option<TokenKind> {
+        self.ts.get(self.i + offset).map(|t| t.kind.clone())
+    }
     /// 指定した種別のトークンを期待しつつ消費する。
     fn pop(&mut self, kind: TokenKind) -> Result<Token, ParseError> {
         let t = self.peek().clone();
@@ -474,18 +478,35 @@ impl Parser {
     fn try_parse_context(&mut self) -> Result<Option<Vec<AConstraint>>, ParseError> {
         match self.peek().kind {
             TokenKind::CONID => {
+                if !matches!(self.peek_kind(1), Some(TokenKind::VARID)) {
+                    return Ok(None);
+                }
+                let save = self.i;
                 let c = self.parse_constraint()?;
                 if self.peek().kind == TokenKind::DARROW {
                     Ok(Some(vec![c]))
                 } else {
+                    self.i = save;
                     Ok(None)
                 }
             }
             TokenKind::LPAREN => {
                 let save = self.i;
                 self.pop(TokenKind::LPAREN)?;
+                if !(matches!(self.peek_kind(0), Some(TokenKind::CONID))
+                    && matches!(self.peek_kind(1), Some(TokenKind::VARID)))
+                {
+                    self.i = save;
+                    return Ok(None);
+                }
                 let mut cs = vec![self.parse_constraint()?];
                 while self.accept(TokenKind::COMMA).is_some() {
+                    if !(matches!(self.peek_kind(0), Some(TokenKind::CONID))
+                        && matches!(self.peek_kind(1), Some(TokenKind::VARID)))
+                    {
+                        self.i = save;
+                        return Ok(None);
+                    }
                     cs.push(self.parse_constraint()?);
                 }
                 if self.accept(TokenKind::RPAREN).is_none() {

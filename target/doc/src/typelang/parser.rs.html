@@ -80,605 +80,626 @@
 <a href=#80 id=80 data-nosnippet>80</a>        <span class="self">self</span>.i += <span class="number">1</span>;
 <a href=#81 id=81 data-nosnippet>81</a>        t
 <a href=#82 id=82 data-nosnippet>82</a>    }
-<a href=#83 id=83 data-nosnippet>83</a>    <span class="doccomment">/// 指定した種別のトークンを期待しつつ消費する。
-<a href=#84 id=84 data-nosnippet>84</a>    </span><span class="kw">fn </span>pop(<span class="kw-2">&amp;mut </span><span class="self">self</span>, kind: TokenKind) -&gt; <span class="prelude-ty">Result</span>&lt;Token, ParseError&gt; {
-<a href=#85 id=85 data-nosnippet>85</a>        <span class="kw">let </span>t = <span class="self">self</span>.peek().clone();
-<a href=#86 id=86 data-nosnippet>86</a>        <span class="kw">if </span>t.kind != kind {
-<a href=#87 id=87 data-nosnippet>87</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(ParseError::at(
-<a href=#88 id=88 data-nosnippet>88</a>                <span class="string">"PAR001"</span>,
-<a href=#89 id=89 data-nosnippet>89</a>                <span class="macro">format!</span>(<span class="string">"{:?} を期待しましたが {:?} ({})"</span>, kind, t.kind, t.value),
-<a href=#90 id=90 data-nosnippet>90</a>                <span class="prelude-val">Some</span>(t.pos),
-<a href=#91 id=91 data-nosnippet>91</a>                <span class="prelude-val">Some</span>(t.line),
-<a href=#92 id=92 data-nosnippet>92</a>                <span class="prelude-val">Some</span>(t.col),
-<a href=#93 id=93 data-nosnippet>93</a>            ));
-<a href=#94 id=94 data-nosnippet>94</a>        }
-<a href=#95 id=95 data-nosnippet>95</a>        <span class="self">self</span>.i += <span class="number">1</span>;
-<a href=#96 id=96 data-nosnippet>96</a>        <span class="prelude-val">Ok</span>(t)
-<a href=#97 id=97 data-nosnippet>97</a>    }
-<a href=#98 id=98 data-nosnippet>98</a>    <span class="doccomment">/// 指定した種別が先頭にあれば消費し、なければ `None` を返す。
-<a href=#99 id=99 data-nosnippet>99</a>    </span><span class="kw">fn </span>accept(<span class="kw-2">&amp;mut </span><span class="self">self</span>, kind: TokenKind) -&gt; <span class="prelude-ty">Option</span>&lt;Token&gt; {
-<a href=#100 id=100 data-nosnippet>100</a>        <span class="kw">if </span><span class="self">self</span>.peek().kind == kind {
-<a href=#101 id=101 data-nosnippet>101</a>            <span class="kw">let </span>t = <span class="self">self</span>.pop_any();
-<a href=#102 id=102 data-nosnippet>102</a>            <span class="prelude-val">Some</span>(t)
-<a href=#103 id=103 data-nosnippet>103</a>        } <span class="kw">else </span>{
-<a href=#104 id=104 data-nosnippet>104</a>            <span class="prelude-val">None
-<a href=#105 id=105 data-nosnippet>105</a>        </span>}
-<a href=#106 id=106 data-nosnippet>106</a>    }
-<a href=#107 id=107 data-nosnippet>107</a>
-<a href=#108 id=108 data-nosnippet>108</a>    <span class="doccomment">/// プログラム全体（`program := { toplevel }`）を解析する。
-<a href=#109 id=109 data-nosnippet>109</a>    ///
-<a href=#110 id=110 data-nosnippet>110</a>    /// # Examples
-<a href=#111 id=111 data-nosnippet>111</a>    /// ```
-<a href=#112 id=112 data-nosnippet>112</a>    /// use typelang::parser::{self, Parser};
-<a href=#113 id=113 data-nosnippet>113</a>    /// let src = "square :: Num a =&gt; a -&gt; a;\nlet square x = x * x;";
-<a href=#114 id=114 data-nosnippet>114</a>    /// let tokens = typelang::lexer::lex(src).unwrap();
-<a href=#115 id=115 data-nosnippet>115</a>    /// let mut p = Parser::new(tokens);
-<a href=#116 id=116 data-nosnippet>116</a>    /// let prog = p.parse_program().unwrap();
-<a href=#117 id=117 data-nosnippet>117</a>    /// assert_eq!(prog.decls.len(), 1);
-<a href=#118 id=118 data-nosnippet>118</a>    /// ```
-<a href=#119 id=119 data-nosnippet>119</a>    </span><span class="kw">pub fn </span>parse_program(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Program, ParseError&gt; {
-<a href=#120 id=120 data-nosnippet>120</a>        <span class="kw">let </span><span class="kw-2">mut </span>decls = Vec::new();
-<a href=#121 id=121 data-nosnippet>121</a>        <span class="kw">while </span><span class="self">self</span>.peek().kind != TokenKind::EOF {
-<a href=#122 id=122 data-nosnippet>122</a>            <span class="kw">let </span><span class="kw-2">mut </span>sig: <span class="prelude-ty">Option</span>&lt;SigmaType&gt; = <span class="prelude-val">None</span>;
-<a href=#123 id=123 data-nosnippet>123</a>            <span class="comment">// 先読み: varid '::' ...
-<a href=#124 id=124 data-nosnippet>124</a>            </span><span class="kw">let </span>save = <span class="self">self</span>.i;
-<a href=#125 id=125 data-nosnippet>125</a>            <span class="kw">if </span><span class="self">self</span>.peek().kind == TokenKind::VARID {
-<a href=#126 id=126 data-nosnippet>126</a>                <span class="kw">let </span>_name_tok = <span class="self">self</span>.pop_any();
-<a href=#127 id=127 data-nosnippet>127</a>                <span class="kw">if </span><span class="self">self</span>.accept(TokenKind::DCOLON).is_some() {
-<a href=#128 id=128 data-nosnippet>128</a>                    sig = <span class="prelude-val">Some</span>(<span class="self">self</span>.parse_sigma_type()<span class="question-mark">?</span>);
-<a href=#129 id=129 data-nosnippet>129</a>                    <span class="self">self</span>._expect_semicolon_optional()<span class="question-mark">?</span>;
-<a href=#130 id=130 data-nosnippet>130</a>                } <span class="kw">else </span>{
-<a href=#131 id=131 data-nosnippet>131</a>                    <span class="self">self</span>.i = save;
-<a href=#132 id=132 data-nosnippet>132</a>                }
-<a href=#133 id=133 data-nosnippet>133</a>            }
-<a href=#134 id=134 data-nosnippet>134</a>            <span class="comment">// let binding
-<a href=#135 id=135 data-nosnippet>135</a>            </span><span class="self">self</span>.pop(TokenKind::LET)<span class="question-mark">?</span>;
-<a href=#136 id=136 data-nosnippet>136</a>            <span class="kw">let </span>name_tok = <span class="self">self</span>.pop(TokenKind::VARID)<span class="question-mark">?</span>;
-<a href=#137 id=137 data-nosnippet>137</a>            <span class="kw">let </span><span class="kw-2">mut </span>params: Vec&lt;String&gt; = Vec::new();
-<a href=#138 id=138 data-nosnippet>138</a>            <span class="kw">while </span><span class="self">self</span>.peek().kind == TokenKind::VARID {
-<a href=#139 id=139 data-nosnippet>139</a>                params.push(<span class="self">self</span>.pop_any().value);
-<a href=#140 id=140 data-nosnippet>140</a>            }
-<a href=#141 id=141 data-nosnippet>141</a>            <span class="self">self</span>.pop(TokenKind::EQUAL)<span class="question-mark">?</span>;
-<a href=#142 id=142 data-nosnippet>142</a>            <span class="kw">let </span>expr = <span class="self">self</span>.parse_expr()<span class="question-mark">?</span>;
-<a href=#143 id=143 data-nosnippet>143</a>            <span class="self">self</span>._expect_semicolon_optional()<span class="question-mark">?</span>;
-<a href=#144 id=144 data-nosnippet>144</a>            decls.push(TopLevel {
-<a href=#145 id=145 data-nosnippet>145</a>                name: name_tok.value,
-<a href=#146 id=146 data-nosnippet>146</a>                params,
-<a href=#147 id=147 data-nosnippet>147</a>                expr,
-<a href=#148 id=148 data-nosnippet>148</a>                signature: sig,
-<a href=#149 id=149 data-nosnippet>149</a>            });
-<a href=#150 id=150 data-nosnippet>150</a>        }
-<a href=#151 id=151 data-nosnippet>151</a>        <span class="prelude-val">Ok</span>(Program { decls })
-<a href=#152 id=152 data-nosnippet>152</a>    }
-<a href=#153 id=153 data-nosnippet>153</a>
-<a href=#154 id=154 data-nosnippet>154</a>    <span class="doccomment">/// 文末のセミコロンがあれば消費する（省略可）。
-<a href=#155 id=155 data-nosnippet>155</a>    </span><span class="kw">fn </span>_expect_semicolon_optional(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;(), ParseError&gt; {
-<a href=#156 id=156 data-nosnippet>156</a>        <span class="self">self</span>.accept(TokenKind::SEMI);
-<a href=#157 id=157 data-nosnippet>157</a>        <span class="prelude-val">Ok</span>(())
-<a href=#158 id=158 data-nosnippet>158</a>    }
-<a href=#159 id=159 data-nosnippet>159</a>
-<a href=#160 id=160 data-nosnippet>160</a>    <span class="doccomment">/// 型注釈を含む単一式（`expr := core_expr ['::' type]`）を解析する。
-<a href=#161 id=161 data-nosnippet>161</a>    ///
-<a href=#162 id=162 data-nosnippet>162</a>    /// # Examples
-<a href=#163 id=163 data-nosnippet>163</a>    /// ```
-<a href=#164 id=164 data-nosnippet>164</a>    /// use typelang::parser;
-<a href=#165 id=165 data-nosnippet>165</a>    /// let e = parser::parse_expr("1 + 2").unwrap();
-<a href=#166 id=166 data-nosnippet>166</a>    /// match e { typelang::ast::Expr::BinOp{..} =&gt; (), _ =&gt; unreachable!() }
+<a href=#83 id=83 data-nosnippet>83</a>    <span class="doccomment">/// 現在位置から任意のオフセットにあるトークン種別を先読みする。
+<a href=#84 id=84 data-nosnippet>84</a>    </span><span class="kw">fn </span>peek_kind(<span class="kw-2">&amp;</span><span class="self">self</span>, offset: usize) -&gt; <span class="prelude-ty">Option</span>&lt;TokenKind&gt; {
+<a href=#85 id=85 data-nosnippet>85</a>        <span class="self">self</span>.ts.get(<span class="self">self</span>.i + offset).map(|t| t.kind.clone())
+<a href=#86 id=86 data-nosnippet>86</a>    }
+<a href=#87 id=87 data-nosnippet>87</a>    <span class="doccomment">/// 指定した種別のトークンを期待しつつ消費する。
+<a href=#88 id=88 data-nosnippet>88</a>    </span><span class="kw">fn </span>pop(<span class="kw-2">&amp;mut </span><span class="self">self</span>, kind: TokenKind) -&gt; <span class="prelude-ty">Result</span>&lt;Token, ParseError&gt; {
+<a href=#89 id=89 data-nosnippet>89</a>        <span class="kw">let </span>t = <span class="self">self</span>.peek().clone();
+<a href=#90 id=90 data-nosnippet>90</a>        <span class="kw">if </span>t.kind != kind {
+<a href=#91 id=91 data-nosnippet>91</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(ParseError::at(
+<a href=#92 id=92 data-nosnippet>92</a>                <span class="string">"PAR001"</span>,
+<a href=#93 id=93 data-nosnippet>93</a>                <span class="macro">format!</span>(<span class="string">"{:?} を期待しましたが {:?} ({})"</span>, kind, t.kind, t.value),
+<a href=#94 id=94 data-nosnippet>94</a>                <span class="prelude-val">Some</span>(t.pos),
+<a href=#95 id=95 data-nosnippet>95</a>                <span class="prelude-val">Some</span>(t.line),
+<a href=#96 id=96 data-nosnippet>96</a>                <span class="prelude-val">Some</span>(t.col),
+<a href=#97 id=97 data-nosnippet>97</a>            ));
+<a href=#98 id=98 data-nosnippet>98</a>        }
+<a href=#99 id=99 data-nosnippet>99</a>        <span class="self">self</span>.i += <span class="number">1</span>;
+<a href=#100 id=100 data-nosnippet>100</a>        <span class="prelude-val">Ok</span>(t)
+<a href=#101 id=101 data-nosnippet>101</a>    }
+<a href=#102 id=102 data-nosnippet>102</a>    <span class="doccomment">/// 指定した種別が先頭にあれば消費し、なければ `None` を返す。
+<a href=#103 id=103 data-nosnippet>103</a>    </span><span class="kw">fn </span>accept(<span class="kw-2">&amp;mut </span><span class="self">self</span>, kind: TokenKind) -&gt; <span class="prelude-ty">Option</span>&lt;Token&gt; {
+<a href=#104 id=104 data-nosnippet>104</a>        <span class="kw">if </span><span class="self">self</span>.peek().kind == kind {
+<a href=#105 id=105 data-nosnippet>105</a>            <span class="kw">let </span>t = <span class="self">self</span>.pop_any();
+<a href=#106 id=106 data-nosnippet>106</a>            <span class="prelude-val">Some</span>(t)
+<a href=#107 id=107 data-nosnippet>107</a>        } <span class="kw">else </span>{
+<a href=#108 id=108 data-nosnippet>108</a>            <span class="prelude-val">None
+<a href=#109 id=109 data-nosnippet>109</a>        </span>}
+<a href=#110 id=110 data-nosnippet>110</a>    }
+<a href=#111 id=111 data-nosnippet>111</a>
+<a href=#112 id=112 data-nosnippet>112</a>    <span class="doccomment">/// プログラム全体（`program := { toplevel }`）を解析する。
+<a href=#113 id=113 data-nosnippet>113</a>    ///
+<a href=#114 id=114 data-nosnippet>114</a>    /// # Examples
+<a href=#115 id=115 data-nosnippet>115</a>    /// ```
+<a href=#116 id=116 data-nosnippet>116</a>    /// use typelang::parser::{self, Parser};
+<a href=#117 id=117 data-nosnippet>117</a>    /// let src = "square :: Num a =&gt; a -&gt; a;\nlet square x = x * x;";
+<a href=#118 id=118 data-nosnippet>118</a>    /// let tokens = typelang::lexer::lex(src).unwrap();
+<a href=#119 id=119 data-nosnippet>119</a>    /// let mut p = Parser::new(tokens);
+<a href=#120 id=120 data-nosnippet>120</a>    /// let prog = p.parse_program().unwrap();
+<a href=#121 id=121 data-nosnippet>121</a>    /// assert_eq!(prog.decls.len(), 1);
+<a href=#122 id=122 data-nosnippet>122</a>    /// ```
+<a href=#123 id=123 data-nosnippet>123</a>    </span><span class="kw">pub fn </span>parse_program(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Program, ParseError&gt; {
+<a href=#124 id=124 data-nosnippet>124</a>        <span class="kw">let </span><span class="kw-2">mut </span>decls = Vec::new();
+<a href=#125 id=125 data-nosnippet>125</a>        <span class="kw">while </span><span class="self">self</span>.peek().kind != TokenKind::EOF {
+<a href=#126 id=126 data-nosnippet>126</a>            <span class="kw">let </span><span class="kw-2">mut </span>sig: <span class="prelude-ty">Option</span>&lt;SigmaType&gt; = <span class="prelude-val">None</span>;
+<a href=#127 id=127 data-nosnippet>127</a>            <span class="comment">// 先読み: varid '::' ...
+<a href=#128 id=128 data-nosnippet>128</a>            </span><span class="kw">let </span>save = <span class="self">self</span>.i;
+<a href=#129 id=129 data-nosnippet>129</a>            <span class="kw">if </span><span class="self">self</span>.peek().kind == TokenKind::VARID {
+<a href=#130 id=130 data-nosnippet>130</a>                <span class="kw">let </span>_name_tok = <span class="self">self</span>.pop_any();
+<a href=#131 id=131 data-nosnippet>131</a>                <span class="kw">if </span><span class="self">self</span>.accept(TokenKind::DCOLON).is_some() {
+<a href=#132 id=132 data-nosnippet>132</a>                    sig = <span class="prelude-val">Some</span>(<span class="self">self</span>.parse_sigma_type()<span class="question-mark">?</span>);
+<a href=#133 id=133 data-nosnippet>133</a>                    <span class="self">self</span>._expect_semicolon_optional()<span class="question-mark">?</span>;
+<a href=#134 id=134 data-nosnippet>134</a>                } <span class="kw">else </span>{
+<a href=#135 id=135 data-nosnippet>135</a>                    <span class="self">self</span>.i = save;
+<a href=#136 id=136 data-nosnippet>136</a>                }
+<a href=#137 id=137 data-nosnippet>137</a>            }
+<a href=#138 id=138 data-nosnippet>138</a>            <span class="comment">// let binding
+<a href=#139 id=139 data-nosnippet>139</a>            </span><span class="self">self</span>.pop(TokenKind::LET)<span class="question-mark">?</span>;
+<a href=#140 id=140 data-nosnippet>140</a>            <span class="kw">let </span>name_tok = <span class="self">self</span>.pop(TokenKind::VARID)<span class="question-mark">?</span>;
+<a href=#141 id=141 data-nosnippet>141</a>            <span class="kw">let </span><span class="kw-2">mut </span>params: Vec&lt;String&gt; = Vec::new();
+<a href=#142 id=142 data-nosnippet>142</a>            <span class="kw">while </span><span class="self">self</span>.peek().kind == TokenKind::VARID {
+<a href=#143 id=143 data-nosnippet>143</a>                params.push(<span class="self">self</span>.pop_any().value);
+<a href=#144 id=144 data-nosnippet>144</a>            }
+<a href=#145 id=145 data-nosnippet>145</a>            <span class="self">self</span>.pop(TokenKind::EQUAL)<span class="question-mark">?</span>;
+<a href=#146 id=146 data-nosnippet>146</a>            <span class="kw">let </span>expr = <span class="self">self</span>.parse_expr()<span class="question-mark">?</span>;
+<a href=#147 id=147 data-nosnippet>147</a>            <span class="self">self</span>._expect_semicolon_optional()<span class="question-mark">?</span>;
+<a href=#148 id=148 data-nosnippet>148</a>            decls.push(TopLevel {
+<a href=#149 id=149 data-nosnippet>149</a>                name: name_tok.value,
+<a href=#150 id=150 data-nosnippet>150</a>                params,
+<a href=#151 id=151 data-nosnippet>151</a>                expr,
+<a href=#152 id=152 data-nosnippet>152</a>                signature: sig,
+<a href=#153 id=153 data-nosnippet>153</a>            });
+<a href=#154 id=154 data-nosnippet>154</a>        }
+<a href=#155 id=155 data-nosnippet>155</a>        <span class="prelude-val">Ok</span>(Program { decls })
+<a href=#156 id=156 data-nosnippet>156</a>    }
+<a href=#157 id=157 data-nosnippet>157</a>
+<a href=#158 id=158 data-nosnippet>158</a>    <span class="doccomment">/// 文末のセミコロンがあれば消費する（省略可）。
+<a href=#159 id=159 data-nosnippet>159</a>    </span><span class="kw">fn </span>_expect_semicolon_optional(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;(), ParseError&gt; {
+<a href=#160 id=160 data-nosnippet>160</a>        <span class="self">self</span>.accept(TokenKind::SEMI);
+<a href=#161 id=161 data-nosnippet>161</a>        <span class="prelude-val">Ok</span>(())
+<a href=#162 id=162 data-nosnippet>162</a>    }
+<a href=#163 id=163 data-nosnippet>163</a>
+<a href=#164 id=164 data-nosnippet>164</a>    <span class="doccomment">/// 型注釈を含む単一式（`expr := core_expr ['::' type]`）を解析する。
+<a href=#165 id=165 data-nosnippet>165</a>    ///
+<a href=#166 id=166 data-nosnippet>166</a>    /// # Examples
 <a href=#167 id=167 data-nosnippet>167</a>    /// ```
-<a href=#168 id=168 data-nosnippet>168</a>    </span><span class="kw">pub fn </span>parse_expr(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Expr, ParseError&gt; {
-<a href=#169 id=169 data-nosnippet>169</a>        <span class="kw">let </span>expr = <span class="self">self</span>.parse_expr_no_annot()<span class="question-mark">?</span>;
-<a href=#170 id=170 data-nosnippet>170</a>        <span class="kw">if </span><span class="self">self</span>.accept(TokenKind::DCOLON).is_some() {
-<a href=#171 id=171 data-nosnippet>171</a>            <span class="kw">let </span>ty = <span class="self">self</span>.parse_type()<span class="question-mark">?</span>;
-<a href=#172 id=172 data-nosnippet>172</a>            <span class="prelude-val">Ok</span>(Expr::Annot {
-<a href=#173 id=173 data-nosnippet>173</a>                expr: Box::new(expr),
-<a href=#174 id=174 data-nosnippet>174</a>                type_expr: ty,
-<a href=#175 id=175 data-nosnippet>175</a>            })
-<a href=#176 id=176 data-nosnippet>176</a>        } <span class="kw">else </span>{
-<a href=#177 id=177 data-nosnippet>177</a>            <span class="prelude-val">Ok</span>(expr)
-<a href=#178 id=178 data-nosnippet>178</a>        }
-<a href=#179 id=179 data-nosnippet>179</a>    }
-<a href=#180 id=180 data-nosnippet>180</a>
-<a href=#181 id=181 data-nosnippet>181</a>    <span class="doccomment">/// 型注釈を除いた式（ラムダ/let-in/if/二項式）を解析する。
-<a href=#182 id=182 data-nosnippet>182</a>    </span><span class="kw">fn </span>parse_expr_no_annot(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Expr, ParseError&gt; {
-<a href=#183 id=183 data-nosnippet>183</a>        <span class="kw">match </span><span class="self">self</span>.peek().kind.clone() {
-<a href=#184 id=184 data-nosnippet>184</a>            TokenKind::LAMBDA =&gt; <span class="self">self</span>.parse_lambda(),
-<a href=#185 id=185 data-nosnippet>185</a>            TokenKind::LET =&gt; <span class="self">self</span>.parse_let_in(),
-<a href=#186 id=186 data-nosnippet>186</a>            TokenKind::IF =&gt; <span class="self">self</span>.parse_if(),
-<a href=#187 id=187 data-nosnippet>187</a>            <span class="kw">_ </span>=&gt; <span class="self">self</span>.parse_infix_level(<span class="number">0</span>),
-<a href=#188 id=188 data-nosnippet>188</a>        }
-<a href=#189 id=189 data-nosnippet>189</a>    }
-<a href=#190 id=190 data-nosnippet>190</a>
-<a href=#191 id=191 data-nosnippet>191</a>    <span class="doccomment">/// ラムダ式（`\ params -&gt; expr`）を解析する。
-<a href=#192 id=192 data-nosnippet>192</a>    </span><span class="kw">fn </span>parse_lambda(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Expr, ParseError&gt; {
-<a href=#193 id=193 data-nosnippet>193</a>        <span class="self">self</span>.pop(TokenKind::LAMBDA)<span class="question-mark">?</span>;
-<a href=#194 id=194 data-nosnippet>194</a>        <span class="kw">let </span><span class="kw-2">mut </span>params: Vec&lt;String&gt; = Vec::new();
-<a href=#195 id=195 data-nosnippet>195</a>        <span class="kw">while </span><span class="self">self</span>.peek().kind == TokenKind::VARID {
-<a href=#196 id=196 data-nosnippet>196</a>            params.push(<span class="self">self</span>.pop_any().value);
-<a href=#197 id=197 data-nosnippet>197</a>        }
-<a href=#198 id=198 data-nosnippet>198</a>        <span class="self">self</span>.pop(TokenKind::ARROW)<span class="question-mark">?</span>;
-<a href=#199 id=199 data-nosnippet>199</a>        <span class="kw">let </span>body = <span class="self">self</span>.parse_expr()<span class="question-mark">?</span>;
-<a href=#200 id=200 data-nosnippet>200</a>        <span class="prelude-val">Ok</span>(Expr::Lambda {
-<a href=#201 id=201 data-nosnippet>201</a>            params,
-<a href=#202 id=202 data-nosnippet>202</a>            body: Box::new(body),
-<a href=#203 id=203 data-nosnippet>203</a>        })
-<a href=#204 id=204 data-nosnippet>204</a>    }
-<a href=#205 id=205 data-nosnippet>205</a>
-<a href=#206 id=206 data-nosnippet>206</a>    <span class="doccomment">/// `let ... in ...` 式を解析し、束縛を収集する。
-<a href=#207 id=207 data-nosnippet>207</a>    </span><span class="kw">fn </span>parse_let_in(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Expr, ParseError&gt; {
-<a href=#208 id=208 data-nosnippet>208</a>        <span class="self">self</span>.pop(TokenKind::LET)<span class="question-mark">?</span>;
-<a href=#209 id=209 data-nosnippet>209</a>        <span class="kw">let </span><span class="kw-2">mut </span>bindings: Vec&lt;(String, Vec&lt;String&gt;, Expr)&gt; = Vec::new();
-<a href=#210 id=210 data-nosnippet>210</a>        <span class="kw">loop </span>{
-<a href=#211 id=211 data-nosnippet>211</a>            <span class="kw">let </span>name = <span class="self">self</span>.pop(TokenKind::VARID)<span class="question-mark">?</span>.value;
-<a href=#212 id=212 data-nosnippet>212</a>            <span class="kw">let </span><span class="kw-2">mut </span>params: Vec&lt;String&gt; = Vec::new();
-<a href=#213 id=213 data-nosnippet>213</a>            <span class="kw">while </span><span class="self">self</span>.peek().kind == TokenKind::VARID {
-<a href=#214 id=214 data-nosnippet>214</a>                params.push(<span class="self">self</span>.pop_any().value);
-<a href=#215 id=215 data-nosnippet>215</a>            }
-<a href=#216 id=216 data-nosnippet>216</a>            <span class="self">self</span>.pop(TokenKind::EQUAL)<span class="question-mark">?</span>;
-<a href=#217 id=217 data-nosnippet>217</a>            <span class="kw">let </span>e = <span class="self">self</span>.parse_expr()<span class="question-mark">?</span>;
-<a href=#218 id=218 data-nosnippet>218</a>            bindings.push((name, params, e));
-<a href=#219 id=219 data-nosnippet>219</a>            <span class="kw">if </span><span class="self">self</span>.accept(TokenKind::SEMI).is_none() {
-<a href=#220 id=220 data-nosnippet>220</a>                <span class="kw">break</span>;
-<a href=#221 id=221 data-nosnippet>221</a>            }
-<a href=#222 id=222 data-nosnippet>222</a>        }
-<a href=#223 id=223 data-nosnippet>223</a>        <span class="self">self</span>.pop(TokenKind::IN)<span class="question-mark">?</span>;
-<a href=#224 id=224 data-nosnippet>224</a>        <span class="kw">let </span>body = <span class="self">self</span>.parse_expr()<span class="question-mark">?</span>;
-<a href=#225 id=225 data-nosnippet>225</a>        <span class="prelude-val">Ok</span>(Expr::LetIn {
-<a href=#226 id=226 data-nosnippet>226</a>            bindings,
-<a href=#227 id=227 data-nosnippet>227</a>            body: Box::new(body),
-<a href=#228 id=228 data-nosnippet>228</a>        })
-<a href=#229 id=229 data-nosnippet>229</a>    }
-<a href=#230 id=230 data-nosnippet>230</a>
-<a href=#231 id=231 data-nosnippet>231</a>    <span class="doccomment">/// `if ... then ... else ...` 式を解析する。
-<a href=#232 id=232 data-nosnippet>232</a>    </span><span class="kw">fn </span>parse_if(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Expr, ParseError&gt; {
-<a href=#233 id=233 data-nosnippet>233</a>        <span class="self">self</span>.pop(TokenKind::IF)<span class="question-mark">?</span>;
-<a href=#234 id=234 data-nosnippet>234</a>        <span class="kw">let </span>cond = <span class="self">self</span>.parse_expr()<span class="question-mark">?</span>;
-<a href=#235 id=235 data-nosnippet>235</a>        <span class="self">self</span>.pop(TokenKind::THEN)<span class="question-mark">?</span>;
-<a href=#236 id=236 data-nosnippet>236</a>        <span class="kw">let </span>th = <span class="self">self</span>.parse_expr()<span class="question-mark">?</span>;
-<a href=#237 id=237 data-nosnippet>237</a>        <span class="self">self</span>.pop(TokenKind::ELSE)<span class="question-mark">?</span>;
-<a href=#238 id=238 data-nosnippet>238</a>        <span class="kw">let </span>el = <span class="self">self</span>.parse_expr()<span class="question-mark">?</span>;
-<a href=#239 id=239 data-nosnippet>239</a>        <span class="prelude-val">Ok</span>(Expr::If {
-<a href=#240 id=240 data-nosnippet>240</a>            cond: Box::new(cond),
-<a href=#241 id=241 data-nosnippet>241</a>            then_branch: Box::new(th),
-<a href=#242 id=242 data-nosnippet>242</a>            else_branch: Box::new(el),
-<a href=#243 id=243 data-nosnippet>243</a>        })
-<a href=#244 id=244 data-nosnippet>244</a>    }
-<a href=#245 id=245 data-nosnippet>245</a>
-<a href=#246 id=246 data-nosnippet>246</a>    <span class="kw">fn </span>parse_infix_level(<span class="kw-2">&amp;mut </span><span class="self">self</span>, level: usize) -&gt; <span class="prelude-ty">Result</span>&lt;Expr, ParseError&gt; {
-<a href=#247 id=247 data-nosnippet>247</a>        <span class="kw">if </span>level &gt;= INFIX_LEVELS.len() {
-<a href=#248 id=248 data-nosnippet>248</a>            <span class="kw">return </span><span class="self">self</span>.parse_app();
-<a href=#249 id=249 data-nosnippet>249</a>        }
-<a href=#250 id=250 data-nosnippet>250</a>        <span class="kw">let </span>spec = <span class="kw-2">&amp;</span>INFIX_LEVELS[level];
-<a href=#251 id=251 data-nosnippet>251</a>        <span class="kw">match </span>spec.assoc {
-<a href=#252 id=252 data-nosnippet>252</a>            Assoc::Left =&gt; <span class="self">self</span>.parse_infix_left(level, spec),
-<a href=#253 id=253 data-nosnippet>253</a>            Assoc::Right =&gt; <span class="self">self</span>.parse_infix_right(level, spec),
-<a href=#254 id=254 data-nosnippet>254</a>            Assoc::Non =&gt; <span class="self">self</span>.parse_infix_non(level, spec),
-<a href=#255 id=255 data-nosnippet>255</a>        }
-<a href=#256 id=256 data-nosnippet>256</a>    }
-<a href=#257 id=257 data-nosnippet>257</a>
-<a href=#258 id=258 data-nosnippet>258</a>    <span class="kw">fn </span>parse_infix_left(<span class="kw-2">&amp;mut </span><span class="self">self</span>, level: usize, spec: <span class="kw-2">&amp;</span>InfixSpec) -&gt; <span class="prelude-ty">Result</span>&lt;Expr, ParseError&gt; {
-<a href=#259 id=259 data-nosnippet>259</a>        <span class="kw">let </span><span class="kw-2">mut </span>left = <span class="self">self</span>.parse_infix_level(level + <span class="number">1</span>)<span class="question-mark">?</span>;
-<a href=#260 id=260 data-nosnippet>260</a>        <span class="kw">while </span>spec.contains(<span class="kw-2">&amp;</span><span class="self">self</span>.peek().kind) {
-<a href=#261 id=261 data-nosnippet>261</a>            <span class="kw">let </span>op = <span class="self">self</span>.pop_any().value;
-<a href=#262 id=262 data-nosnippet>262</a>            <span class="kw">let </span>right = <span class="self">self</span>.parse_infix_level(level + <span class="number">1</span>)<span class="question-mark">?</span>;
-<a href=#263 id=263 data-nosnippet>263</a>            left = Expr::BinOp {
-<a href=#264 id=264 data-nosnippet>264</a>                op,
-<a href=#265 id=265 data-nosnippet>265</a>                left: Box::new(left),
-<a href=#266 id=266 data-nosnippet>266</a>                right: Box::new(right),
-<a href=#267 id=267 data-nosnippet>267</a>            };
-<a href=#268 id=268 data-nosnippet>268</a>        }
-<a href=#269 id=269 data-nosnippet>269</a>        <span class="prelude-val">Ok</span>(left)
-<a href=#270 id=270 data-nosnippet>270</a>    }
-<a href=#271 id=271 data-nosnippet>271</a>
-<a href=#272 id=272 data-nosnippet>272</a>    <span class="kw">fn </span>parse_infix_right(<span class="kw-2">&amp;mut </span><span class="self">self</span>, level: usize, spec: <span class="kw-2">&amp;</span>InfixSpec) -&gt; <span class="prelude-ty">Result</span>&lt;Expr, ParseError&gt; {
-<a href=#273 id=273 data-nosnippet>273</a>        <span class="kw">let </span>left = <span class="self">self</span>.parse_infix_level(level + <span class="number">1</span>)<span class="question-mark">?</span>;
-<a href=#274 id=274 data-nosnippet>274</a>        <span class="kw">if </span>spec.contains(<span class="kw-2">&amp;</span><span class="self">self</span>.peek().kind) {
-<a href=#275 id=275 data-nosnippet>275</a>            <span class="kw">let </span>op = <span class="self">self</span>.pop_any().value;
-<a href=#276 id=276 data-nosnippet>276</a>            <span class="kw">let </span>right = <span class="self">self</span>.parse_infix_level(level)<span class="question-mark">?</span>;
-<a href=#277 id=277 data-nosnippet>277</a>            <span class="prelude-val">Ok</span>(Expr::BinOp {
-<a href=#278 id=278 data-nosnippet>278</a>                op,
-<a href=#279 id=279 data-nosnippet>279</a>                left: Box::new(left),
-<a href=#280 id=280 data-nosnippet>280</a>                right: Box::new(right),
-<a href=#281 id=281 data-nosnippet>281</a>            })
-<a href=#282 id=282 data-nosnippet>282</a>        } <span class="kw">else </span>{
-<a href=#283 id=283 data-nosnippet>283</a>            <span class="prelude-val">Ok</span>(left)
-<a href=#284 id=284 data-nosnippet>284</a>        }
-<a href=#285 id=285 data-nosnippet>285</a>    }
-<a href=#286 id=286 data-nosnippet>286</a>
-<a href=#287 id=287 data-nosnippet>287</a>    <span class="kw">fn </span>parse_infix_non(<span class="kw-2">&amp;mut </span><span class="self">self</span>, level: usize, spec: <span class="kw-2">&amp;</span>InfixSpec) -&gt; <span class="prelude-ty">Result</span>&lt;Expr, ParseError&gt; {
-<a href=#288 id=288 data-nosnippet>288</a>        <span class="kw">let </span>left = <span class="self">self</span>.parse_infix_level(level + <span class="number">1</span>)<span class="question-mark">?</span>;
-<a href=#289 id=289 data-nosnippet>289</a>        <span class="kw">if </span>spec.contains(<span class="kw-2">&amp;</span><span class="self">self</span>.peek().kind) {
-<a href=#290 id=290 data-nosnippet>290</a>            <span class="kw">let </span>op = <span class="self">self</span>.pop_any().value;
-<a href=#291 id=291 data-nosnippet>291</a>            <span class="kw">let </span>right = <span class="self">self</span>.parse_infix_level(level + <span class="number">1</span>)<span class="question-mark">?</span>;
-<a href=#292 id=292 data-nosnippet>292</a>            <span class="prelude-val">Ok</span>(Expr::BinOp {
-<a href=#293 id=293 data-nosnippet>293</a>                op,
-<a href=#294 id=294 data-nosnippet>294</a>                left: Box::new(left),
-<a href=#295 id=295 data-nosnippet>295</a>                right: Box::new(right),
-<a href=#296 id=296 data-nosnippet>296</a>            })
-<a href=#297 id=297 data-nosnippet>297</a>        } <span class="kw">else </span>{
-<a href=#298 id=298 data-nosnippet>298</a>            <span class="prelude-val">Ok</span>(left)
-<a href=#299 id=299 data-nosnippet>299</a>        }
-<a href=#300 id=300 data-nosnippet>300</a>    }
-<a href=#301 id=301 data-nosnippet>301</a>
-<a href=#302 id=302 data-nosnippet>302</a>    <span class="doccomment">/// 関数適用（左結合）を解析する。
-<a href=#303 id=303 data-nosnippet>303</a>    </span><span class="kw">fn </span>parse_app(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Expr, ParseError&gt; {
-<a href=#304 id=304 data-nosnippet>304</a>        <span class="kw">let </span><span class="kw-2">mut </span>left = <span class="self">self</span>.parse_atom()<span class="question-mark">?</span>;
-<a href=#305 id=305 data-nosnippet>305</a>        <span class="kw">while let </span>TokenKind::INT
-<a href=#306 id=306 data-nosnippet>306</a>        | TokenKind::HEX
-<a href=#307 id=307 data-nosnippet>307</a>        | TokenKind::OCT
-<a href=#308 id=308 data-nosnippet>308</a>        | TokenKind::BIN
-<a href=#309 id=309 data-nosnippet>309</a>        | TokenKind::FLOAT
-<a href=#310 id=310 data-nosnippet>310</a>        | TokenKind::CHAR
-<a href=#311 id=311 data-nosnippet>311</a>        | TokenKind::STRING
-<a href=#312 id=312 data-nosnippet>312</a>        | TokenKind::VARID
-<a href=#313 id=313 data-nosnippet>313</a>        | TokenKind::UNDERSCORE
-<a href=#314 id=314 data-nosnippet>314</a>        | TokenKind::QMARK
-<a href=#315 id=315 data-nosnippet>315</a>        | TokenKind::LPAREN
-<a href=#316 id=316 data-nosnippet>316</a>        | TokenKind::LBRACK
-<a href=#317 id=317 data-nosnippet>317</a>        | TokenKind::TRUE
-<a href=#318 id=318 data-nosnippet>318</a>        | TokenKind::FALSE = <span class="self">self</span>.peek().kind
-<a href=#319 id=319 data-nosnippet>319</a>        {
-<a href=#320 id=320 data-nosnippet>320</a>            <span class="kw">let </span>right = <span class="self">self</span>.parse_atom()<span class="question-mark">?</span>;
-<a href=#321 id=321 data-nosnippet>321</a>            left = Expr::App {
-<a href=#322 id=322 data-nosnippet>322</a>                func: Box::new(left),
-<a href=#323 id=323 data-nosnippet>323</a>                arg: Box::new(right),
-<a href=#324 id=324 data-nosnippet>324</a>            };
-<a href=#325 id=325 data-nosnippet>325</a>        }
-<a href=#326 id=326 data-nosnippet>326</a>        <span class="prelude-val">Ok</span>(left)
-<a href=#327 id=327 data-nosnippet>327</a>    }
-<a href=#328 id=328 data-nosnippet>328</a>
-<a href=#329 id=329 data-nosnippet>329</a>    <span class="doccomment">/// リテラル・識別子・括弧を含む原子式を解析する。
-<a href=#330 id=330 data-nosnippet>330</a>    </span><span class="kw">fn </span>parse_atom(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Expr, ParseError&gt; {
-<a href=#331 id=331 data-nosnippet>331</a>        <span class="kw">let </span>t = <span class="self">self</span>.peek().clone();
-<a href=#332 id=332 data-nosnippet>332</a>        <span class="kw">match </span>t.kind {
-<a href=#333 id=333 data-nosnippet>333</a>            TokenKind::MINUS =&gt; {
-<a href=#334 id=334 data-nosnippet>334</a>                <span class="self">self</span>.pop_any();
-<a href=#335 id=335 data-nosnippet>335</a>                <span class="kw">let </span>rhs = <span class="self">self</span>.parse_atom()<span class="question-mark">?</span>;
-<a href=#336 id=336 data-nosnippet>336</a>                <span class="prelude-val">Ok</span>(Expr::BinOp {
-<a href=#337 id=337 data-nosnippet>337</a>                    op: <span class="string">"-"</span>.into(),
-<a href=#338 id=338 data-nosnippet>338</a>                    left: Box::new(Expr::IntLit {
-<a href=#339 id=339 data-nosnippet>339</a>                        value: <span class="number">0</span>,
-<a href=#340 id=340 data-nosnippet>340</a>                        base: IntBase::Dec,
-<a href=#341 id=341 data-nosnippet>341</a>                    }),
-<a href=#342 id=342 data-nosnippet>342</a>                    right: Box::new(rhs),
-<a href=#343 id=343 data-nosnippet>343</a>                })
-<a href=#344 id=344 data-nosnippet>344</a>            }
-<a href=#345 id=345 data-nosnippet>345</a>            TokenKind::INT | TokenKind::HEX | TokenKind::OCT | TokenKind::BIN =&gt; {
-<a href=#346 id=346 data-nosnippet>346</a>                <span class="self">self</span>.pop_any();
-<a href=#347 id=347 data-nosnippet>347</a>                <span class="kw">let </span>s = t.value.clone();
-<a href=#348 id=348 data-nosnippet>348</a>                <span class="kw">let </span>parsed: <span class="prelude-ty">Result</span>&lt;i64, <span class="kw">_</span>&gt; = <span class="kw">match </span>t.kind {
-<a href=#349 id=349 data-nosnippet>349</a>                    TokenKind::HEX =&gt; i64::from_str_radix(<span class="kw-2">&amp;</span>s[<span class="number">2</span>..], <span class="number">16</span>),
-<a href=#350 id=350 data-nosnippet>350</a>                    TokenKind::OCT =&gt; i64::from_str_radix(<span class="kw-2">&amp;</span>s[<span class="number">2</span>..], <span class="number">8</span>),
-<a href=#351 id=351 data-nosnippet>351</a>                    TokenKind::BIN =&gt; i64::from_str_radix(<span class="kw-2">&amp;</span>s[<span class="number">2</span>..], <span class="number">2</span>),
-<a href=#352 id=352 data-nosnippet>352</a>                    <span class="kw">_ </span>=&gt; s.parse::&lt;i64&gt;(),
-<a href=#353 id=353 data-nosnippet>353</a>                };
-<a href=#354 id=354 data-nosnippet>354</a>                <span class="kw">match </span>parsed {
-<a href=#355 id=355 data-nosnippet>355</a>                    <span class="prelude-val">Ok</span>(v) =&gt; {
-<a href=#356 id=356 data-nosnippet>356</a>                        <span class="kw">let </span>base = <span class="kw">match </span>t.kind {
-<a href=#357 id=357 data-nosnippet>357</a>                            TokenKind::HEX =&gt; IntBase::Hex,
-<a href=#358 id=358 data-nosnippet>358</a>                            TokenKind::OCT =&gt; IntBase::Oct,
-<a href=#359 id=359 data-nosnippet>359</a>                            TokenKind::BIN =&gt; IntBase::Bin,
-<a href=#360 id=360 data-nosnippet>360</a>                            <span class="kw">_ </span>=&gt; IntBase::Dec,
-<a href=#361 id=361 data-nosnippet>361</a>                        };
-<a href=#362 id=362 data-nosnippet>362</a>                        <span class="prelude-val">Ok</span>(Expr::IntLit { value: v, base })
-<a href=#363 id=363 data-nosnippet>363</a>                    }
-<a href=#364 id=364 data-nosnippet>364</a>                    <span class="prelude-val">Err</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">Err</span>(ParseError::new(
-<a href=#365 id=365 data-nosnippet>365</a>                        <span class="string">"PAR210"</span>,
-<a href=#366 id=366 data-nosnippet>366</a>                        <span class="string">"整数リテラルが範囲外"</span>,
-<a href=#367 id=367 data-nosnippet>367</a>                        <span class="prelude-val">Some</span>(t.pos),
-<a href=#368 id=368 data-nosnippet>368</a>                    )),
-<a href=#369 id=369 data-nosnippet>369</a>                }
-<a href=#370 id=370 data-nosnippet>370</a>            }
-<a href=#371 id=371 data-nosnippet>371</a>            TokenKind::FLOAT =&gt; {
-<a href=#372 id=372 data-nosnippet>372</a>                <span class="self">self</span>.pop_any();
-<a href=#373 id=373 data-nosnippet>373</a>                <span class="kw">match </span>t.value.parse::&lt;f64&gt;() {
-<a href=#374 id=374 data-nosnippet>374</a>                    <span class="prelude-val">Ok</span>(v) =&gt; <span class="prelude-val">Ok</span>(Expr::FloatLit { value: v }),
-<a href=#375 id=375 data-nosnippet>375</a>                    <span class="prelude-val">Err</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">Err</span>(ParseError::at(
-<a href=#376 id=376 data-nosnippet>376</a>                        <span class="string">"PAR220"</span>,
-<a href=#377 id=377 data-nosnippet>377</a>                        <span class="string">"浮動小数リテラルが不正"</span>,
-<a href=#378 id=378 data-nosnippet>378</a>                        <span class="prelude-val">Some</span>(t.pos),
-<a href=#379 id=379 data-nosnippet>379</a>                        <span class="prelude-val">Some</span>(t.line),
-<a href=#380 id=380 data-nosnippet>380</a>                        <span class="prelude-val">Some</span>(t.col),
-<a href=#381 id=381 data-nosnippet>381</a>                    )),
-<a href=#382 id=382 data-nosnippet>382</a>                }
-<a href=#383 id=383 data-nosnippet>383</a>            }
-<a href=#384 id=384 data-nosnippet>384</a>            TokenKind::CHAR =&gt; {
-<a href=#385 id=385 data-nosnippet>385</a>                <span class="self">self</span>.pop_any();
-<a href=#386 id=386 data-nosnippet>386</a>                <span class="kw">let </span>ch = decode_char(<span class="kw-2">&amp;</span>t.value)<span class="question-mark">?</span>;
-<a href=#387 id=387 data-nosnippet>387</a>                <span class="prelude-val">Ok</span>(Expr::CharLit { value: ch })
-<a href=#388 id=388 data-nosnippet>388</a>            }
-<a href=#389 id=389 data-nosnippet>389</a>            TokenKind::STRING =&gt; {
-<a href=#390 id=390 data-nosnippet>390</a>                <span class="self">self</span>.pop_any();
-<a href=#391 id=391 data-nosnippet>391</a>                <span class="kw">let </span>s = decode_string(<span class="kw-2">&amp;</span>t.value)<span class="question-mark">?</span>;
-<a href=#392 id=392 data-nosnippet>392</a>                <span class="prelude-val">Ok</span>(Expr::StringLit { value: s })
-<a href=#393 id=393 data-nosnippet>393</a>            }
-<a href=#394 id=394 data-nosnippet>394</a>            TokenKind::TRUE =&gt; {
-<a href=#395 id=395 data-nosnippet>395</a>                <span class="self">self</span>.pop_any();
-<a href=#396 id=396 data-nosnippet>396</a>                <span class="prelude-val">Ok</span>(Expr::BoolLit { value: <span class="bool-val">true </span>})
+<a href=#168 id=168 data-nosnippet>168</a>    /// use typelang::parser;
+<a href=#169 id=169 data-nosnippet>169</a>    /// let e = parser::parse_expr("1 + 2").unwrap();
+<a href=#170 id=170 data-nosnippet>170</a>    /// match e { typelang::ast::Expr::BinOp{..} =&gt; (), _ =&gt; unreachable!() }
+<a href=#171 id=171 data-nosnippet>171</a>    /// ```
+<a href=#172 id=172 data-nosnippet>172</a>    </span><span class="kw">pub fn </span>parse_expr(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Expr, ParseError&gt; {
+<a href=#173 id=173 data-nosnippet>173</a>        <span class="kw">let </span>expr = <span class="self">self</span>.parse_expr_no_annot()<span class="question-mark">?</span>;
+<a href=#174 id=174 data-nosnippet>174</a>        <span class="kw">if </span><span class="self">self</span>.accept(TokenKind::DCOLON).is_some() {
+<a href=#175 id=175 data-nosnippet>175</a>            <span class="kw">let </span>ty = <span class="self">self</span>.parse_type()<span class="question-mark">?</span>;
+<a href=#176 id=176 data-nosnippet>176</a>            <span class="prelude-val">Ok</span>(Expr::Annot {
+<a href=#177 id=177 data-nosnippet>177</a>                expr: Box::new(expr),
+<a href=#178 id=178 data-nosnippet>178</a>                type_expr: ty,
+<a href=#179 id=179 data-nosnippet>179</a>            })
+<a href=#180 id=180 data-nosnippet>180</a>        } <span class="kw">else </span>{
+<a href=#181 id=181 data-nosnippet>181</a>            <span class="prelude-val">Ok</span>(expr)
+<a href=#182 id=182 data-nosnippet>182</a>        }
+<a href=#183 id=183 data-nosnippet>183</a>    }
+<a href=#184 id=184 data-nosnippet>184</a>
+<a href=#185 id=185 data-nosnippet>185</a>    <span class="doccomment">/// 型注釈を除いた式（ラムダ/let-in/if/二項式）を解析する。
+<a href=#186 id=186 data-nosnippet>186</a>    </span><span class="kw">fn </span>parse_expr_no_annot(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Expr, ParseError&gt; {
+<a href=#187 id=187 data-nosnippet>187</a>        <span class="kw">match </span><span class="self">self</span>.peek().kind.clone() {
+<a href=#188 id=188 data-nosnippet>188</a>            TokenKind::LAMBDA =&gt; <span class="self">self</span>.parse_lambda(),
+<a href=#189 id=189 data-nosnippet>189</a>            TokenKind::LET =&gt; <span class="self">self</span>.parse_let_in(),
+<a href=#190 id=190 data-nosnippet>190</a>            TokenKind::IF =&gt; <span class="self">self</span>.parse_if(),
+<a href=#191 id=191 data-nosnippet>191</a>            <span class="kw">_ </span>=&gt; <span class="self">self</span>.parse_infix_level(<span class="number">0</span>),
+<a href=#192 id=192 data-nosnippet>192</a>        }
+<a href=#193 id=193 data-nosnippet>193</a>    }
+<a href=#194 id=194 data-nosnippet>194</a>
+<a href=#195 id=195 data-nosnippet>195</a>    <span class="doccomment">/// ラムダ式（`\ params -&gt; expr`）を解析する。
+<a href=#196 id=196 data-nosnippet>196</a>    </span><span class="kw">fn </span>parse_lambda(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Expr, ParseError&gt; {
+<a href=#197 id=197 data-nosnippet>197</a>        <span class="self">self</span>.pop(TokenKind::LAMBDA)<span class="question-mark">?</span>;
+<a href=#198 id=198 data-nosnippet>198</a>        <span class="kw">let </span><span class="kw-2">mut </span>params: Vec&lt;String&gt; = Vec::new();
+<a href=#199 id=199 data-nosnippet>199</a>        <span class="kw">while </span><span class="self">self</span>.peek().kind == TokenKind::VARID {
+<a href=#200 id=200 data-nosnippet>200</a>            params.push(<span class="self">self</span>.pop_any().value);
+<a href=#201 id=201 data-nosnippet>201</a>        }
+<a href=#202 id=202 data-nosnippet>202</a>        <span class="self">self</span>.pop(TokenKind::ARROW)<span class="question-mark">?</span>;
+<a href=#203 id=203 data-nosnippet>203</a>        <span class="kw">let </span>body = <span class="self">self</span>.parse_expr()<span class="question-mark">?</span>;
+<a href=#204 id=204 data-nosnippet>204</a>        <span class="prelude-val">Ok</span>(Expr::Lambda {
+<a href=#205 id=205 data-nosnippet>205</a>            params,
+<a href=#206 id=206 data-nosnippet>206</a>            body: Box::new(body),
+<a href=#207 id=207 data-nosnippet>207</a>        })
+<a href=#208 id=208 data-nosnippet>208</a>    }
+<a href=#209 id=209 data-nosnippet>209</a>
+<a href=#210 id=210 data-nosnippet>210</a>    <span class="doccomment">/// `let ... in ...` 式を解析し、束縛を収集する。
+<a href=#211 id=211 data-nosnippet>211</a>    </span><span class="kw">fn </span>parse_let_in(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Expr, ParseError&gt; {
+<a href=#212 id=212 data-nosnippet>212</a>        <span class="self">self</span>.pop(TokenKind::LET)<span class="question-mark">?</span>;
+<a href=#213 id=213 data-nosnippet>213</a>        <span class="kw">let </span><span class="kw-2">mut </span>bindings: Vec&lt;(String, Vec&lt;String&gt;, Expr)&gt; = Vec::new();
+<a href=#214 id=214 data-nosnippet>214</a>        <span class="kw">loop </span>{
+<a href=#215 id=215 data-nosnippet>215</a>            <span class="kw">let </span>name = <span class="self">self</span>.pop(TokenKind::VARID)<span class="question-mark">?</span>.value;
+<a href=#216 id=216 data-nosnippet>216</a>            <span class="kw">let </span><span class="kw-2">mut </span>params: Vec&lt;String&gt; = Vec::new();
+<a href=#217 id=217 data-nosnippet>217</a>            <span class="kw">while </span><span class="self">self</span>.peek().kind == TokenKind::VARID {
+<a href=#218 id=218 data-nosnippet>218</a>                params.push(<span class="self">self</span>.pop_any().value);
+<a href=#219 id=219 data-nosnippet>219</a>            }
+<a href=#220 id=220 data-nosnippet>220</a>            <span class="self">self</span>.pop(TokenKind::EQUAL)<span class="question-mark">?</span>;
+<a href=#221 id=221 data-nosnippet>221</a>            <span class="kw">let </span>e = <span class="self">self</span>.parse_expr()<span class="question-mark">?</span>;
+<a href=#222 id=222 data-nosnippet>222</a>            bindings.push((name, params, e));
+<a href=#223 id=223 data-nosnippet>223</a>            <span class="kw">if </span><span class="self">self</span>.accept(TokenKind::SEMI).is_none() {
+<a href=#224 id=224 data-nosnippet>224</a>                <span class="kw">break</span>;
+<a href=#225 id=225 data-nosnippet>225</a>            }
+<a href=#226 id=226 data-nosnippet>226</a>        }
+<a href=#227 id=227 data-nosnippet>227</a>        <span class="self">self</span>.pop(TokenKind::IN)<span class="question-mark">?</span>;
+<a href=#228 id=228 data-nosnippet>228</a>        <span class="kw">let </span>body = <span class="self">self</span>.parse_expr()<span class="question-mark">?</span>;
+<a href=#229 id=229 data-nosnippet>229</a>        <span class="prelude-val">Ok</span>(Expr::LetIn {
+<a href=#230 id=230 data-nosnippet>230</a>            bindings,
+<a href=#231 id=231 data-nosnippet>231</a>            body: Box::new(body),
+<a href=#232 id=232 data-nosnippet>232</a>        })
+<a href=#233 id=233 data-nosnippet>233</a>    }
+<a href=#234 id=234 data-nosnippet>234</a>
+<a href=#235 id=235 data-nosnippet>235</a>    <span class="doccomment">/// `if ... then ... else ...` 式を解析する。
+<a href=#236 id=236 data-nosnippet>236</a>    </span><span class="kw">fn </span>parse_if(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Expr, ParseError&gt; {
+<a href=#237 id=237 data-nosnippet>237</a>        <span class="self">self</span>.pop(TokenKind::IF)<span class="question-mark">?</span>;
+<a href=#238 id=238 data-nosnippet>238</a>        <span class="kw">let </span>cond = <span class="self">self</span>.parse_expr()<span class="question-mark">?</span>;
+<a href=#239 id=239 data-nosnippet>239</a>        <span class="self">self</span>.pop(TokenKind::THEN)<span class="question-mark">?</span>;
+<a href=#240 id=240 data-nosnippet>240</a>        <span class="kw">let </span>th = <span class="self">self</span>.parse_expr()<span class="question-mark">?</span>;
+<a href=#241 id=241 data-nosnippet>241</a>        <span class="self">self</span>.pop(TokenKind::ELSE)<span class="question-mark">?</span>;
+<a href=#242 id=242 data-nosnippet>242</a>        <span class="kw">let </span>el = <span class="self">self</span>.parse_expr()<span class="question-mark">?</span>;
+<a href=#243 id=243 data-nosnippet>243</a>        <span class="prelude-val">Ok</span>(Expr::If {
+<a href=#244 id=244 data-nosnippet>244</a>            cond: Box::new(cond),
+<a href=#245 id=245 data-nosnippet>245</a>            then_branch: Box::new(th),
+<a href=#246 id=246 data-nosnippet>246</a>            else_branch: Box::new(el),
+<a href=#247 id=247 data-nosnippet>247</a>        })
+<a href=#248 id=248 data-nosnippet>248</a>    }
+<a href=#249 id=249 data-nosnippet>249</a>
+<a href=#250 id=250 data-nosnippet>250</a>    <span class="kw">fn </span>parse_infix_level(<span class="kw-2">&amp;mut </span><span class="self">self</span>, level: usize) -&gt; <span class="prelude-ty">Result</span>&lt;Expr, ParseError&gt; {
+<a href=#251 id=251 data-nosnippet>251</a>        <span class="kw">if </span>level &gt;= INFIX_LEVELS.len() {
+<a href=#252 id=252 data-nosnippet>252</a>            <span class="kw">return </span><span class="self">self</span>.parse_app();
+<a href=#253 id=253 data-nosnippet>253</a>        }
+<a href=#254 id=254 data-nosnippet>254</a>        <span class="kw">let </span>spec = <span class="kw-2">&amp;</span>INFIX_LEVELS[level];
+<a href=#255 id=255 data-nosnippet>255</a>        <span class="kw">match </span>spec.assoc {
+<a href=#256 id=256 data-nosnippet>256</a>            Assoc::Left =&gt; <span class="self">self</span>.parse_infix_left(level, spec),
+<a href=#257 id=257 data-nosnippet>257</a>            Assoc::Right =&gt; <span class="self">self</span>.parse_infix_right(level, spec),
+<a href=#258 id=258 data-nosnippet>258</a>            Assoc::Non =&gt; <span class="self">self</span>.parse_infix_non(level, spec),
+<a href=#259 id=259 data-nosnippet>259</a>        }
+<a href=#260 id=260 data-nosnippet>260</a>    }
+<a href=#261 id=261 data-nosnippet>261</a>
+<a href=#262 id=262 data-nosnippet>262</a>    <span class="kw">fn </span>parse_infix_left(<span class="kw-2">&amp;mut </span><span class="self">self</span>, level: usize, spec: <span class="kw-2">&amp;</span>InfixSpec) -&gt; <span class="prelude-ty">Result</span>&lt;Expr, ParseError&gt; {
+<a href=#263 id=263 data-nosnippet>263</a>        <span class="kw">let </span><span class="kw-2">mut </span>left = <span class="self">self</span>.parse_infix_level(level + <span class="number">1</span>)<span class="question-mark">?</span>;
+<a href=#264 id=264 data-nosnippet>264</a>        <span class="kw">while </span>spec.contains(<span class="kw-2">&amp;</span><span class="self">self</span>.peek().kind) {
+<a href=#265 id=265 data-nosnippet>265</a>            <span class="kw">let </span>op = <span class="self">self</span>.pop_any().value;
+<a href=#266 id=266 data-nosnippet>266</a>            <span class="kw">let </span>right = <span class="self">self</span>.parse_infix_level(level + <span class="number">1</span>)<span class="question-mark">?</span>;
+<a href=#267 id=267 data-nosnippet>267</a>            left = Expr::BinOp {
+<a href=#268 id=268 data-nosnippet>268</a>                op,
+<a href=#269 id=269 data-nosnippet>269</a>                left: Box::new(left),
+<a href=#270 id=270 data-nosnippet>270</a>                right: Box::new(right),
+<a href=#271 id=271 data-nosnippet>271</a>            };
+<a href=#272 id=272 data-nosnippet>272</a>        }
+<a href=#273 id=273 data-nosnippet>273</a>        <span class="prelude-val">Ok</span>(left)
+<a href=#274 id=274 data-nosnippet>274</a>    }
+<a href=#275 id=275 data-nosnippet>275</a>
+<a href=#276 id=276 data-nosnippet>276</a>    <span class="kw">fn </span>parse_infix_right(<span class="kw-2">&amp;mut </span><span class="self">self</span>, level: usize, spec: <span class="kw-2">&amp;</span>InfixSpec) -&gt; <span class="prelude-ty">Result</span>&lt;Expr, ParseError&gt; {
+<a href=#277 id=277 data-nosnippet>277</a>        <span class="kw">let </span>left = <span class="self">self</span>.parse_infix_level(level + <span class="number">1</span>)<span class="question-mark">?</span>;
+<a href=#278 id=278 data-nosnippet>278</a>        <span class="kw">if </span>spec.contains(<span class="kw-2">&amp;</span><span class="self">self</span>.peek().kind) {
+<a href=#279 id=279 data-nosnippet>279</a>            <span class="kw">let </span>op = <span class="self">self</span>.pop_any().value;
+<a href=#280 id=280 data-nosnippet>280</a>            <span class="kw">let </span>right = <span class="self">self</span>.parse_infix_level(level)<span class="question-mark">?</span>;
+<a href=#281 id=281 data-nosnippet>281</a>            <span class="prelude-val">Ok</span>(Expr::BinOp {
+<a href=#282 id=282 data-nosnippet>282</a>                op,
+<a href=#283 id=283 data-nosnippet>283</a>                left: Box::new(left),
+<a href=#284 id=284 data-nosnippet>284</a>                right: Box::new(right),
+<a href=#285 id=285 data-nosnippet>285</a>            })
+<a href=#286 id=286 data-nosnippet>286</a>        } <span class="kw">else </span>{
+<a href=#287 id=287 data-nosnippet>287</a>            <span class="prelude-val">Ok</span>(left)
+<a href=#288 id=288 data-nosnippet>288</a>        }
+<a href=#289 id=289 data-nosnippet>289</a>    }
+<a href=#290 id=290 data-nosnippet>290</a>
+<a href=#291 id=291 data-nosnippet>291</a>    <span class="kw">fn </span>parse_infix_non(<span class="kw-2">&amp;mut </span><span class="self">self</span>, level: usize, spec: <span class="kw-2">&amp;</span>InfixSpec) -&gt; <span class="prelude-ty">Result</span>&lt;Expr, ParseError&gt; {
+<a href=#292 id=292 data-nosnippet>292</a>        <span class="kw">let </span>left = <span class="self">self</span>.parse_infix_level(level + <span class="number">1</span>)<span class="question-mark">?</span>;
+<a href=#293 id=293 data-nosnippet>293</a>        <span class="kw">if </span>spec.contains(<span class="kw-2">&amp;</span><span class="self">self</span>.peek().kind) {
+<a href=#294 id=294 data-nosnippet>294</a>            <span class="kw">let </span>op = <span class="self">self</span>.pop_any().value;
+<a href=#295 id=295 data-nosnippet>295</a>            <span class="kw">let </span>right = <span class="self">self</span>.parse_infix_level(level + <span class="number">1</span>)<span class="question-mark">?</span>;
+<a href=#296 id=296 data-nosnippet>296</a>            <span class="prelude-val">Ok</span>(Expr::BinOp {
+<a href=#297 id=297 data-nosnippet>297</a>                op,
+<a href=#298 id=298 data-nosnippet>298</a>                left: Box::new(left),
+<a href=#299 id=299 data-nosnippet>299</a>                right: Box::new(right),
+<a href=#300 id=300 data-nosnippet>300</a>            })
+<a href=#301 id=301 data-nosnippet>301</a>        } <span class="kw">else </span>{
+<a href=#302 id=302 data-nosnippet>302</a>            <span class="prelude-val">Ok</span>(left)
+<a href=#303 id=303 data-nosnippet>303</a>        }
+<a href=#304 id=304 data-nosnippet>304</a>    }
+<a href=#305 id=305 data-nosnippet>305</a>
+<a href=#306 id=306 data-nosnippet>306</a>    <span class="doccomment">/// 関数適用（左結合）を解析する。
+<a href=#307 id=307 data-nosnippet>307</a>    </span><span class="kw">fn </span>parse_app(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Expr, ParseError&gt; {
+<a href=#308 id=308 data-nosnippet>308</a>        <span class="kw">let </span><span class="kw-2">mut </span>left = <span class="self">self</span>.parse_atom()<span class="question-mark">?</span>;
+<a href=#309 id=309 data-nosnippet>309</a>        <span class="kw">while let </span>TokenKind::INT
+<a href=#310 id=310 data-nosnippet>310</a>        | TokenKind::HEX
+<a href=#311 id=311 data-nosnippet>311</a>        | TokenKind::OCT
+<a href=#312 id=312 data-nosnippet>312</a>        | TokenKind::BIN
+<a href=#313 id=313 data-nosnippet>313</a>        | TokenKind::FLOAT
+<a href=#314 id=314 data-nosnippet>314</a>        | TokenKind::CHAR
+<a href=#315 id=315 data-nosnippet>315</a>        | TokenKind::STRING
+<a href=#316 id=316 data-nosnippet>316</a>        | TokenKind::VARID
+<a href=#317 id=317 data-nosnippet>317</a>        | TokenKind::UNDERSCORE
+<a href=#318 id=318 data-nosnippet>318</a>        | TokenKind::QMARK
+<a href=#319 id=319 data-nosnippet>319</a>        | TokenKind::LPAREN
+<a href=#320 id=320 data-nosnippet>320</a>        | TokenKind::LBRACK
+<a href=#321 id=321 data-nosnippet>321</a>        | TokenKind::TRUE
+<a href=#322 id=322 data-nosnippet>322</a>        | TokenKind::FALSE = <span class="self">self</span>.peek().kind
+<a href=#323 id=323 data-nosnippet>323</a>        {
+<a href=#324 id=324 data-nosnippet>324</a>            <span class="kw">let </span>right = <span class="self">self</span>.parse_atom()<span class="question-mark">?</span>;
+<a href=#325 id=325 data-nosnippet>325</a>            left = Expr::App {
+<a href=#326 id=326 data-nosnippet>326</a>                func: Box::new(left),
+<a href=#327 id=327 data-nosnippet>327</a>                arg: Box::new(right),
+<a href=#328 id=328 data-nosnippet>328</a>            };
+<a href=#329 id=329 data-nosnippet>329</a>        }
+<a href=#330 id=330 data-nosnippet>330</a>        <span class="prelude-val">Ok</span>(left)
+<a href=#331 id=331 data-nosnippet>331</a>    }
+<a href=#332 id=332 data-nosnippet>332</a>
+<a href=#333 id=333 data-nosnippet>333</a>    <span class="doccomment">/// リテラル・識別子・括弧を含む原子式を解析する。
+<a href=#334 id=334 data-nosnippet>334</a>    </span><span class="kw">fn </span>parse_atom(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Expr, ParseError&gt; {
+<a href=#335 id=335 data-nosnippet>335</a>        <span class="kw">let </span>t = <span class="self">self</span>.peek().clone();
+<a href=#336 id=336 data-nosnippet>336</a>        <span class="kw">match </span>t.kind {
+<a href=#337 id=337 data-nosnippet>337</a>            TokenKind::MINUS =&gt; {
+<a href=#338 id=338 data-nosnippet>338</a>                <span class="self">self</span>.pop_any();
+<a href=#339 id=339 data-nosnippet>339</a>                <span class="kw">let </span>rhs = <span class="self">self</span>.parse_atom()<span class="question-mark">?</span>;
+<a href=#340 id=340 data-nosnippet>340</a>                <span class="prelude-val">Ok</span>(Expr::BinOp {
+<a href=#341 id=341 data-nosnippet>341</a>                    op: <span class="string">"-"</span>.into(),
+<a href=#342 id=342 data-nosnippet>342</a>                    left: Box::new(Expr::IntLit {
+<a href=#343 id=343 data-nosnippet>343</a>                        value: <span class="number">0</span>,
+<a href=#344 id=344 data-nosnippet>344</a>                        base: IntBase::Dec,
+<a href=#345 id=345 data-nosnippet>345</a>                    }),
+<a href=#346 id=346 data-nosnippet>346</a>                    right: Box::new(rhs),
+<a href=#347 id=347 data-nosnippet>347</a>                })
+<a href=#348 id=348 data-nosnippet>348</a>            }
+<a href=#349 id=349 data-nosnippet>349</a>            TokenKind::INT | TokenKind::HEX | TokenKind::OCT | TokenKind::BIN =&gt; {
+<a href=#350 id=350 data-nosnippet>350</a>                <span class="self">self</span>.pop_any();
+<a href=#351 id=351 data-nosnippet>351</a>                <span class="kw">let </span>s = t.value.clone();
+<a href=#352 id=352 data-nosnippet>352</a>                <span class="kw">let </span>parsed: <span class="prelude-ty">Result</span>&lt;i64, <span class="kw">_</span>&gt; = <span class="kw">match </span>t.kind {
+<a href=#353 id=353 data-nosnippet>353</a>                    TokenKind::HEX =&gt; i64::from_str_radix(<span class="kw-2">&amp;</span>s[<span class="number">2</span>..], <span class="number">16</span>),
+<a href=#354 id=354 data-nosnippet>354</a>                    TokenKind::OCT =&gt; i64::from_str_radix(<span class="kw-2">&amp;</span>s[<span class="number">2</span>..], <span class="number">8</span>),
+<a href=#355 id=355 data-nosnippet>355</a>                    TokenKind::BIN =&gt; i64::from_str_radix(<span class="kw-2">&amp;</span>s[<span class="number">2</span>..], <span class="number">2</span>),
+<a href=#356 id=356 data-nosnippet>356</a>                    <span class="kw">_ </span>=&gt; s.parse::&lt;i64&gt;(),
+<a href=#357 id=357 data-nosnippet>357</a>                };
+<a href=#358 id=358 data-nosnippet>358</a>                <span class="kw">match </span>parsed {
+<a href=#359 id=359 data-nosnippet>359</a>                    <span class="prelude-val">Ok</span>(v) =&gt; {
+<a href=#360 id=360 data-nosnippet>360</a>                        <span class="kw">let </span>base = <span class="kw">match </span>t.kind {
+<a href=#361 id=361 data-nosnippet>361</a>                            TokenKind::HEX =&gt; IntBase::Hex,
+<a href=#362 id=362 data-nosnippet>362</a>                            TokenKind::OCT =&gt; IntBase::Oct,
+<a href=#363 id=363 data-nosnippet>363</a>                            TokenKind::BIN =&gt; IntBase::Bin,
+<a href=#364 id=364 data-nosnippet>364</a>                            <span class="kw">_ </span>=&gt; IntBase::Dec,
+<a href=#365 id=365 data-nosnippet>365</a>                        };
+<a href=#366 id=366 data-nosnippet>366</a>                        <span class="prelude-val">Ok</span>(Expr::IntLit { value: v, base })
+<a href=#367 id=367 data-nosnippet>367</a>                    }
+<a href=#368 id=368 data-nosnippet>368</a>                    <span class="prelude-val">Err</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">Err</span>(ParseError::new(
+<a href=#369 id=369 data-nosnippet>369</a>                        <span class="string">"PAR210"</span>,
+<a href=#370 id=370 data-nosnippet>370</a>                        <span class="string">"整数リテラルが範囲外"</span>,
+<a href=#371 id=371 data-nosnippet>371</a>                        <span class="prelude-val">Some</span>(t.pos),
+<a href=#372 id=372 data-nosnippet>372</a>                    )),
+<a href=#373 id=373 data-nosnippet>373</a>                }
+<a href=#374 id=374 data-nosnippet>374</a>            }
+<a href=#375 id=375 data-nosnippet>375</a>            TokenKind::FLOAT =&gt; {
+<a href=#376 id=376 data-nosnippet>376</a>                <span class="self">self</span>.pop_any();
+<a href=#377 id=377 data-nosnippet>377</a>                <span class="kw">match </span>t.value.parse::&lt;f64&gt;() {
+<a href=#378 id=378 data-nosnippet>378</a>                    <span class="prelude-val">Ok</span>(v) =&gt; <span class="prelude-val">Ok</span>(Expr::FloatLit { value: v }),
+<a href=#379 id=379 data-nosnippet>379</a>                    <span class="prelude-val">Err</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">Err</span>(ParseError::at(
+<a href=#380 id=380 data-nosnippet>380</a>                        <span class="string">"PAR220"</span>,
+<a href=#381 id=381 data-nosnippet>381</a>                        <span class="string">"浮動小数リテラルが不正"</span>,
+<a href=#382 id=382 data-nosnippet>382</a>                        <span class="prelude-val">Some</span>(t.pos),
+<a href=#383 id=383 data-nosnippet>383</a>                        <span class="prelude-val">Some</span>(t.line),
+<a href=#384 id=384 data-nosnippet>384</a>                        <span class="prelude-val">Some</span>(t.col),
+<a href=#385 id=385 data-nosnippet>385</a>                    )),
+<a href=#386 id=386 data-nosnippet>386</a>                }
+<a href=#387 id=387 data-nosnippet>387</a>            }
+<a href=#388 id=388 data-nosnippet>388</a>            TokenKind::CHAR =&gt; {
+<a href=#389 id=389 data-nosnippet>389</a>                <span class="self">self</span>.pop_any();
+<a href=#390 id=390 data-nosnippet>390</a>                <span class="kw">let </span>ch = decode_char(<span class="kw-2">&amp;</span>t.value)<span class="question-mark">?</span>;
+<a href=#391 id=391 data-nosnippet>391</a>                <span class="prelude-val">Ok</span>(Expr::CharLit { value: ch })
+<a href=#392 id=392 data-nosnippet>392</a>            }
+<a href=#393 id=393 data-nosnippet>393</a>            TokenKind::STRING =&gt; {
+<a href=#394 id=394 data-nosnippet>394</a>                <span class="self">self</span>.pop_any();
+<a href=#395 id=395 data-nosnippet>395</a>                <span class="kw">let </span>s = decode_string(<span class="kw-2">&amp;</span>t.value)<span class="question-mark">?</span>;
+<a href=#396 id=396 data-nosnippet>396</a>                <span class="prelude-val">Ok</span>(Expr::StringLit { value: s })
 <a href=#397 id=397 data-nosnippet>397</a>            }
-<a href=#398 id=398 data-nosnippet>398</a>            TokenKind::FALSE =&gt; {
+<a href=#398 id=398 data-nosnippet>398</a>            TokenKind::TRUE =&gt; {
 <a href=#399 id=399 data-nosnippet>399</a>                <span class="self">self</span>.pop_any();
-<a href=#400 id=400 data-nosnippet>400</a>                <span class="prelude-val">Ok</span>(Expr::BoolLit { value: <span class="bool-val">false </span>})
+<a href=#400 id=400 data-nosnippet>400</a>                <span class="prelude-val">Ok</span>(Expr::BoolLit { value: <span class="bool-val">true </span>})
 <a href=#401 id=401 data-nosnippet>401</a>            }
-<a href=#402 id=402 data-nosnippet>402</a>            TokenKind::VARID =&gt; {
+<a href=#402 id=402 data-nosnippet>402</a>            TokenKind::FALSE =&gt; {
 <a href=#403 id=403 data-nosnippet>403</a>                <span class="self">self</span>.pop_any();
-<a href=#404 id=404 data-nosnippet>404</a>                <span class="prelude-val">Ok</span>(Expr::Var { name: t.value })
+<a href=#404 id=404 data-nosnippet>404</a>                <span class="prelude-val">Ok</span>(Expr::BoolLit { value: <span class="bool-val">false </span>})
 <a href=#405 id=405 data-nosnippet>405</a>            }
-<a href=#406 id=406 data-nosnippet>406</a>            TokenKind::QMARK =&gt; {
+<a href=#406 id=406 data-nosnippet>406</a>            TokenKind::VARID =&gt; {
 <a href=#407 id=407 data-nosnippet>407</a>                <span class="self">self</span>.pop_any();
-<a href=#408 id=408 data-nosnippet>408</a>                <span class="kw">let </span>name = <span class="self">self</span>.pop(TokenKind::VARID)<span class="question-mark">?</span>.value;
-<a href=#409 id=409 data-nosnippet>409</a>                <span class="prelude-val">Ok</span>(Expr::Var {
-<a href=#410 id=410 data-nosnippet>410</a>                    name: <span class="macro">format!</span>(<span class="string">"?{}"</span>, name),
-<a href=#411 id=411 data-nosnippet>411</a>                })
-<a href=#412 id=412 data-nosnippet>412</a>            }
-<a href=#413 id=413 data-nosnippet>413</a>            TokenKind::UNDERSCORE =&gt; {
-<a href=#414 id=414 data-nosnippet>414</a>                <span class="self">self</span>.pop_any();
-<a href=#415 id=415 data-nosnippet>415</a>                <span class="prelude-val">Ok</span>(Expr::Var { name: <span class="string">"_"</span>.into() })
+<a href=#408 id=408 data-nosnippet>408</a>                <span class="prelude-val">Ok</span>(Expr::Var { name: t.value })
+<a href=#409 id=409 data-nosnippet>409</a>            }
+<a href=#410 id=410 data-nosnippet>410</a>            TokenKind::QMARK =&gt; {
+<a href=#411 id=411 data-nosnippet>411</a>                <span class="self">self</span>.pop_any();
+<a href=#412 id=412 data-nosnippet>412</a>                <span class="kw">let </span>name = <span class="self">self</span>.pop(TokenKind::VARID)<span class="question-mark">?</span>.value;
+<a href=#413 id=413 data-nosnippet>413</a>                <span class="prelude-val">Ok</span>(Expr::Var {
+<a href=#414 id=414 data-nosnippet>414</a>                    name: <span class="macro">format!</span>(<span class="string">"?{}"</span>, name),
+<a href=#415 id=415 data-nosnippet>415</a>                })
 <a href=#416 id=416 data-nosnippet>416</a>            }
-<a href=#417 id=417 data-nosnippet>417</a>            TokenKind::LPAREN =&gt; {
+<a href=#417 id=417 data-nosnippet>417</a>            TokenKind::UNDERSCORE =&gt; {
 <a href=#418 id=418 data-nosnippet>418</a>                <span class="self">self</span>.pop_any();
-<a href=#419 id=419 data-nosnippet>419</a>                <span class="kw">let </span>e = <span class="self">self</span>.parse_expr()<span class="question-mark">?</span>;
-<a href=#420 id=420 data-nosnippet>420</a>                <span class="kw">if </span><span class="self">self</span>.accept(TokenKind::COMMA).is_some() {
-<a href=#421 id=421 data-nosnippet>421</a>                    <span class="kw">let </span><span class="kw-2">mut </span>items = <span class="macro">vec!</span>[e, <span class="self">self</span>.parse_expr()<span class="question-mark">?</span>];
-<a href=#422 id=422 data-nosnippet>422</a>                    <span class="kw">while </span><span class="self">self</span>.accept(TokenKind::COMMA).is_some() {
-<a href=#423 id=423 data-nosnippet>423</a>                        items.push(<span class="self">self</span>.parse_expr()<span class="question-mark">?</span>);
-<a href=#424 id=424 data-nosnippet>424</a>                    }
-<a href=#425 id=425 data-nosnippet>425</a>                    <span class="self">self</span>.pop(TokenKind::RPAREN)<span class="question-mark">?</span>;
-<a href=#426 id=426 data-nosnippet>426</a>                    <span class="prelude-val">Ok</span>(Expr::TupleLit { items })
-<a href=#427 id=427 data-nosnippet>427</a>                } <span class="kw">else </span>{
-<a href=#428 id=428 data-nosnippet>428</a>                    <span class="self">self</span>.pop(TokenKind::RPAREN)<span class="question-mark">?</span>;
-<a href=#429 id=429 data-nosnippet>429</a>                    <span class="prelude-val">Ok</span>(e)
-<a href=#430 id=430 data-nosnippet>430</a>                }
-<a href=#431 id=431 data-nosnippet>431</a>            }
-<a href=#432 id=432 data-nosnippet>432</a>            TokenKind::LBRACK =&gt; {
-<a href=#433 id=433 data-nosnippet>433</a>                <span class="self">self</span>.pop_any();
-<a href=#434 id=434 data-nosnippet>434</a>                <span class="kw">let </span><span class="kw-2">mut </span>items = Vec::new();
-<a href=#435 id=435 data-nosnippet>435</a>                <span class="kw">if </span><span class="self">self</span>.peek().kind != TokenKind::RBRACK {
-<a href=#436 id=436 data-nosnippet>436</a>                    items.push(<span class="self">self</span>.parse_expr()<span class="question-mark">?</span>);
-<a href=#437 id=437 data-nosnippet>437</a>                    <span class="kw">while </span><span class="self">self</span>.accept(TokenKind::COMMA).is_some() {
-<a href=#438 id=438 data-nosnippet>438</a>                        items.push(<span class="self">self</span>.parse_expr()<span class="question-mark">?</span>);
-<a href=#439 id=439 data-nosnippet>439</a>                    }
-<a href=#440 id=440 data-nosnippet>440</a>                }
-<a href=#441 id=441 data-nosnippet>441</a>                <span class="self">self</span>.pop(TokenKind::RBRACK)<span class="question-mark">?</span>;
-<a href=#442 id=442 data-nosnippet>442</a>                <span class="prelude-val">Ok</span>(Expr::ListLit { items })
-<a href=#443 id=443 data-nosnippet>443</a>            }
-<a href=#444 id=444 data-nosnippet>444</a>            <span class="kw">_ </span>=&gt; <span class="prelude-val">Err</span>(ParseError::new(
-<a href=#445 id=445 data-nosnippet>445</a>                <span class="string">"PAR002"</span>,
-<a href=#446 id=446 data-nosnippet>446</a>                <span class="macro">format!</span>(<span class="string">"不正なトークン: {:?} {}"</span>, t.kind, t.value),
-<a href=#447 id=447 data-nosnippet>447</a>                <span class="prelude-val">Some</span>(t.pos),
-<a href=#448 id=448 data-nosnippet>448</a>            )),
-<a href=#449 id=449 data-nosnippet>449</a>        }
-<a href=#450 id=450 data-nosnippet>450</a>    }
-<a href=#451 id=451 data-nosnippet>451</a>
-<a href=#452 id=452 data-nosnippet>452</a>    <span class="comment">// ===== 型式 =====
-<a href=#453 id=453 data-nosnippet>453</a>    </span><span class="doccomment">/// 制約付きシグマ型（`context =&gt; type`）を解析する。
-<a href=#454 id=454 data-nosnippet>454</a>    </span><span class="kw">pub fn </span>parse_sigma_type(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;SigmaType, ParseError&gt; {
-<a href=#455 id=455 data-nosnippet>455</a>        <span class="comment">// 先読み context '=&gt;'
-<a href=#456 id=456 data-nosnippet>456</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>constraints: Vec&lt;AConstraint&gt; = Vec::new();
-<a href=#457 id=457 data-nosnippet>457</a>        <span class="kw">if </span><span class="macro">matches!</span>(<span class="self">self</span>.peek().kind, TokenKind::CONID | TokenKind::LPAREN) {
-<a href=#458 id=458 data-nosnippet>458</a>            <span class="kw">let </span>save = <span class="self">self</span>.i;
-<a href=#459 id=459 data-nosnippet>459</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(cs) = <span class="self">self</span>.try_parse_context()<span class="question-mark">? </span>{
-<a href=#460 id=460 data-nosnippet>460</a>                constraints = cs;
-<a href=#461 id=461 data-nosnippet>461</a>                <span class="self">self</span>.pop(TokenKind::DARROW)<span class="question-mark">?</span>;
-<a href=#462 id=462 data-nosnippet>462</a>            } <span class="kw">else </span>{
-<a href=#463 id=463 data-nosnippet>463</a>                <span class="self">self</span>.i = save;
-<a href=#464 id=464 data-nosnippet>464</a>            }
-<a href=#465 id=465 data-nosnippet>465</a>        }
-<a href=#466 id=466 data-nosnippet>466</a>        <span class="kw">let </span>ty = <span class="self">self</span>.parse_type()<span class="question-mark">?</span>;
-<a href=#467 id=467 data-nosnippet>467</a>        <span class="prelude-val">Ok</span>(SigmaType {
-<a href=#468 id=468 data-nosnippet>468</a>            constraints,
-<a href=#469 id=469 data-nosnippet>469</a>            r#type: ty,
-<a href=#470 id=470 data-nosnippet>470</a>        })
-<a href=#471 id=471 data-nosnippet>471</a>    }
-<a href=#472 id=472 data-nosnippet>472</a>
-<a href=#473 id=473 data-nosnippet>473</a>    <span class="doccomment">/// 制約コンテキストを先読みし、存在すれば解析して返す。
-<a href=#474 id=474 data-nosnippet>474</a>    </span><span class="kw">fn </span>try_parse_context(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;Vec&lt;AConstraint&gt;&gt;, ParseError&gt; {
-<a href=#475 id=475 data-nosnippet>475</a>        <span class="kw">match </span><span class="self">self</span>.peek().kind {
-<a href=#476 id=476 data-nosnippet>476</a>            TokenKind::CONID =&gt; {
-<a href=#477 id=477 data-nosnippet>477</a>                <span class="kw">let </span>c = <span class="self">self</span>.parse_constraint()<span class="question-mark">?</span>;
-<a href=#478 id=478 data-nosnippet>478</a>                <span class="kw">if </span><span class="self">self</span>.peek().kind == TokenKind::DARROW {
-<a href=#479 id=479 data-nosnippet>479</a>                    <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="macro">vec!</span>[c]))
-<a href=#480 id=480 data-nosnippet>480</a>                } <span class="kw">else </span>{
-<a href=#481 id=481 data-nosnippet>481</a>                    <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>)
-<a href=#482 id=482 data-nosnippet>482</a>                }
-<a href=#483 id=483 data-nosnippet>483</a>            }
-<a href=#484 id=484 data-nosnippet>484</a>            TokenKind::LPAREN =&gt; {
-<a href=#485 id=485 data-nosnippet>485</a>                <span class="kw">let </span>save = <span class="self">self</span>.i;
-<a href=#486 id=486 data-nosnippet>486</a>                <span class="self">self</span>.pop(TokenKind::LPAREN)<span class="question-mark">?</span>;
-<a href=#487 id=487 data-nosnippet>487</a>                <span class="kw">let </span><span class="kw-2">mut </span>cs = <span class="macro">vec!</span>[<span class="self">self</span>.parse_constraint()<span class="question-mark">?</span>];
-<a href=#488 id=488 data-nosnippet>488</a>                <span class="kw">while </span><span class="self">self</span>.accept(TokenKind::COMMA).is_some() {
-<a href=#489 id=489 data-nosnippet>489</a>                    cs.push(<span class="self">self</span>.parse_constraint()<span class="question-mark">?</span>);
-<a href=#490 id=490 data-nosnippet>490</a>                }
-<a href=#491 id=491 data-nosnippet>491</a>                <span class="kw">if </span><span class="self">self</span>.accept(TokenKind::RPAREN).is_none() {
-<a href=#492 id=492 data-nosnippet>492</a>                    <span class="self">self</span>.i = save;
-<a href=#493 id=493 data-nosnippet>493</a>                    <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>);
-<a href=#494 id=494 data-nosnippet>494</a>                }
-<a href=#495 id=495 data-nosnippet>495</a>                <span class="kw">if </span><span class="self">self</span>.peek().kind == TokenKind::DARROW {
-<a href=#496 id=496 data-nosnippet>496</a>                    <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(cs))
-<a href=#497 id=497 data-nosnippet>497</a>                } <span class="kw">else </span>{
-<a href=#498 id=498 data-nosnippet>498</a>                    <span class="self">self</span>.i = save;
-<a href=#499 id=499 data-nosnippet>499</a>                    <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>)
-<a href=#500 id=500 data-nosnippet>500</a>                }
-<a href=#501 id=501 data-nosnippet>501</a>            }
-<a href=#502 id=502 data-nosnippet>502</a>            <span class="kw">_ </span>=&gt; <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>),
-<a href=#503 id=503 data-nosnippet>503</a>        }
-<a href=#504 id=504 data-nosnippet>504</a>    }
-<a href=#505 id=505 data-nosnippet>505</a>
-<a href=#506 id=506 data-nosnippet>506</a>    <span class="doccomment">/// `Class var` 形式の型クラス制約を解析する。
-<a href=#507 id=507 data-nosnippet>507</a>    </span><span class="kw">fn </span>parse_constraint(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;AConstraint, ParseError&gt; {
-<a href=#508 id=508 data-nosnippet>508</a>        <span class="kw">let </span>cls = <span class="self">self</span>.pop(TokenKind::CONID)<span class="question-mark">?</span>.value;
-<a href=#509 id=509 data-nosnippet>509</a>        <span class="kw">let </span>tv = <span class="self">self</span>.pop(TokenKind::VARID)<span class="question-mark">?</span>.value;
-<a href=#510 id=510 data-nosnippet>510</a>        <span class="prelude-val">Ok</span>(AConstraint {
-<a href=#511 id=511 data-nosnippet>511</a>            classname: cls,
-<a href=#512 id=512 data-nosnippet>512</a>            typevar: tv,
-<a href=#513 id=513 data-nosnippet>513</a>        })
-<a href=#514 id=514 data-nosnippet>514</a>    }
-<a href=#515 id=515 data-nosnippet>515</a>
-<a href=#516 id=516 data-nosnippet>516</a>    <span class="doccomment">/// 関数矢印を含む型式を解析する。
-<a href=#517 id=517 data-nosnippet>517</a>    </span><span class="kw">pub fn </span>parse_type(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;TypeExpr, ParseError&gt; {
-<a href=#518 id=518 data-nosnippet>518</a>        <span class="kw">let </span>left = <span class="self">self</span>.parse_type_app()<span class="question-mark">?</span>;
-<a href=#519 id=519 data-nosnippet>519</a>        <span class="kw">if </span><span class="self">self</span>.accept(TokenKind::ARROW).is_some() {
-<a href=#520 id=520 data-nosnippet>520</a>            <span class="kw">let </span>right = <span class="self">self</span>.parse_type()<span class="question-mark">?</span>;
-<a href=#521 id=521 data-nosnippet>521</a>            <span class="prelude-val">Ok</span>(TypeExpr::TEFun(Box::new(left), Box::new(right)))
-<a href=#522 id=522 data-nosnippet>522</a>        } <span class="kw">else </span>{
-<a href=#523 id=523 data-nosnippet>523</a>            <span class="prelude-val">Ok</span>(left)
+<a href=#419 id=419 data-nosnippet>419</a>                <span class="prelude-val">Ok</span>(Expr::Var { name: <span class="string">"_"</span>.into() })
+<a href=#420 id=420 data-nosnippet>420</a>            }
+<a href=#421 id=421 data-nosnippet>421</a>            TokenKind::LPAREN =&gt; {
+<a href=#422 id=422 data-nosnippet>422</a>                <span class="self">self</span>.pop_any();
+<a href=#423 id=423 data-nosnippet>423</a>                <span class="kw">let </span>e = <span class="self">self</span>.parse_expr()<span class="question-mark">?</span>;
+<a href=#424 id=424 data-nosnippet>424</a>                <span class="kw">if </span><span class="self">self</span>.accept(TokenKind::COMMA).is_some() {
+<a href=#425 id=425 data-nosnippet>425</a>                    <span class="kw">let </span><span class="kw-2">mut </span>items = <span class="macro">vec!</span>[e, <span class="self">self</span>.parse_expr()<span class="question-mark">?</span>];
+<a href=#426 id=426 data-nosnippet>426</a>                    <span class="kw">while </span><span class="self">self</span>.accept(TokenKind::COMMA).is_some() {
+<a href=#427 id=427 data-nosnippet>427</a>                        items.push(<span class="self">self</span>.parse_expr()<span class="question-mark">?</span>);
+<a href=#428 id=428 data-nosnippet>428</a>                    }
+<a href=#429 id=429 data-nosnippet>429</a>                    <span class="self">self</span>.pop(TokenKind::RPAREN)<span class="question-mark">?</span>;
+<a href=#430 id=430 data-nosnippet>430</a>                    <span class="prelude-val">Ok</span>(Expr::TupleLit { items })
+<a href=#431 id=431 data-nosnippet>431</a>                } <span class="kw">else </span>{
+<a href=#432 id=432 data-nosnippet>432</a>                    <span class="self">self</span>.pop(TokenKind::RPAREN)<span class="question-mark">?</span>;
+<a href=#433 id=433 data-nosnippet>433</a>                    <span class="prelude-val">Ok</span>(e)
+<a href=#434 id=434 data-nosnippet>434</a>                }
+<a href=#435 id=435 data-nosnippet>435</a>            }
+<a href=#436 id=436 data-nosnippet>436</a>            TokenKind::LBRACK =&gt; {
+<a href=#437 id=437 data-nosnippet>437</a>                <span class="self">self</span>.pop_any();
+<a href=#438 id=438 data-nosnippet>438</a>                <span class="kw">let </span><span class="kw-2">mut </span>items = Vec::new();
+<a href=#439 id=439 data-nosnippet>439</a>                <span class="kw">if </span><span class="self">self</span>.peek().kind != TokenKind::RBRACK {
+<a href=#440 id=440 data-nosnippet>440</a>                    items.push(<span class="self">self</span>.parse_expr()<span class="question-mark">?</span>);
+<a href=#441 id=441 data-nosnippet>441</a>                    <span class="kw">while </span><span class="self">self</span>.accept(TokenKind::COMMA).is_some() {
+<a href=#442 id=442 data-nosnippet>442</a>                        items.push(<span class="self">self</span>.parse_expr()<span class="question-mark">?</span>);
+<a href=#443 id=443 data-nosnippet>443</a>                    }
+<a href=#444 id=444 data-nosnippet>444</a>                }
+<a href=#445 id=445 data-nosnippet>445</a>                <span class="self">self</span>.pop(TokenKind::RBRACK)<span class="question-mark">?</span>;
+<a href=#446 id=446 data-nosnippet>446</a>                <span class="prelude-val">Ok</span>(Expr::ListLit { items })
+<a href=#447 id=447 data-nosnippet>447</a>            }
+<a href=#448 id=448 data-nosnippet>448</a>            <span class="kw">_ </span>=&gt; <span class="prelude-val">Err</span>(ParseError::new(
+<a href=#449 id=449 data-nosnippet>449</a>                <span class="string">"PAR002"</span>,
+<a href=#450 id=450 data-nosnippet>450</a>                <span class="macro">format!</span>(<span class="string">"不正なトークン: {:?} {}"</span>, t.kind, t.value),
+<a href=#451 id=451 data-nosnippet>451</a>                <span class="prelude-val">Some</span>(t.pos),
+<a href=#452 id=452 data-nosnippet>452</a>            )),
+<a href=#453 id=453 data-nosnippet>453</a>        }
+<a href=#454 id=454 data-nosnippet>454</a>    }
+<a href=#455 id=455 data-nosnippet>455</a>
+<a href=#456 id=456 data-nosnippet>456</a>    <span class="comment">// ===== 型式 =====
+<a href=#457 id=457 data-nosnippet>457</a>    </span><span class="doccomment">/// 制約付きシグマ型（`context =&gt; type`）を解析する。
+<a href=#458 id=458 data-nosnippet>458</a>    </span><span class="kw">pub fn </span>parse_sigma_type(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;SigmaType, ParseError&gt; {
+<a href=#459 id=459 data-nosnippet>459</a>        <span class="comment">// 先読み context '=&gt;'
+<a href=#460 id=460 data-nosnippet>460</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>constraints: Vec&lt;AConstraint&gt; = Vec::new();
+<a href=#461 id=461 data-nosnippet>461</a>        <span class="kw">if </span><span class="macro">matches!</span>(<span class="self">self</span>.peek().kind, TokenKind::CONID | TokenKind::LPAREN) {
+<a href=#462 id=462 data-nosnippet>462</a>            <span class="kw">let </span>save = <span class="self">self</span>.i;
+<a href=#463 id=463 data-nosnippet>463</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(cs) = <span class="self">self</span>.try_parse_context()<span class="question-mark">? </span>{
+<a href=#464 id=464 data-nosnippet>464</a>                constraints = cs;
+<a href=#465 id=465 data-nosnippet>465</a>                <span class="self">self</span>.pop(TokenKind::DARROW)<span class="question-mark">?</span>;
+<a href=#466 id=466 data-nosnippet>466</a>            } <span class="kw">else </span>{
+<a href=#467 id=467 data-nosnippet>467</a>                <span class="self">self</span>.i = save;
+<a href=#468 id=468 data-nosnippet>468</a>            }
+<a href=#469 id=469 data-nosnippet>469</a>        }
+<a href=#470 id=470 data-nosnippet>470</a>        <span class="kw">let </span>ty = <span class="self">self</span>.parse_type()<span class="question-mark">?</span>;
+<a href=#471 id=471 data-nosnippet>471</a>        <span class="prelude-val">Ok</span>(SigmaType {
+<a href=#472 id=472 data-nosnippet>472</a>            constraints,
+<a href=#473 id=473 data-nosnippet>473</a>            r#type: ty,
+<a href=#474 id=474 data-nosnippet>474</a>        })
+<a href=#475 id=475 data-nosnippet>475</a>    }
+<a href=#476 id=476 data-nosnippet>476</a>
+<a href=#477 id=477 data-nosnippet>477</a>    <span class="doccomment">/// 制約コンテキストを先読みし、存在すれば解析して返す。
+<a href=#478 id=478 data-nosnippet>478</a>    </span><span class="kw">fn </span>try_parse_context(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;Vec&lt;AConstraint&gt;&gt;, ParseError&gt; {
+<a href=#479 id=479 data-nosnippet>479</a>        <span class="kw">match </span><span class="self">self</span>.peek().kind {
+<a href=#480 id=480 data-nosnippet>480</a>            TokenKind::CONID =&gt; {
+<a href=#481 id=481 data-nosnippet>481</a>                <span class="kw">if </span>!<span class="macro">matches!</span>(<span class="self">self</span>.peek_kind(<span class="number">1</span>), <span class="prelude-val">Some</span>(TokenKind::VARID)) {
+<a href=#482 id=482 data-nosnippet>482</a>                    <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>);
+<a href=#483 id=483 data-nosnippet>483</a>                }
+<a href=#484 id=484 data-nosnippet>484</a>                <span class="kw">let </span>save = <span class="self">self</span>.i;
+<a href=#485 id=485 data-nosnippet>485</a>                <span class="kw">let </span>c = <span class="self">self</span>.parse_constraint()<span class="question-mark">?</span>;
+<a href=#486 id=486 data-nosnippet>486</a>                <span class="kw">if </span><span class="self">self</span>.peek().kind == TokenKind::DARROW {
+<a href=#487 id=487 data-nosnippet>487</a>                    <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="macro">vec!</span>[c]))
+<a href=#488 id=488 data-nosnippet>488</a>                } <span class="kw">else </span>{
+<a href=#489 id=489 data-nosnippet>489</a>                    <span class="self">self</span>.i = save;
+<a href=#490 id=490 data-nosnippet>490</a>                    <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>)
+<a href=#491 id=491 data-nosnippet>491</a>                }
+<a href=#492 id=492 data-nosnippet>492</a>            }
+<a href=#493 id=493 data-nosnippet>493</a>            TokenKind::LPAREN =&gt; {
+<a href=#494 id=494 data-nosnippet>494</a>                <span class="kw">let </span>save = <span class="self">self</span>.i;
+<a href=#495 id=495 data-nosnippet>495</a>                <span class="self">self</span>.pop(TokenKind::LPAREN)<span class="question-mark">?</span>;
+<a href=#496 id=496 data-nosnippet>496</a>                <span class="kw">if </span>!(<span class="macro">matches!</span>(<span class="self">self</span>.peek_kind(<span class="number">0</span>), <span class="prelude-val">Some</span>(TokenKind::CONID))
+<a href=#497 id=497 data-nosnippet>497</a>                    &amp;&amp; <span class="macro">matches!</span>(<span class="self">self</span>.peek_kind(<span class="number">1</span>), <span class="prelude-val">Some</span>(TokenKind::VARID)))
+<a href=#498 id=498 data-nosnippet>498</a>                {
+<a href=#499 id=499 data-nosnippet>499</a>                    <span class="self">self</span>.i = save;
+<a href=#500 id=500 data-nosnippet>500</a>                    <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>);
+<a href=#501 id=501 data-nosnippet>501</a>                }
+<a href=#502 id=502 data-nosnippet>502</a>                <span class="kw">let </span><span class="kw-2">mut </span>cs = <span class="macro">vec!</span>[<span class="self">self</span>.parse_constraint()<span class="question-mark">?</span>];
+<a href=#503 id=503 data-nosnippet>503</a>                <span class="kw">while </span><span class="self">self</span>.accept(TokenKind::COMMA).is_some() {
+<a href=#504 id=504 data-nosnippet>504</a>                    <span class="kw">if </span>!(<span class="macro">matches!</span>(<span class="self">self</span>.peek_kind(<span class="number">0</span>), <span class="prelude-val">Some</span>(TokenKind::CONID))
+<a href=#505 id=505 data-nosnippet>505</a>                        &amp;&amp; <span class="macro">matches!</span>(<span class="self">self</span>.peek_kind(<span class="number">1</span>), <span class="prelude-val">Some</span>(TokenKind::VARID)))
+<a href=#506 id=506 data-nosnippet>506</a>                    {
+<a href=#507 id=507 data-nosnippet>507</a>                        <span class="self">self</span>.i = save;
+<a href=#508 id=508 data-nosnippet>508</a>                        <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>);
+<a href=#509 id=509 data-nosnippet>509</a>                    }
+<a href=#510 id=510 data-nosnippet>510</a>                    cs.push(<span class="self">self</span>.parse_constraint()<span class="question-mark">?</span>);
+<a href=#511 id=511 data-nosnippet>511</a>                }
+<a href=#512 id=512 data-nosnippet>512</a>                <span class="kw">if </span><span class="self">self</span>.accept(TokenKind::RPAREN).is_none() {
+<a href=#513 id=513 data-nosnippet>513</a>                    <span class="self">self</span>.i = save;
+<a href=#514 id=514 data-nosnippet>514</a>                    <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>);
+<a href=#515 id=515 data-nosnippet>515</a>                }
+<a href=#516 id=516 data-nosnippet>516</a>                <span class="kw">if </span><span class="self">self</span>.peek().kind == TokenKind::DARROW {
+<a href=#517 id=517 data-nosnippet>517</a>                    <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(cs))
+<a href=#518 id=518 data-nosnippet>518</a>                } <span class="kw">else </span>{
+<a href=#519 id=519 data-nosnippet>519</a>                    <span class="self">self</span>.i = save;
+<a href=#520 id=520 data-nosnippet>520</a>                    <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>)
+<a href=#521 id=521 data-nosnippet>521</a>                }
+<a href=#522 id=522 data-nosnippet>522</a>            }
+<a href=#523 id=523 data-nosnippet>523</a>            <span class="kw">_ </span>=&gt; <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>),
 <a href=#524 id=524 data-nosnippet>524</a>        }
 <a href=#525 id=525 data-nosnippet>525</a>    }
 <a href=#526 id=526 data-nosnippet>526</a>
-<a href=#527 id=527 data-nosnippet>527</a>    <span class="doccomment">/// 型適用（左結合）を解析する。
-<a href=#528 id=528 data-nosnippet>528</a>    </span><span class="kw">fn </span>parse_type_app(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;TypeExpr, ParseError&gt; {
-<a href=#529 id=529 data-nosnippet>529</a>        <span class="kw">let </span><span class="kw-2">mut </span>left = <span class="self">self</span>.parse_type_atom()<span class="question-mark">?</span>;
-<a href=#530 id=530 data-nosnippet>530</a>        <span class="kw">while let </span>TokenKind::CONID | TokenKind::VARID | TokenKind::LPAREN | TokenKind::LBRACK =
-<a href=#531 id=531 data-nosnippet>531</a>            <span class="self">self</span>.peek().kind
-<a href=#532 id=532 data-nosnippet>532</a>        {
-<a href=#533 id=533 data-nosnippet>533</a>            <span class="kw">let </span>right = <span class="self">self</span>.parse_type_atom()<span class="question-mark">?</span>;
-<a href=#534 id=534 data-nosnippet>534</a>            left = TypeExpr::TEApp(Box::new(left), Box::new(right));
-<a href=#535 id=535 data-nosnippet>535</a>        }
-<a href=#536 id=536 data-nosnippet>536</a>        <span class="prelude-val">Ok</span>(left)
-<a href=#537 id=537 data-nosnippet>537</a>    }
-<a href=#538 id=538 data-nosnippet>538</a>
-<a href=#539 id=539 data-nosnippet>539</a>    <span class="doccomment">/// 型式の原子要素（変数・コンストラクタ・タプル・リスト）を解析する。
-<a href=#540 id=540 data-nosnippet>540</a>    </span><span class="kw">fn </span>parse_type_atom(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;TypeExpr, ParseError&gt; {
-<a href=#541 id=541 data-nosnippet>541</a>        <span class="kw">let </span>t = <span class="self">self</span>.peek().clone();
-<a href=#542 id=542 data-nosnippet>542</a>        <span class="kw">match </span>t.kind {
-<a href=#543 id=543 data-nosnippet>543</a>            TokenKind::VARID =&gt; {
-<a href=#544 id=544 data-nosnippet>544</a>                <span class="self">self</span>.pop_any();
-<a href=#545 id=545 data-nosnippet>545</a>                <span class="prelude-val">Ok</span>(TypeExpr::TEVar(t.value))
-<a href=#546 id=546 data-nosnippet>546</a>            }
-<a href=#547 id=547 data-nosnippet>547</a>            TokenKind::CONID =&gt; {
-<a href=#548 id=548 data-nosnippet>548</a>                <span class="self">self</span>.pop_any();
-<a href=#549 id=549 data-nosnippet>549</a>                <span class="prelude-val">Ok</span>(TypeExpr::TECon(t.value))
-<a href=#550 id=550 data-nosnippet>550</a>            }
-<a href=#551 id=551 data-nosnippet>551</a>            TokenKind::LPAREN =&gt; {
-<a href=#552 id=552 data-nosnippet>552</a>                <span class="self">self</span>.pop_any();
-<a href=#553 id=553 data-nosnippet>553</a>                <span class="kw">let </span>ty = <span class="self">self</span>.parse_type()<span class="question-mark">?</span>;
-<a href=#554 id=554 data-nosnippet>554</a>                <span class="kw">if </span><span class="self">self</span>.accept(TokenKind::COMMA).is_some() {
-<a href=#555 id=555 data-nosnippet>555</a>                    <span class="kw">let </span><span class="kw-2">mut </span>items = <span class="macro">vec!</span>[ty, <span class="self">self</span>.parse_type()<span class="question-mark">?</span>];
-<a href=#556 id=556 data-nosnippet>556</a>                    <span class="kw">while </span><span class="self">self</span>.accept(TokenKind::COMMA).is_some() {
-<a href=#557 id=557 data-nosnippet>557</a>                        items.push(<span class="self">self</span>.parse_type()<span class="question-mark">?</span>);
-<a href=#558 id=558 data-nosnippet>558</a>                    }
-<a href=#559 id=559 data-nosnippet>559</a>                    <span class="self">self</span>.pop(TokenKind::RPAREN)<span class="question-mark">?</span>;
-<a href=#560 id=560 data-nosnippet>560</a>                    <span class="prelude-val">Ok</span>(TypeExpr::TETuple(items))
-<a href=#561 id=561 data-nosnippet>561</a>                } <span class="kw">else </span>{
-<a href=#562 id=562 data-nosnippet>562</a>                    <span class="self">self</span>.pop(TokenKind::RPAREN)<span class="question-mark">?</span>;
-<a href=#563 id=563 data-nosnippet>563</a>                    <span class="prelude-val">Ok</span>(ty)
-<a href=#564 id=564 data-nosnippet>564</a>                }
-<a href=#565 id=565 data-nosnippet>565</a>            }
-<a href=#566 id=566 data-nosnippet>566</a>            TokenKind::LBRACK =&gt; {
-<a href=#567 id=567 data-nosnippet>567</a>                <span class="self">self</span>.pop_any();
-<a href=#568 id=568 data-nosnippet>568</a>                <span class="kw">let </span>inner = <span class="self">self</span>.parse_type()<span class="question-mark">?</span>;
-<a href=#569 id=569 data-nosnippet>569</a>                <span class="self">self</span>.pop(TokenKind::RBRACK)<span class="question-mark">?</span>;
-<a href=#570 id=570 data-nosnippet>570</a>                <span class="prelude-val">Ok</span>(TypeExpr::TEList(Box::new(inner)))
+<a href=#527 id=527 data-nosnippet>527</a>    <span class="doccomment">/// `Class var` 形式の型クラス制約を解析する。
+<a href=#528 id=528 data-nosnippet>528</a>    </span><span class="kw">fn </span>parse_constraint(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;AConstraint, ParseError&gt; {
+<a href=#529 id=529 data-nosnippet>529</a>        <span class="kw">let </span>cls = <span class="self">self</span>.pop(TokenKind::CONID)<span class="question-mark">?</span>.value;
+<a href=#530 id=530 data-nosnippet>530</a>        <span class="kw">let </span>tv = <span class="self">self</span>.pop(TokenKind::VARID)<span class="question-mark">?</span>.value;
+<a href=#531 id=531 data-nosnippet>531</a>        <span class="prelude-val">Ok</span>(AConstraint {
+<a href=#532 id=532 data-nosnippet>532</a>            classname: cls,
+<a href=#533 id=533 data-nosnippet>533</a>            typevar: tv,
+<a href=#534 id=534 data-nosnippet>534</a>        })
+<a href=#535 id=535 data-nosnippet>535</a>    }
+<a href=#536 id=536 data-nosnippet>536</a>
+<a href=#537 id=537 data-nosnippet>537</a>    <span class="doccomment">/// 関数矢印を含む型式を解析する。
+<a href=#538 id=538 data-nosnippet>538</a>    </span><span class="kw">pub fn </span>parse_type(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;TypeExpr, ParseError&gt; {
+<a href=#539 id=539 data-nosnippet>539</a>        <span class="kw">let </span>left = <span class="self">self</span>.parse_type_app()<span class="question-mark">?</span>;
+<a href=#540 id=540 data-nosnippet>540</a>        <span class="kw">if </span><span class="self">self</span>.accept(TokenKind::ARROW).is_some() {
+<a href=#541 id=541 data-nosnippet>541</a>            <span class="kw">let </span>right = <span class="self">self</span>.parse_type()<span class="question-mark">?</span>;
+<a href=#542 id=542 data-nosnippet>542</a>            <span class="prelude-val">Ok</span>(TypeExpr::TEFun(Box::new(left), Box::new(right)))
+<a href=#543 id=543 data-nosnippet>543</a>        } <span class="kw">else </span>{
+<a href=#544 id=544 data-nosnippet>544</a>            <span class="prelude-val">Ok</span>(left)
+<a href=#545 id=545 data-nosnippet>545</a>        }
+<a href=#546 id=546 data-nosnippet>546</a>    }
+<a href=#547 id=547 data-nosnippet>547</a>
+<a href=#548 id=548 data-nosnippet>548</a>    <span class="doccomment">/// 型適用（左結合）を解析する。
+<a href=#549 id=549 data-nosnippet>549</a>    </span><span class="kw">fn </span>parse_type_app(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;TypeExpr, ParseError&gt; {
+<a href=#550 id=550 data-nosnippet>550</a>        <span class="kw">let </span><span class="kw-2">mut </span>left = <span class="self">self</span>.parse_type_atom()<span class="question-mark">?</span>;
+<a href=#551 id=551 data-nosnippet>551</a>        <span class="kw">while let </span>TokenKind::CONID | TokenKind::VARID | TokenKind::LPAREN | TokenKind::LBRACK =
+<a href=#552 id=552 data-nosnippet>552</a>            <span class="self">self</span>.peek().kind
+<a href=#553 id=553 data-nosnippet>553</a>        {
+<a href=#554 id=554 data-nosnippet>554</a>            <span class="kw">let </span>right = <span class="self">self</span>.parse_type_atom()<span class="question-mark">?</span>;
+<a href=#555 id=555 data-nosnippet>555</a>            left = TypeExpr::TEApp(Box::new(left), Box::new(right));
+<a href=#556 id=556 data-nosnippet>556</a>        }
+<a href=#557 id=557 data-nosnippet>557</a>        <span class="prelude-val">Ok</span>(left)
+<a href=#558 id=558 data-nosnippet>558</a>    }
+<a href=#559 id=559 data-nosnippet>559</a>
+<a href=#560 id=560 data-nosnippet>560</a>    <span class="doccomment">/// 型式の原子要素（変数・コンストラクタ・タプル・リスト）を解析する。
+<a href=#561 id=561 data-nosnippet>561</a>    </span><span class="kw">fn </span>parse_type_atom(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;TypeExpr, ParseError&gt; {
+<a href=#562 id=562 data-nosnippet>562</a>        <span class="kw">let </span>t = <span class="self">self</span>.peek().clone();
+<a href=#563 id=563 data-nosnippet>563</a>        <span class="kw">match </span>t.kind {
+<a href=#564 id=564 data-nosnippet>564</a>            TokenKind::VARID =&gt; {
+<a href=#565 id=565 data-nosnippet>565</a>                <span class="self">self</span>.pop_any();
+<a href=#566 id=566 data-nosnippet>566</a>                <span class="prelude-val">Ok</span>(TypeExpr::TEVar(t.value))
+<a href=#567 id=567 data-nosnippet>567</a>            }
+<a href=#568 id=568 data-nosnippet>568</a>            TokenKind::CONID =&gt; {
+<a href=#569 id=569 data-nosnippet>569</a>                <span class="self">self</span>.pop_any();
+<a href=#570 id=570 data-nosnippet>570</a>                <span class="prelude-val">Ok</span>(TypeExpr::TECon(t.value))
 <a href=#571 id=571 data-nosnippet>571</a>            }
-<a href=#572 id=572 data-nosnippet>572</a>            <span class="kw">_ </span>=&gt; <span class="prelude-val">Err</span>(ParseError::at(
-<a href=#573 id=573 data-nosnippet>573</a>                <span class="string">"PAR102"</span>,
-<a href=#574 id=574 data-nosnippet>574</a>                <span class="macro">format!</span>(<span class="string">"型の原子が不正: {:?} {}"</span>, t.kind, t.value),
-<a href=#575 id=575 data-nosnippet>575</a>                <span class="prelude-val">Some</span>(t.pos),
-<a href=#576 id=576 data-nosnippet>576</a>                <span class="prelude-val">Some</span>(t.line),
-<a href=#577 id=577 data-nosnippet>577</a>                <span class="prelude-val">Some</span>(t.col),
-<a href=#578 id=578 data-nosnippet>578</a>            )),
-<a href=#579 id=579 data-nosnippet>579</a>        }
-<a href=#580 id=580 data-nosnippet>580</a>    }
-<a href=#581 id=581 data-nosnippet>581</a>}
-<a href=#582 id=582 data-nosnippet>582</a>
-<a href=#583 id=583 data-nosnippet>583</a><span class="comment">// ===== ユーティリティ =====
-<a href=#584 id=584 data-nosnippet>584</a></span><span class="doccomment">/// ソース上の文字列リテラルをアンエスケープし、内容だけを返す。
-<a href=#585 id=585 data-nosnippet>585</a></span><span class="kw">fn </span>decode_string(quoted: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;String, ParseError&gt; {
-<a href=#586 id=586 data-nosnippet>586</a>    <span class="comment">// quoted には "..." を含む
-<a href=#587 id=587 data-nosnippet>587</a>    </span><span class="kw">if </span>!quoted.starts_with(<span class="string">'"'</span>) || !quoted.ends_with(<span class="string">'"'</span>) {
-<a href=#588 id=588 data-nosnippet>588</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(ParseError::new(<span class="string">"PAR201"</span>, <span class="string">"文字列リテラルが不正"</span>, <span class="prelude-val">None</span>));
-<a href=#589 id=589 data-nosnippet>589</a>    }
-<a href=#590 id=590 data-nosnippet>590</a>    <span class="kw">let </span>s = <span class="kw-2">&amp;</span>quoted[<span class="number">1</span>..quoted.len() - <span class="number">1</span>];
-<a href=#591 id=591 data-nosnippet>591</a>    <span class="kw">let </span><span class="kw-2">mut </span>out = String::new();
-<a href=#592 id=592 data-nosnippet>592</a>    <span class="kw">let </span><span class="kw-2">mut </span>chars = s.chars();
-<a href=#593 id=593 data-nosnippet>593</a>    <span class="kw">while let </span><span class="prelude-val">Some</span>(ch) = chars.next() {
-<a href=#594 id=594 data-nosnippet>594</a>        <span class="kw">if </span>ch == <span class="string">'\\' </span>{
-<a href=#595 id=595 data-nosnippet>595</a>            <span class="comment">// エスケープシーケンスを復号する
-<a href=#596 id=596 data-nosnippet>596</a>            </span><span class="kw">let </span><span class="prelude-val">Some</span>(e) = chars.next() <span class="kw">else </span>{
-<a href=#597 id=597 data-nosnippet>597</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(ParseError::new(<span class="string">"PAR202"</span>, <span class="string">"末尾のバックスラッシュ"</span>, <span class="prelude-val">None</span>));
-<a href=#598 id=598 data-nosnippet>598</a>            };
-<a href=#599 id=599 data-nosnippet>599</a>            <span class="kw">match </span>e {
-<a href=#600 id=600 data-nosnippet>600</a>                <span class="string">'n' </span>=&gt; out.push(<span class="string">'\n'</span>),
-<a href=#601 id=601 data-nosnippet>601</a>                <span class="string">'r' </span>=&gt; out.push(<span class="string">'\r'</span>),
-<a href=#602 id=602 data-nosnippet>602</a>                <span class="string">'t' </span>=&gt; out.push(<span class="string">'\t'</span>),
-<a href=#603 id=603 data-nosnippet>603</a>                <span class="string">'\\' </span>=&gt; out.push(<span class="string">'\\'</span>),
-<a href=#604 id=604 data-nosnippet>604</a>                <span class="string">'\'' </span>=&gt; out.push(<span class="string">'\''</span>),
-<a href=#605 id=605 data-nosnippet>605</a>                <span class="string">'"' </span>=&gt; out.push(<span class="string">'"'</span>),
-<a href=#606 id=606 data-nosnippet>606</a>                <span class="kw">_ </span>=&gt; out.push(e),
-<a href=#607 id=607 data-nosnippet>607</a>            }
-<a href=#608 id=608 data-nosnippet>608</a>        } <span class="kw">else </span>{
-<a href=#609 id=609 data-nosnippet>609</a>            out.push(ch);
-<a href=#610 id=610 data-nosnippet>610</a>        }
-<a href=#611 id=611 data-nosnippet>611</a>    }
-<a href=#612 id=612 data-nosnippet>612</a>    <span class="prelude-val">Ok</span>(out)
-<a href=#613 id=613 data-nosnippet>613</a>}
-<a href=#614 id=614 data-nosnippet>614</a>
-<a href=#615 id=615 data-nosnippet>615</a><span class="doccomment">/// ソース上の文字リテラルをアンエスケープして単一文字を返す。
-<a href=#616 id=616 data-nosnippet>616</a></span><span class="kw">fn </span>decode_char(quoted: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;char, ParseError&gt; {
-<a href=#617 id=617 data-nosnippet>617</a>    <span class="kw">if </span>!quoted.starts_with(<span class="string">'\''</span>) || !quoted.ends_with(<span class="string">'\''</span>) {
-<a href=#618 id=618 data-nosnippet>618</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(ParseError::new(<span class="string">"PAR204"</span>, <span class="string">"文字リテラルが不正"</span>, <span class="prelude-val">None</span>));
-<a href=#619 id=619 data-nosnippet>619</a>    }
-<a href=#620 id=620 data-nosnippet>620</a>    <span class="kw">let </span>s = <span class="kw-2">&amp;</span>quoted[<span class="number">1</span>..quoted.len() - <span class="number">1</span>];
-<a href=#621 id=621 data-nosnippet>621</a>    <span class="kw">let </span>ch = <span class="kw">if </span>s.starts_with(<span class="string">'\\'</span>) {
-<a href=#622 id=622 data-nosnippet>622</a>        <span class="kw">match </span>s.chars().nth(<span class="number">1</span>) {
-<a href=#623 id=623 data-nosnippet>623</a>            <span class="prelude-val">Some</span>(<span class="string">'n'</span>) =&gt; <span class="string">'\n'</span>,
-<a href=#624 id=624 data-nosnippet>624</a>            <span class="prelude-val">Some</span>(<span class="string">'r'</span>) =&gt; <span class="string">'\r'</span>,
-<a href=#625 id=625 data-nosnippet>625</a>            <span class="prelude-val">Some</span>(<span class="string">'t'</span>) =&gt; <span class="string">'\t'</span>,
-<a href=#626 id=626 data-nosnippet>626</a>            <span class="prelude-val">Some</span>(<span class="string">'\\'</span>) =&gt; <span class="string">'\\'</span>,
-<a href=#627 id=627 data-nosnippet>627</a>            <span class="prelude-val">Some</span>(<span class="string">'\''</span>) =&gt; <span class="string">'\''</span>,
-<a href=#628 id=628 data-nosnippet>628</a>            <span class="prelude-val">Some</span>(<span class="string">'"'</span>) =&gt; <span class="string">'"'</span>,
-<a href=#629 id=629 data-nosnippet>629</a>            <span class="prelude-val">Some</span>(x) =&gt; x,
-<a href=#630 id=630 data-nosnippet>630</a>            <span class="prelude-val">None </span>=&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(ParseError::new(<span class="string">"PAR203"</span>, <span class="string">"空のエスケープ"</span>, <span class="prelude-val">None</span>)),
+<a href=#572 id=572 data-nosnippet>572</a>            TokenKind::LPAREN =&gt; {
+<a href=#573 id=573 data-nosnippet>573</a>                <span class="self">self</span>.pop_any();
+<a href=#574 id=574 data-nosnippet>574</a>                <span class="kw">let </span>ty = <span class="self">self</span>.parse_type()<span class="question-mark">?</span>;
+<a href=#575 id=575 data-nosnippet>575</a>                <span class="kw">if </span><span class="self">self</span>.accept(TokenKind::COMMA).is_some() {
+<a href=#576 id=576 data-nosnippet>576</a>                    <span class="kw">let </span><span class="kw-2">mut </span>items = <span class="macro">vec!</span>[ty, <span class="self">self</span>.parse_type()<span class="question-mark">?</span>];
+<a href=#577 id=577 data-nosnippet>577</a>                    <span class="kw">while </span><span class="self">self</span>.accept(TokenKind::COMMA).is_some() {
+<a href=#578 id=578 data-nosnippet>578</a>                        items.push(<span class="self">self</span>.parse_type()<span class="question-mark">?</span>);
+<a href=#579 id=579 data-nosnippet>579</a>                    }
+<a href=#580 id=580 data-nosnippet>580</a>                    <span class="self">self</span>.pop(TokenKind::RPAREN)<span class="question-mark">?</span>;
+<a href=#581 id=581 data-nosnippet>581</a>                    <span class="prelude-val">Ok</span>(TypeExpr::TETuple(items))
+<a href=#582 id=582 data-nosnippet>582</a>                } <span class="kw">else </span>{
+<a href=#583 id=583 data-nosnippet>583</a>                    <span class="self">self</span>.pop(TokenKind::RPAREN)<span class="question-mark">?</span>;
+<a href=#584 id=584 data-nosnippet>584</a>                    <span class="prelude-val">Ok</span>(ty)
+<a href=#585 id=585 data-nosnippet>585</a>                }
+<a href=#586 id=586 data-nosnippet>586</a>            }
+<a href=#587 id=587 data-nosnippet>587</a>            TokenKind::LBRACK =&gt; {
+<a href=#588 id=588 data-nosnippet>588</a>                <span class="self">self</span>.pop_any();
+<a href=#589 id=589 data-nosnippet>589</a>                <span class="kw">let </span>inner = <span class="self">self</span>.parse_type()<span class="question-mark">?</span>;
+<a href=#590 id=590 data-nosnippet>590</a>                <span class="self">self</span>.pop(TokenKind::RBRACK)<span class="question-mark">?</span>;
+<a href=#591 id=591 data-nosnippet>591</a>                <span class="prelude-val">Ok</span>(TypeExpr::TEList(Box::new(inner)))
+<a href=#592 id=592 data-nosnippet>592</a>            }
+<a href=#593 id=593 data-nosnippet>593</a>            <span class="kw">_ </span>=&gt; <span class="prelude-val">Err</span>(ParseError::at(
+<a href=#594 id=594 data-nosnippet>594</a>                <span class="string">"PAR102"</span>,
+<a href=#595 id=595 data-nosnippet>595</a>                <span class="macro">format!</span>(<span class="string">"型の原子が不正: {:?} {}"</span>, t.kind, t.value),
+<a href=#596 id=596 data-nosnippet>596</a>                <span class="prelude-val">Some</span>(t.pos),
+<a href=#597 id=597 data-nosnippet>597</a>                <span class="prelude-val">Some</span>(t.line),
+<a href=#598 id=598 data-nosnippet>598</a>                <span class="prelude-val">Some</span>(t.col),
+<a href=#599 id=599 data-nosnippet>599</a>            )),
+<a href=#600 id=600 data-nosnippet>600</a>        }
+<a href=#601 id=601 data-nosnippet>601</a>    }
+<a href=#602 id=602 data-nosnippet>602</a>}
+<a href=#603 id=603 data-nosnippet>603</a>
+<a href=#604 id=604 data-nosnippet>604</a><span class="comment">// ===== ユーティリティ =====
+<a href=#605 id=605 data-nosnippet>605</a></span><span class="doccomment">/// ソース上の文字列リテラルをアンエスケープし、内容だけを返す。
+<a href=#606 id=606 data-nosnippet>606</a></span><span class="kw">fn </span>decode_string(quoted: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;String, ParseError&gt; {
+<a href=#607 id=607 data-nosnippet>607</a>    <span class="comment">// quoted には "..." を含む
+<a href=#608 id=608 data-nosnippet>608</a>    </span><span class="kw">if </span>!quoted.starts_with(<span class="string">'"'</span>) || !quoted.ends_with(<span class="string">'"'</span>) {
+<a href=#609 id=609 data-nosnippet>609</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(ParseError::new(<span class="string">"PAR201"</span>, <span class="string">"文字列リテラルが不正"</span>, <span class="prelude-val">None</span>));
+<a href=#610 id=610 data-nosnippet>610</a>    }
+<a href=#611 id=611 data-nosnippet>611</a>    <span class="kw">let </span>s = <span class="kw-2">&amp;</span>quoted[<span class="number">1</span>..quoted.len() - <span class="number">1</span>];
+<a href=#612 id=612 data-nosnippet>612</a>    <span class="kw">let </span><span class="kw-2">mut </span>out = String::new();
+<a href=#613 id=613 data-nosnippet>613</a>    <span class="kw">let </span><span class="kw-2">mut </span>chars = s.chars();
+<a href=#614 id=614 data-nosnippet>614</a>    <span class="kw">while let </span><span class="prelude-val">Some</span>(ch) = chars.next() {
+<a href=#615 id=615 data-nosnippet>615</a>        <span class="kw">if </span>ch == <span class="string">'\\' </span>{
+<a href=#616 id=616 data-nosnippet>616</a>            <span class="comment">// エスケープシーケンスを復号する
+<a href=#617 id=617 data-nosnippet>617</a>            </span><span class="kw">let </span><span class="prelude-val">Some</span>(e) = chars.next() <span class="kw">else </span>{
+<a href=#618 id=618 data-nosnippet>618</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(ParseError::new(<span class="string">"PAR202"</span>, <span class="string">"末尾のバックスラッシュ"</span>, <span class="prelude-val">None</span>));
+<a href=#619 id=619 data-nosnippet>619</a>            };
+<a href=#620 id=620 data-nosnippet>620</a>            <span class="kw">match </span>e {
+<a href=#621 id=621 data-nosnippet>621</a>                <span class="string">'n' </span>=&gt; out.push(<span class="string">'\n'</span>),
+<a href=#622 id=622 data-nosnippet>622</a>                <span class="string">'r' </span>=&gt; out.push(<span class="string">'\r'</span>),
+<a href=#623 id=623 data-nosnippet>623</a>                <span class="string">'t' </span>=&gt; out.push(<span class="string">'\t'</span>),
+<a href=#624 id=624 data-nosnippet>624</a>                <span class="string">'\\' </span>=&gt; out.push(<span class="string">'\\'</span>),
+<a href=#625 id=625 data-nosnippet>625</a>                <span class="string">'\'' </span>=&gt; out.push(<span class="string">'\''</span>),
+<a href=#626 id=626 data-nosnippet>626</a>                <span class="string">'"' </span>=&gt; out.push(<span class="string">'"'</span>),
+<a href=#627 id=627 data-nosnippet>627</a>                <span class="kw">_ </span>=&gt; out.push(e),
+<a href=#628 id=628 data-nosnippet>628</a>            }
+<a href=#629 id=629 data-nosnippet>629</a>        } <span class="kw">else </span>{
+<a href=#630 id=630 data-nosnippet>630</a>            out.push(ch);
 <a href=#631 id=631 data-nosnippet>631</a>        }
-<a href=#632 id=632 data-nosnippet>632</a>    } <span class="kw">else </span>{
-<a href=#633 id=633 data-nosnippet>633</a>        s.chars()
-<a href=#634 id=634 data-nosnippet>634</a>            .next()
-<a href=#635 id=635 data-nosnippet>635</a>            .ok_or_else(|| ParseError::new(<span class="string">"PAR205"</span>, <span class="string">"空の文字"</span>, <span class="prelude-val">None</span>))<span class="question-mark">?
-<a href=#636 id=636 data-nosnippet>636</a>    </span>};
-<a href=#637 id=637 data-nosnippet>637</a>    <span class="prelude-val">Ok</span>(ch)
-<a href=#638 id=638 data-nosnippet>638</a>}
-<a href=#639 id=639 data-nosnippet>639</a>
-<a href=#640 id=640 data-nosnippet>640</a><span class="comment">// エントリヘルパ
-<a href=#641 id=641 data-nosnippet>641</a></span><span class="doccomment">/// ソース文字列を完全に解析し、`Program` を返す高水準 API。
-<a href=#642 id=642 data-nosnippet>642</a></span><span class="kw">pub fn </span>parse_program(src: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;Program, ParseError&gt; {
-<a href=#643 id=643 data-nosnippet>643</a>    <span class="kw">let </span>ts = lex(src).map_err(|e| ParseError::new(<span class="string">"PAR100"</span>, <span class="macro">format!</span>(<span class="string">"lex error: {}"</span>, e), <span class="prelude-val">None</span>))<span class="question-mark">?</span>;
-<a href=#644 id=644 data-nosnippet>644</a>    Parser::new(ts).parse_program()
-<a href=#645 id=645 data-nosnippet>645</a>}
-<a href=#646 id=646 data-nosnippet>646</a><span class="doccomment">/// ソース文字列から単一の式を解析する高水準 API。
-<a href=#647 id=647 data-nosnippet>647</a></span><span class="kw">pub fn </span>parse_expr(src: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;Expr, ParseError&gt; {
-<a href=#648 id=648 data-nosnippet>648</a>    <span class="kw">let </span>ts = lex(src).map_err(|e| ParseError::new(<span class="string">"PAR100"</span>, <span class="macro">format!</span>(<span class="string">"lex error: {}"</span>, e), <span class="prelude-val">None</span>))<span class="question-mark">?</span>;
-<a href=#649 id=649 data-nosnippet>649</a>    <span class="kw">let </span><span class="kw-2">mut </span>p = Parser::new(ts);
-<a href=#650 id=650 data-nosnippet>650</a>    <span class="kw">let </span>e = p.parse_expr()<span class="question-mark">?</span>;
-<a href=#651 id=651 data-nosnippet>651</a>    <span class="kw">if </span>p.peek().kind != TokenKind::EOF {
-<a href=#652 id=652 data-nosnippet>652</a>        <span class="kw">let </span>t = p.peek().clone();
-<a href=#653 id=653 data-nosnippet>653</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(ParseError::at(
-<a href=#654 id=654 data-nosnippet>654</a>            <span class="string">"PAR090"</span>,
-<a href=#655 id=655 data-nosnippet>655</a>            <span class="string">"余分なトークンが残っています"</span>,
-<a href=#656 id=656 data-nosnippet>656</a>            <span class="prelude-val">Some</span>(t.pos),
-<a href=#657 id=657 data-nosnippet>657</a>            <span class="prelude-val">Some</span>(t.line),
-<a href=#658 id=658 data-nosnippet>658</a>            <span class="prelude-val">Some</span>(t.col),
-<a href=#659 id=659 data-nosnippet>659</a>        ));
-<a href=#660 id=660 data-nosnippet>660</a>    }
-<a href=#661 id=661 data-nosnippet>661</a>    <span class="prelude-val">Ok</span>(e)
-<a href=#662 id=662 data-nosnippet>662</a>}
-<a href=#663 id=663 data-nosnippet>663</a>
-<a href=#664 id=664 data-nosnippet>664</a><span class="attr">#[cfg(test)]
-<a href=#665 id=665 data-nosnippet>665</a></span><span class="kw">mod </span>tests {
-<a href=#666 id=666 data-nosnippet>666</a>    <span class="kw">use super</span>::{decode_char, decode_string};
-<a href=#667 id=667 data-nosnippet>667</a>
-<a href=#668 id=668 data-nosnippet>668</a>    <span class="attr">#[test]
-<a href=#669 id=669 data-nosnippet>669</a>    </span><span class="doccomment">/// 文字列リテラルの基本的なエスケープをテストする。
-<a href=#670 id=670 data-nosnippet>670</a>    </span><span class="kw">fn </span>decode_string_basic_escapes() {
-<a href=#671 id=671 data-nosnippet>671</a>        <span class="macro">assert_eq!</span>(decode_string(<span class="string">"\"a\\n\""</span>).unwrap(), <span class="string">"a\n"</span>);
-<a href=#672 id=672 data-nosnippet>672</a>        <span class="macro">assert_eq!</span>(decode_string(<span class="string">"\"\\t\"\""</span>).unwrap(), <span class="string">"\t\""</span>);
-<a href=#673 id=673 data-nosnippet>673</a>        <span class="macro">assert_eq!</span>(decode_string(<span class="string">"\"\\\\\""</span>).unwrap(), <span class="string">"\\"</span>);
-<a href=#674 id=674 data-nosnippet>674</a>    }
-<a href=#675 id=675 data-nosnippet>675</a>
-<a href=#676 id=676 data-nosnippet>676</a>    <span class="attr">#[test]
-<a href=#677 id=677 data-nosnippet>677</a>    </span><span class="doccomment">/// 文字リテラルのエスケープをテストする。
-<a href=#678 id=678 data-nosnippet>678</a>    </span><span class="kw">fn </span>decode_char_escapes_and_plain() {
-<a href=#679 id=679 data-nosnippet>679</a>        <span class="macro">assert_eq!</span>(decode_char(<span class="string">"'a'"</span>).unwrap(), <span class="string">'a'</span>);
-<a href=#680 id=680 data-nosnippet>680</a>        <span class="macro">assert_eq!</span>(decode_char(<span class="string">"'\\n'"</span>).unwrap(), <span class="string">'\n'</span>);
-<a href=#681 id=681 data-nosnippet>681</a>        <span class="macro">assert_eq!</span>(decode_char(<span class="string">"'\\\''"</span>).unwrap(), <span class="string">'\''</span>);
-<a href=#682 id=682 data-nosnippet>682</a>        <span class="macro">assert_eq!</span>(decode_char(<span class="string">"'\"'"</span>).unwrap(), <span class="string">'"'</span>);
-<a href=#683 id=683 data-nosnippet>683</a>    }
-<a href=#684 id=684 data-nosnippet>684</a>}</code></pre></div></section></main></body></html>
+<a href=#632 id=632 data-nosnippet>632</a>    }
+<a href=#633 id=633 data-nosnippet>633</a>    <span class="prelude-val">Ok</span>(out)
+<a href=#634 id=634 data-nosnippet>634</a>}
+<a href=#635 id=635 data-nosnippet>635</a>
+<a href=#636 id=636 data-nosnippet>636</a><span class="doccomment">/// ソース上の文字リテラルをアンエスケープして単一文字を返す。
+<a href=#637 id=637 data-nosnippet>637</a></span><span class="kw">fn </span>decode_char(quoted: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;char, ParseError&gt; {
+<a href=#638 id=638 data-nosnippet>638</a>    <span class="kw">if </span>!quoted.starts_with(<span class="string">'\''</span>) || !quoted.ends_with(<span class="string">'\''</span>) {
+<a href=#639 id=639 data-nosnippet>639</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(ParseError::new(<span class="string">"PAR204"</span>, <span class="string">"文字リテラルが不正"</span>, <span class="prelude-val">None</span>));
+<a href=#640 id=640 data-nosnippet>640</a>    }
+<a href=#641 id=641 data-nosnippet>641</a>    <span class="kw">let </span>s = <span class="kw-2">&amp;</span>quoted[<span class="number">1</span>..quoted.len() - <span class="number">1</span>];
+<a href=#642 id=642 data-nosnippet>642</a>    <span class="kw">let </span>ch = <span class="kw">if </span>s.starts_with(<span class="string">'\\'</span>) {
+<a href=#643 id=643 data-nosnippet>643</a>        <span class="kw">match </span>s.chars().nth(<span class="number">1</span>) {
+<a href=#644 id=644 data-nosnippet>644</a>            <span class="prelude-val">Some</span>(<span class="string">'n'</span>) =&gt; <span class="string">'\n'</span>,
+<a href=#645 id=645 data-nosnippet>645</a>            <span class="prelude-val">Some</span>(<span class="string">'r'</span>) =&gt; <span class="string">'\r'</span>,
+<a href=#646 id=646 data-nosnippet>646</a>            <span class="prelude-val">Some</span>(<span class="string">'t'</span>) =&gt; <span class="string">'\t'</span>,
+<a href=#647 id=647 data-nosnippet>647</a>            <span class="prelude-val">Some</span>(<span class="string">'\\'</span>) =&gt; <span class="string">'\\'</span>,
+<a href=#648 id=648 data-nosnippet>648</a>            <span class="prelude-val">Some</span>(<span class="string">'\''</span>) =&gt; <span class="string">'\''</span>,
+<a href=#649 id=649 data-nosnippet>649</a>            <span class="prelude-val">Some</span>(<span class="string">'"'</span>) =&gt; <span class="string">'"'</span>,
+<a href=#650 id=650 data-nosnippet>650</a>            <span class="prelude-val">Some</span>(x) =&gt; x,
+<a href=#651 id=651 data-nosnippet>651</a>            <span class="prelude-val">None </span>=&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(ParseError::new(<span class="string">"PAR203"</span>, <span class="string">"空のエスケープ"</span>, <span class="prelude-val">None</span>)),
+<a href=#652 id=652 data-nosnippet>652</a>        }
+<a href=#653 id=653 data-nosnippet>653</a>    } <span class="kw">else </span>{
+<a href=#654 id=654 data-nosnippet>654</a>        s.chars()
+<a href=#655 id=655 data-nosnippet>655</a>            .next()
+<a href=#656 id=656 data-nosnippet>656</a>            .ok_or_else(|| ParseError::new(<span class="string">"PAR205"</span>, <span class="string">"空の文字"</span>, <span class="prelude-val">None</span>))<span class="question-mark">?
+<a href=#657 id=657 data-nosnippet>657</a>    </span>};
+<a href=#658 id=658 data-nosnippet>658</a>    <span class="prelude-val">Ok</span>(ch)
+<a href=#659 id=659 data-nosnippet>659</a>}
+<a href=#660 id=660 data-nosnippet>660</a>
+<a href=#661 id=661 data-nosnippet>661</a><span class="comment">// エントリヘルパ
+<a href=#662 id=662 data-nosnippet>662</a></span><span class="doccomment">/// ソース文字列を完全に解析し、`Program` を返す高水準 API。
+<a href=#663 id=663 data-nosnippet>663</a></span><span class="kw">pub fn </span>parse_program(src: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;Program, ParseError&gt; {
+<a href=#664 id=664 data-nosnippet>664</a>    <span class="kw">let </span>ts = lex(src).map_err(|e| ParseError::new(<span class="string">"PAR100"</span>, <span class="macro">format!</span>(<span class="string">"lex error: {}"</span>, e), <span class="prelude-val">None</span>))<span class="question-mark">?</span>;
+<a href=#665 id=665 data-nosnippet>665</a>    Parser::new(ts).parse_program()
+<a href=#666 id=666 data-nosnippet>666</a>}
+<a href=#667 id=667 data-nosnippet>667</a><span class="doccomment">/// ソース文字列から単一の式を解析する高水準 API。
+<a href=#668 id=668 data-nosnippet>668</a></span><span class="kw">pub fn </span>parse_expr(src: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;Expr, ParseError&gt; {
+<a href=#669 id=669 data-nosnippet>669</a>    <span class="kw">let </span>ts = lex(src).map_err(|e| ParseError::new(<span class="string">"PAR100"</span>, <span class="macro">format!</span>(<span class="string">"lex error: {}"</span>, e), <span class="prelude-val">None</span>))<span class="question-mark">?</span>;
+<a href=#670 id=670 data-nosnippet>670</a>    <span class="kw">let </span><span class="kw-2">mut </span>p = Parser::new(ts);
+<a href=#671 id=671 data-nosnippet>671</a>    <span class="kw">let </span>e = p.parse_expr()<span class="question-mark">?</span>;
+<a href=#672 id=672 data-nosnippet>672</a>    <span class="kw">if </span>p.peek().kind != TokenKind::EOF {
+<a href=#673 id=673 data-nosnippet>673</a>        <span class="kw">let </span>t = p.peek().clone();
+<a href=#674 id=674 data-nosnippet>674</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(ParseError::at(
+<a href=#675 id=675 data-nosnippet>675</a>            <span class="string">"PAR090"</span>,
+<a href=#676 id=676 data-nosnippet>676</a>            <span class="string">"余分なトークンが残っています"</span>,
+<a href=#677 id=677 data-nosnippet>677</a>            <span class="prelude-val">Some</span>(t.pos),
+<a href=#678 id=678 data-nosnippet>678</a>            <span class="prelude-val">Some</span>(t.line),
+<a href=#679 id=679 data-nosnippet>679</a>            <span class="prelude-val">Some</span>(t.col),
+<a href=#680 id=680 data-nosnippet>680</a>        ));
+<a href=#681 id=681 data-nosnippet>681</a>    }
+<a href=#682 id=682 data-nosnippet>682</a>    <span class="prelude-val">Ok</span>(e)
+<a href=#683 id=683 data-nosnippet>683</a>}
+<a href=#684 id=684 data-nosnippet>684</a>
+<a href=#685 id=685 data-nosnippet>685</a><span class="attr">#[cfg(test)]
+<a href=#686 id=686 data-nosnippet>686</a></span><span class="kw">mod </span>tests {
+<a href=#687 id=687 data-nosnippet>687</a>    <span class="kw">use super</span>::{decode_char, decode_string};
+<a href=#688 id=688 data-nosnippet>688</a>
+<a href=#689 id=689 data-nosnippet>689</a>    <span class="attr">#[test]
+<a href=#690 id=690 data-nosnippet>690</a>    </span><span class="doccomment">/// 文字列リテラルの基本的なエスケープをテストする。
+<a href=#691 id=691 data-nosnippet>691</a>    </span><span class="kw">fn </span>decode_string_basic_escapes() {
+<a href=#692 id=692 data-nosnippet>692</a>        <span class="macro">assert_eq!</span>(decode_string(<span class="string">"\"a\\n\""</span>).unwrap(), <span class="string">"a\n"</span>);
+<a href=#693 id=693 data-nosnippet>693</a>        <span class="macro">assert_eq!</span>(decode_string(<span class="string">"\"\\t\"\""</span>).unwrap(), <span class="string">"\t\""</span>);
+<a href=#694 id=694 data-nosnippet>694</a>        <span class="macro">assert_eq!</span>(decode_string(<span class="string">"\"\\\\\""</span>).unwrap(), <span class="string">"\\"</span>);
+<a href=#695 id=695 data-nosnippet>695</a>    }
+<a href=#696 id=696 data-nosnippet>696</a>
+<a href=#697 id=697 data-nosnippet>697</a>    <span class="attr">#[test]
+<a href=#698 id=698 data-nosnippet>698</a>    </span><span class="doccomment">/// 文字リテラルのエスケープをテストする。
+<a href=#699 id=699 data-nosnippet>699</a>    </span><span class="kw">fn </span>decode_char_escapes_and_plain() {
+<a href=#700 id=700 data-nosnippet>700</a>        <span class="macro">assert_eq!</span>(decode_char(<span class="string">"'a'"</span>).unwrap(), <span class="string">'a'</span>);
+<a href=#701 id=701 data-nosnippet>701</a>        <span class="macro">assert_eq!</span>(decode_char(<span class="string">"'\\n'"</span>).unwrap(), <span class="string">'\n'</span>);
+<a href=#702 id=702 data-nosnippet>702</a>        <span class="macro">assert_eq!</span>(decode_char(<span class="string">"'\\\''"</span>).unwrap(), <span class="string">'\''</span>);
+<a href=#703 id=703 data-nosnippet>703</a>        <span class="macro">assert_eq!</span>(decode_char(<span class="string">"'\"'"</span>).unwrap(), <span class="string">'"'</span>);
+<a href=#704 id=704 data-nosnippet>704</a>    }
+<a href=#705 id=705 data-nosnippet>705</a>}</code></pre></div></section></main></body></html>
