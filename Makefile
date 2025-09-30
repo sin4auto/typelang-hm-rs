@@ -1,5 +1,5 @@
 # ==============================================================================
-# Rust プロジェクト Makefile（変数なし・check→ci 順）
+# Rust プロジェクト Makefile
 # ==============================================================================
 
 .DEFAULT_GOAL := help
@@ -11,15 +11,13 @@ SHELL := /usr/bin/bash
 
 .PHONY: \
   help add-tools clean \
-  fmt fmt-check clippy \
-  test build release \
+  fmt fmt-check clippy test build release \
   doc coverage \
   audit outdated udeps miri bench \
   check full_local ci
 
 help: ## このヘルプを表示
-	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | \
-	  awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
 # ---- 基本 ---------------------------------------------------------------------
 clean: ## target などを削除
@@ -29,32 +27,39 @@ fmt: ## 整形を実行（ローカル用）
 	cargo fmt --all
 
 fmt-check: ## 整形済みかを検査（CI向け）
-	cargo fmt --all --check
+	cargo fmt --all -- --check
 
-clippy: ## Clippy（警告=エラー）
+clippy: ## リンター（警告=エラー）
 	cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-test: ## テスト（ワークスペース全体）
-	cargo test --workspace --all-features --verbose
+test: ## テスト（警告=エラー）
+	RUSTFLAGS="-D warnings" cargo test --workspace --all-features
 
-build: ## デバッグビルド（ローカル用）
-	cargo build --workspace --all-features
+build: ## デバッグビルド（警告=エラー）
+	RUSTFLAGS="-D warnings" cargo build --workspace --all-features
 
-release: ## リリースビルド（ローカル用）
-	cargo build --workspace --all-features --release
+release: ## リリースビルド（警告=エラー）
+	RUSTFLAGS="-D warnings" cargo build --workspace --all-features --release
 
 doc: ## ドキュメント生成（警告=エラー）
 	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
 
 # ---- ツール導入（未導入時のみ） -----------------------------------------------
-add-tools: ## rustfmt/clippy/llvm-cov を未導入なら導入
-	command -v rustfmt >/dev/null 2>&1 || rustup component add rustfmt
-	command -v cargo-clippy >/dev/null 2>&1 || rustup component add clippy
+add-tools: ## llvm-cov/監査系ツールを未導入なら導入
+	rustup component list --installed | grep -q '^rustfmt' || rustup component add rustfmt
+	rustup component list --installed | grep -q '^clippy'  || rustup component add clippy
 	command -v cargo-llvm-cov >/dev/null 2>&1 || { rustup component add llvm-tools-preview; cargo install cargo-llvm-cov --locked; }
+	command -v cargo-audit   >/dev/null 2>&1 || cargo install cargo-audit --locked
+	command -v cargo-outdated >/dev/null 2>&1 || cargo install cargo-outdated --locked
+	command -v cargo-udeps   >/dev/null 2>&1 || cargo install cargo-udeps --locked
+	rustup toolchain list | grep -q '^nightly' || rustup toolchain install nightly
+	rustup +nightly component add miri || true
+	rustup +nightly component add rust-src || true
+	cargo +nightly miri setup || true
 
 # ---- カバレッジ ---------------------------------------------------------------
 coverage: ## カバレッジ (HTML, JSON, LCOV)
-	RUSTFLAGS="-C link-dead-code" cargo llvm-cov --workspace --html
+	cargo llvm-cov --workspace --all-features --html
 	cargo llvm-cov report --json --output-path coverage.json
 	cargo llvm-cov report --lcov --output-path target/llvm-cov/lcov.info
 	@echo "HTML: target/llvm-cov/html/index.html"
@@ -85,6 +90,6 @@ full_local: add-tools clean fmt clippy test release audit outdated udeps miri do
 	@echo "✅ フルローカルビルド (clean → fmt → clippy → test → release → audit → outdated → udeps → miri → doc → coverage) 完了"
 
 ci: clean fmt-check clippy ## CI: クリーンビルド + fmt-check + clippy + test + release
-	cargo test  --workspace --all-features --frozen --locked --verbose
-	cargo build --workspace --all-features --frozen --locked --release
+	RUSTFLAGS="-D warnings" cargo test  --workspace --all-features --frozen --locked --verbose
+	RUSTFLAGS="-D warnings" cargo build --workspace --all-features --frozen --locked --release
 	@echo "✅ CIフロー (clean → fmt-check → clippy → test → release) 完了"
