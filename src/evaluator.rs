@@ -8,6 +8,7 @@
 //! - プリミティブ演算は部分適用可能な値として登録し、REPL 操作を簡潔にする。
 //! - べき乗や比較など一部演算子は直感的な型へフォールバックする設計を採用する。
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use crate::ast as A;
@@ -106,93 +107,71 @@ pub fn initial_env() -> Env {
         Ok(Value::Double(to_double(&a)?.powf(to_double(&b)?)))
     }
 
-    /// リストやタプルを含む値の構造的な等価判定を行う。
-    fn eqv(a: &Value, b: &Value) -> Result<bool, EvalError> {
-        Ok(match (a, b) {
-            (Value::Int(x), Value::Int(y)) => x == y,
-            (Value::Double(x), Value::Double(y)) => x == y,
-            (Value::Int(x), Value::Double(y)) => (*x as f64) == *y,
-            (Value::Double(x), Value::Int(y)) => *x == (*y as f64),
-            (Value::Bool(x), Value::Bool(y)) => x == y,
-            (Value::Char(x), Value::Char(y)) => x == y,
-            (Value::String(x), Value::String(y)) => x == y,
-            (Value::List(xs), Value::List(ys)) => {
-                if xs.len() != ys.len() {
-                    return Ok(false);
-                }
-                for (vx, vy) in xs.iter().zip(ys.iter()) {
-                    if !eqv(vx, vy)? {
-                        return Ok(false);
-                    }
-                }
-                true
-            }
-            (Value::Tuple(xs), Value::Tuple(ys)) => {
-                if xs.len() != ys.len() {
-                    return Ok(false);
-                }
-                let mut ok = true;
-                for (vx, vy) in xs.iter().zip(ys.iter()) {
-                    if !eqv(vx, vy)? {
-                        ok = false;
-                        break;
-                    }
-                }
-                ok
-            }
-            _ => {
-                return Err(EvalError::new(
-                    "EVAL050",
-                    "==: 未対応の型の組み合わせ",
-                    None,
-                ))
-            }
-        })
+    enum CompareFailure {
+        Mismatch,
+        NaN,
     }
 
-    use std::cmp::Ordering;
-
-    /// 値を辞書式で比較し、必要に応じて再帰的に判定する。
-    fn compare(a: &Value, b: &Value) -> Result<Ordering, EvalError> {
+    /// `Value` の構造を比較し、順序または失敗理由を返す。
+    fn structural_compare(a: &Value, b: &Value) -> Result<std::cmp::Ordering, CompareFailure> {
         match (a, b) {
             (Value::Int(x), Value::Int(y)) => Ok(x.cmp(y)),
-            (Value::Double(x), Value::Double(y)) => x
-                .partial_cmp(y)
-                .ok_or_else(|| EvalError::new("EVAL090", "NaN 比較", None)),
-            (Value::Int(x), Value::Double(y)) => (*x as f64)
-                .partial_cmp(y)
-                .ok_or_else(|| EvalError::new("EVAL090", "NaN 比較", None)),
-            (Value::Double(x), Value::Int(y)) => x
-                .partial_cmp(&(*y as f64))
-                .ok_or_else(|| EvalError::new("EVAL090", "NaN 比較", None)),
+            (Value::Double(x), Value::Double(y)) => x.partial_cmp(y).ok_or(CompareFailure::NaN),
+            (Value::Int(x), Value::Double(y)) => {
+                (*x as f64).partial_cmp(y).ok_or(CompareFailure::NaN)
+            }
+            (Value::Double(x), Value::Int(y)) => {
+                x.partial_cmp(&(*y as f64)).ok_or(CompareFailure::NaN)
+            }
             (Value::Bool(x), Value::Bool(y)) => Ok(x.cmp(y)),
             (Value::Char(x), Value::Char(y)) => Ok(x.cmp(y)),
             (Value::String(x), Value::String(y)) => Ok(x.cmp(y)),
             (Value::List(xs), Value::List(ys)) => {
-                let n = xs.len().min(ys.len());
-                for i in 0..n {
-                    let ord = compare(&xs[i], &ys[i])?;
-                    if ord != Ordering::Equal {
+                for (vx, vy) in xs.iter().zip(ys.iter()) {
+                    let ord = structural_compare(vx, vy)?;
+                    if ord != std::cmp::Ordering::Equal {
                         return Ok(ord);
                     }
                 }
                 Ok(xs.len().cmp(&ys.len()))
             }
             (Value::Tuple(xs), Value::Tuple(ys)) => {
-                let n = xs.len().min(ys.len());
-                for i in 0..n {
-                    let ord = compare(&xs[i], &ys[i])?;
-                    if ord != Ordering::Equal {
+                for (vx, vy) in xs.iter().zip(ys.iter()) {
+                    let ord = structural_compare(vx, vy)?;
+                    if ord != std::cmp::Ordering::Equal {
                         return Ok(ord);
                     }
                 }
                 Ok(xs.len().cmp(&ys.len()))
             }
-            _ => Err(EvalError::new(
+            _ => Err(CompareFailure::Mismatch),
+        }
+    }
+
+    /// リストやタプルを含む値の構造的な等価判定を行う。
+    fn eqv(a: &Value, b: &Value) -> Result<bool, EvalError> {
+        match structural_compare(a, b) {
+            Ok(std::cmp::Ordering::Equal) => Ok(true),
+            Ok(_) => Ok(false),
+            Err(CompareFailure::Mismatch) => Err(EvalError::new(
+                "EVAL050",
+                "==: 未対応の型の組み合わせ",
+                None,
+            )),
+            Err(CompareFailure::NaN) => Ok(false),
+        }
+    }
+
+    /// 値を辞書式で比較し、必要に応じて再帰的に判定する。
+    fn compare(a: &Value, b: &Value) -> Result<std::cmp::Ordering, EvalError> {
+        match structural_compare(a, b) {
+            Ok(ord) => Ok(ord),
+            Err(CompareFailure::Mismatch) => Err(EvalError::new(
                 "EVAL050",
                 "比較演算: 未対応の型の組み合わせ",
                 None,
             )),
+            Err(CompareFailure::NaN) => Err(EvalError::new("EVAL090", "NaN 比較", None)),
         }
     }
 

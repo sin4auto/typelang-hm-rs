@@ -230,10 +230,7 @@ impl<'a> InferCtx<'a> {
 
         if let Some(sch) = env.lookup(name) {
             let q = instantiate(sch, &mut self.state.supply);
-            return Ok((
-                self.state.subst.clone(),
-                apply_subst_q(&self.state.subst, &q),
-            ));
+            return Ok((self.state.subst.clone(), q.apply_subst(&self.state.subst)));
         }
 
         Err(TypeError::new(
@@ -275,14 +272,11 @@ impl<'a> InferCtx<'a> {
             self.state.subst = s_acc.clone();
             let (s_new, q) = self.infer(env, item)?;
             s_acc = s_new;
-            let s2 = unify(
-                apply_subst_t(&s_acc, &elem),
-                apply_subst_t(&s_acc, &q.r#type),
-            )
-            .map_err(|e| TypeError::new(e.code, e.message, None))?;
+            let s2 = unify(elem.apply_subst(&s_acc), q.r#type.apply_subst(&s_acc))
+                .map_err(|e| TypeError::new(e.code, e.message, None))?;
             s_acc = compose(&s2, &s_acc);
         }
-        let ty = t_list(apply_subst_t(&s_acc, &elem));
+        let ty = t_list(elem.apply_subst(&s_acc));
         Ok((s_acc.clone(), qualify(ty, vec![])))
     }
 
@@ -297,7 +291,7 @@ impl<'a> InferCtx<'a> {
             self.state.subst = s_acc.clone();
             let (s_new, q) = self.infer(env, item)?;
             s_acc = s_new;
-            tys.push(apply_subst_t(&s_acc, &q.r#type));
+            tys.push(q.r#type.apply_subst(&s_acc));
         }
         Ok((
             s_acc.clone(),
@@ -345,13 +339,13 @@ impl<'a> InferCtx<'a> {
         let mut ty = q_body.r#type.clone();
         for arg in arg_tys.iter().rev() {
             ty = Type::TFun(TFun {
-                arg: Box::new(apply_subst_t(&s_acc, arg)),
+                arg: Box::new(arg.apply_subst(&s_acc)),
                 ret: Box::new(ty),
             });
         }
         Ok((
             s_acc.clone(),
-            qualify(apply_subst_t(&s_acc, &ty), q_body.constraints.clone()),
+            qualify(ty.apply_subst(&s_acc), q_body.constraints.clone()),
         ))
     }
 
@@ -375,13 +369,13 @@ impl<'a> InferCtx<'a> {
             self.state.subst = s_acc.clone();
             let (s_new, q_rhs) = self.infer(&env2, &rhs_expr)?;
             s_acc = s_new;
-            let sch = generalize(&env2, apply_subst_q(&s_acc, &q_rhs));
+            let sch = generalize(&env2, q_rhs.apply_subst(&s_acc));
             env2.extend(name.clone(), sch);
         }
         self.state.subst = s_acc.clone();
         let (s_body, q_body) = self.infer(&env2, body)?;
         s_acc = s_body;
-        Ok((s_acc.clone(), apply_subst_q(&s_acc, &q_body)))
+        Ok((s_acc.clone(), q_body.apply_subst(&s_acc)))
     }
 
     fn infer_if(
@@ -393,7 +387,7 @@ impl<'a> InferCtx<'a> {
     ) -> Result<(Subst, QualType), TypeError> {
         let (s_cond, q_cond) = self.infer(env, cond)?;
         let s_bool = unify(
-            apply_subst_t(&s_cond, &q_cond.r#type),
+            q_cond.r#type.apply_subst(&s_cond),
             Type::TCon(TCon {
                 name: "Bool".into(),
             }),
@@ -410,19 +404,21 @@ impl<'a> InferCtx<'a> {
         s_acc = s_else;
 
         let s_merge = unify(
-            apply_subst_t(&s_acc, &q_then.r#type),
-            apply_subst_t(&s_acc, &q_else.r#type),
+            q_then.r#type.apply_subst(&s_acc),
+            q_else.r#type.apply_subst(&s_acc),
         )
         .map_err(|e| TypeError::new(e.code, e.message, None))?;
         let s_acc = compose(&s_merge, &s_acc);
 
-        let mut cs = apply_subst_q(&s_acc, &q_then).constraints;
-        cs.extend(apply_subst_q(&s_acc, &q_else).constraints);
+        let q_then_applied = q_then.apply_subst(&s_acc);
+        let q_else_applied = q_else.apply_subst(&s_acc);
+        let mut cs = q_then_applied.constraints.clone();
+        cs.extend(q_else_applied.constraints.clone());
         Ok((
             s_acc.clone(),
             QualType {
                 constraints: cs,
-                r#type: apply_subst_t(&s_acc, &q_then.r#type),
+                r#type: q_then_applied.r#type,
             },
         ))
     }
@@ -440,21 +436,23 @@ impl<'a> InferCtx<'a> {
         s_acc = s_arg;
         let result_ty = Type::TVar(self.state.supply.fresh());
         let s_fun = unify(
-            apply_subst_t(&s_acc, &q_func.r#type),
+            q_func.r#type.apply_subst(&s_acc),
             Type::TFun(TFun {
-                arg: Box::new(apply_subst_t(&s_acc, &q_arg.r#type)),
+                arg: Box::new(q_arg.r#type.apply_subst(&s_acc)),
                 ret: Box::new(result_ty.clone()),
             }),
         )
         .map_err(|e| TypeError::new(e.code, e.message, None))?;
         let s_acc = compose(&s_fun, &s_acc);
-        let mut cs = apply_subst_q(&s_acc, &q_func).constraints;
-        cs.extend(apply_subst_q(&s_acc, &q_arg).constraints);
+        let q_func_applied = q_func.apply_subst(&s_acc);
+        let q_arg_applied = q_arg.apply_subst(&s_acc);
+        let mut cs = q_func_applied.constraints.clone();
+        cs.extend(q_arg_applied.constraints.clone());
         Ok((
             s_acc.clone(),
             QualType {
                 constraints: cs,
-                r#type: apply_subst_t(&s_acc, &result_ty),
+                r#type: result_ty.apply_subst(&s_acc),
             },
         ))
     }
@@ -468,8 +466,8 @@ impl<'a> InferCtx<'a> {
     ) -> Result<(Subst, QualType), TypeError> {
         if op == "^" && self.is_negative_exponent(right) {
             let (s_left, q_left) = self.infer(env, left)?;
-            let tl = apply_subst_t(&s_left, &q_left.r#type);
-            let mut cs = apply_subst_q(&s_left, &q_left).constraints;
+            let tl = q_left.r#type.apply_subst(&s_left);
+            let mut cs = q_left.apply_subst(&s_left).constraints;
             cs.push(Constraint {
                 classname: "Fractional".into(),
                 r#type: tl,
@@ -505,14 +503,15 @@ impl<'a> InferCtx<'a> {
     ) -> Result<(Subst, QualType), TypeError> {
         let (s_base, q_base) = self.infer(env, expr)?;
         let ty_anno = type_from_texpr(type_expr);
-        let s_eq = unify(apply_subst_t(&s_base, &q_base.r#type), ty_anno.clone())
+        let s_eq = unify(q_base.r#type.apply_subst(&s_base), ty_anno.clone())
             .map_err(|e| TypeError::new(e.code, e.message, None))?;
         let s_acc = compose(&s_eq, &s_base);
+        let q_base_applied = q_base.apply_subst(&s_acc);
         Ok((
             s_acc.clone(),
             QualType {
-                constraints: apply_subst_q(&s_acc, &q_base).constraints,
-                r#type: apply_subst_t(&s_acc, &ty_anno),
+                constraints: q_base_applied.constraints,
+                r#type: ty_anno.apply_subst(&s_acc),
             },
         ))
     }

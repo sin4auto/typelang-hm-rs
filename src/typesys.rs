@@ -90,6 +90,12 @@ pub struct Scheme {
 
 pub type Subst = HashMap<i64, Type>;
 
+/// 置換を適用できる値が実装するトレイト。
+pub trait Substitutable {
+    /// 与えられた置換を適用した新しい値を返す。
+    fn apply_subst(&self, subst: &Subst) -> Self;
+}
+
 /// 与えられた型に現れる自由型変数 ID の集合を計算する。
 pub fn ftv(t: &Type) -> HashSet<i64> {
     match t {
@@ -115,57 +121,67 @@ pub fn ftv(t: &Type) -> HashSet<i64> {
     }
 }
 
-/// 単一の型へ置換マップを適用する。
-pub fn apply_subst_t(s: &Subst, t: &Type) -> Type {
-    match t {
-        Type::TVar(TVar { id }) => s.get(id).cloned().unwrap_or_else(|| t.clone()),
-        Type::TCon(_) => t.clone(),
-        Type::TApp(TApp { func, arg }) => Type::TApp(TApp {
-            func: Box::new(apply_subst_t(s, func)),
-            arg: Box::new(apply_subst_t(s, arg)),
-        }),
-        Type::TFun(TFun { arg, ret }) => Type::TFun(TFun {
-            arg: Box::new(apply_subst_t(s, arg)),
-            ret: Box::new(apply_subst_t(s, ret)),
-        }),
-        Type::TTuple(TTuple { items }) => Type::TTuple(TTuple {
-            items: items.iter().map(|it| apply_subst_t(s, it)).collect(),
-        }),
+impl Substitutable for Type {
+    fn apply_subst(&self, subst: &Subst) -> Self {
+        match self {
+            Type::TVar(TVar { id }) => subst.get(id).cloned().unwrap_or_else(|| self.clone()),
+            Type::TCon(_) => self.clone(),
+            Type::TApp(TApp { func, arg }) => Type::TApp(TApp {
+                func: Box::new(func.apply_subst(subst)),
+                arg: Box::new(arg.apply_subst(subst)),
+            }),
+            Type::TFun(TFun { arg, ret }) => Type::TFun(TFun {
+                arg: Box::new(arg.apply_subst(subst)),
+                ret: Box::new(ret.apply_subst(subst)),
+            }),
+            Type::TTuple(TTuple { items }) => Type::TTuple(TTuple {
+                items: items.iter().map(|it| it.apply_subst(subst)).collect(),
+            }),
+        }
     }
 }
 
-/// 制約に置換を適用し、対象型を更新する。
-pub fn apply_subst_c(s: &Subst, c: &Constraint) -> Constraint {
-    Constraint {
-        classname: c.classname.clone(),
-        r#type: apply_subst_t(s, &c.r#type),
+impl Substitutable for Constraint {
+    fn apply_subst(&self, subst: &Subst) -> Self {
+        Constraint {
+            classname: self.classname.clone(),
+            r#type: self.r#type.apply_subst(subst),
+        }
     }
 }
-/// Qualified Type 全体に置換を適用する。
-pub fn apply_subst_q(s: &Subst, q: &QualType) -> QualType {
-    QualType {
-        constraints: q.constraints.iter().map(|c| apply_subst_c(s, c)).collect(),
-        r#type: apply_subst_t(s, &q.r#type),
+
+impl Substitutable for QualType {
+    fn apply_subst(&self, subst: &Subst) -> Self {
+        QualType {
+            constraints: self
+                .constraints
+                .iter()
+                .map(|c| c.apply_subst(subst))
+                .collect(),
+            r#type: self.r#type.apply_subst(subst),
+        }
     }
 }
-/// 型スキームへ置換を適用する（束縛変数は除外する）。
-pub fn apply_subst_s(s: &Subst, sc: &Scheme) -> Scheme {
-    let bound: HashSet<i64> = sc.vars.iter().map(|tv| tv.id).collect();
-    let s2: Subst = s
-        .iter()
-        .filter(|(k, _)| !bound.contains(k))
-        .map(|(k, v)| (*k, v.clone()))
-        .collect();
-    Scheme {
-        vars: sc.vars.clone(),
-        qual: apply_subst_q(&s2, &sc.qual),
+
+impl Substitutable for Scheme {
+    fn apply_subst(&self, subst: &Subst) -> Self {
+        let bound: HashSet<i64> = self.vars.iter().map(|tv| tv.id).collect();
+        let filtered: Subst = subst
+            .iter()
+            .filter(|(k, _)| !bound.contains(k))
+            .map(|(k, v)| (*k, v.clone()))
+            .collect();
+        Scheme {
+            vars: self.vars.clone(),
+            qual: self.qual.apply_subst(&filtered),
+        }
     }
 }
 
 /// 2つの置換を合成する。
 pub fn compose(a: &Subst, b: &Subst) -> Subst {
     // a ∘ b（先に b を適用し、その結果に a を重ねる）
-    let mut out: Subst = b.iter().map(|(k, v)| (*k, apply_subst_t(a, v))).collect();
+    let mut out: Subst = b.iter().map(|(k, v)| (*k, v.apply_subst(a))).collect();
     for (k, v) in a {
         out.insert(*k, v.clone());
     }
@@ -274,7 +290,7 @@ pub fn instantiate(sc: &Scheme, supply: &mut TVarSupply) -> QualType {
     for tv in &sc.vars {
         sub.insert(tv.id, Type::TVar(supply.fresh()));
     }
-    apply_subst_q(&sub, &sc.qual)
+    sc.qual.apply_subst(&sub)
 }
 
 #[derive(Debug, Clone)]
@@ -309,13 +325,13 @@ pub fn unify(t1: Type, t2: Type) -> Result<Subst, UnifyError> {
             }
         }
         (Type::TApp(a), Type::TApp(b)) => {
-            let s1 = unify(*a.func.clone(), *b.func.clone())?;
-            let s2 = unify(apply_subst_t(&s1, &a.arg), apply_subst_t(&s1, &b.arg))?;
+            let s1 = unify((*a.func).clone(), (*b.func).clone())?;
+            let s2 = unify(a.arg.apply_subst(&s1), b.arg.apply_subst(&s1))?;
             Ok(compose(&s2, &s1))
         }
         (Type::TFun(a), Type::TFun(b)) => {
-            let s1 = unify(*a.arg.clone(), *b.arg.clone())?;
-            let s2 = unify(apply_subst_t(&s1, &a.ret), apply_subst_t(&s1, &b.ret))?;
+            let s1 = unify((*a.arg).clone(), (*b.arg).clone())?;
+            let s2 = unify(a.ret.apply_subst(&s1), b.ret.apply_subst(&s1))?;
             Ok(compose(&s2, &s1))
         }
         (Type::TTuple(ta), Type::TTuple(tb)) => {
@@ -324,7 +340,7 @@ pub fn unify(t1: Type, t2: Type) -> Result<Subst, UnifyError> {
             }
             let mut s = Subst::new();
             for (a, b) in ta.items.into_iter().zip(tb.items.into_iter()) {
-                let s_step = unify(apply_subst_t(&s, &a), apply_subst_t(&s, &b))?;
+                let s_step = unify(a.apply_subst(&s), b.apply_subst(&s))?;
                 s = compose(&s_step, &s);
             }
             Ok(s)
@@ -597,5 +613,5 @@ pub fn apply_defaulting_simple(q: &QualType) -> QualType {
             }
         }
     }
-    apply_subst_q(&sub, q)
+    q.apply_subst(&sub)
 }

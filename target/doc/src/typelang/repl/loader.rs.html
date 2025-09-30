@@ -8,7 +8,7 @@
 <a href=#8 id=8 data-nosnippet>8</a></span><span class="kw">use </span><span class="kw">crate</span>::ast <span class="kw">as </span>A;
 <a href=#9 id=9 data-nosnippet>9</a><span class="kw">use </span><span class="kw">crate</span>::evaluator::{eval_expr, Value};
 <a href=#10 id=10 data-nosnippet>10</a><span class="kw">use </span><span class="kw">crate</span>::infer::{infer_expr, type_from_texpr, InferState};
-<a href=#11 id=11 data-nosnippet>11</a><span class="kw">use </span><span class="kw">crate</span>::typesys::{generalize, unify, TVarSupply};
+<a href=#11 id=11 data-nosnippet>11</a><span class="kw">use </span><span class="kw">crate</span>::typesys::{generalize, unify, Substitutable, TVarSupply};
 <a href=#12 id=12 data-nosnippet>12</a>
 <a href=#13 id=13 data-nosnippet>13</a><span class="kw">use </span><span class="kw">super</span>::util::normalize_expr;
 <a href=#14 id=14 data-nosnippet>14</a><span class="doccomment">/// プログラムを型・クラス・値環境へ段階的に取り込む。
@@ -68,7 +68,7 @@
 <a href=#68 id=68 data-nosnippet>68</a>                <span class="kw">continue</span>;
 <a href=#69 id=69 data-nosnippet>69</a>            }
 <a href=#70 id=70 data-nosnippet>70</a>        };
-<a href=#71 id=71 data-nosnippet>71</a>        <span class="kw">let </span>q_rhs1 = <span class="kw">crate</span>::typesys::apply_subst_q(<span class="kw-2">&amp;</span>s, <span class="kw-2">&amp;</span>q_rhs0);
+<a href=#71 id=71 data-nosnippet>71</a>        <span class="kw">let </span>q_rhs1 = q_rhs0.apply_subst(<span class="kw-2">&amp;</span>s);
 <a href=#72 id=72 data-nosnippet>72</a>        <span class="kw">let </span>is_fun = <span class="macro">matches!</span>(q_rhs1.r#type, <span class="kw">crate</span>::typesys::Type::TFun(<span class="kw">_</span>));
 <a href=#73 id=73 data-nosnippet>73</a>        <span class="kw">let </span>q_rhs = <span class="kw">if </span>decl.signature.is_none() &amp;&amp; !is_fun {
 <a href=#74 id=74 data-nosnippet>74</a>            <span class="kw">crate</span>::typesys::apply_defaulting_simple(<span class="kw-2">&amp;</span>q_rhs1)

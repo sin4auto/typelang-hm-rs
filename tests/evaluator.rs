@@ -101,6 +101,12 @@ fn eval_nan_comparison_is_error() {
 }
 
 #[test]
+/// NaN 同士の等価比較が false を返し、エラーにならないことを検証する。
+fn eval_nan_equality_is_false() {
+    assert!(!eval_bool("(0.0 / 0.0) == (0.0 / 0.0)"));
+}
+
+#[test]
 /// 関数に `show` を適用するとエラーになることを検証する。
 fn eval_show_function_is_error() {
     let expr = parser::parse_expr("show (\\x -> x)").unwrap();

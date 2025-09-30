@@ -8,7 +8,7 @@
 use crate::ast as A;
 use crate::evaluator::{eval_expr, Value};
 use crate::infer::{infer_expr, type_from_texpr, InferState};
-use crate::typesys::{generalize, unify, TVarSupply};
+use crate::typesys::{generalize, unify, Substitutable, TVarSupply};
 
 use super::util::normalize_expr;
 /// プログラムを型・クラス・値環境へ段階的に取り込む。
@@ -68,7 +68,7 @@ pub fn load_program_into_env(
                 continue;
             }
         };
-        let q_rhs1 = crate::typesys::apply_subst_q(&s, &q_rhs0);
+        let q_rhs1 = q_rhs0.apply_subst(&s);
         let is_fun = matches!(q_rhs1.r#type, crate::typesys::Type::TFun(_));
         let q_rhs = if decl.signature.is_none() && !is_fun {
             crate::typesys::apply_defaulting_simple(&q_rhs1)

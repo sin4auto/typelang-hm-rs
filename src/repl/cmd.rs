@@ -10,7 +10,7 @@ use crate::evaluator::{eval_expr, initial_env as value_env_init, Value};
 use crate::infer::{infer_expr, initial_class_env, initial_env as type_env_init, InferState};
 use crate::parser::{parse_expr, parse_program};
 use crate::typesys::{
-    apply_defaulting_simple, apply_subst_q, generalize, pretty_qual, qualify, TCon, TVarSupply,
+    apply_defaulting_simple, generalize, pretty_qual, qualify, Substitutable, TCon, TVarSupply,
     Type,
 };
 
@@ -532,7 +532,7 @@ fn type_string_in_current_env(
     let e = normalize_expr(expr);
     match infer_expr(type_env, class_env, &mut st, &e) {
         Ok((s, q)) => {
-            let mut q2 = apply_subst_q(&s, &q);
+            let mut q2 = q.apply_subst(&s);
             if defaulting_on {
                 q2 = apply_defaulting_simple(&q2);
             }
@@ -571,7 +571,7 @@ fn infer_and_generalize_for_repl(
     };
     match infer_expr(type_env, class_env, &mut st, &e) {
         Ok((s, q)) => {
-            let mut q2 = apply_subst_q(&s, &q);
+            let mut q2 = q.apply_subst(&s);
             if defaulting_on {
                 q2 = apply_defaulting_simple(&q2);
             }
