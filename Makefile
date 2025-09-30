@@ -59,9 +59,9 @@ add-tools: ## llvm-cov/監査系ツールを未導入なら導入
 
 # ---- カバレッジ ---------------------------------------------------------------
 coverage: ## カバレッジ (HTML, JSON, LCOV)
-	cargo llvm-cov --workspace --all-features --html
-	cargo llvm-cov report --json --output-path coverage.json
-	cargo llvm-cov report --lcov --output-path target/llvm-cov/lcov.info
+	cargo +nightly llvm-cov --workspace --all-features --branch --html
+	cargo +nightly llvm-cov report --json --output-path target/llvm-cov/coverage.json
+	cargo +nightly llvm-cov report --lcov --output-path target/llvm-cov/lcov.info
 	@echo "HTML: target/llvm-cov/html/index.html"
 	@echo "JSON: coverage.json"
 	@echo "LCOV: target/llvm-cov/lcov.info"

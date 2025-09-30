@@ -2,7 +2,8 @@
 target/*
 !target/doc/
 !target/doc/**
+!target/llvm-cov/
+!target/llvm-cov/**
 
 # files
 **/*.rs.bk
-codex-bin
