@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Value"],"fn":["eval_expr","initial_env"],"struct":["Prim2"],"type":["Env"]};

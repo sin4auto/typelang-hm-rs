@@ -150,6 +150,80 @@ fn is_ident_rest(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_' || c == '\''
 }
 
+/// 連続する空白文字を読み飛ばす。
+fn skip_whitespace(src: &str, cursor: &mut usize) -> bool {
+    let mut advanced = false;
+    while *cursor < src.len() {
+        let Some(ch) = src[*cursor..].chars().next() else {
+            break;
+        };
+        if is_whitespace(ch) {
+            *cursor += ch.len_utf8();
+            advanced = true;
+        } else {
+            break;
+        }
+    }
+    advanced
+}
+
+/// 行コメント "--" を読み飛ばす。
+fn skip_line_comment(src: &str, cursor: &mut usize) -> bool {
+    if !src[*cursor..].starts_with("--") {
+        return false;
+    }
+    *cursor += 2; // "--"
+    while *cursor < src.len() {
+        let ch = src[*cursor..]
+            .chars()
+            .next()
+            .expect("行コメント処理中にEOFへ到達しない");
+        *cursor += ch.len_utf8();
+        if ch == '\n' {
+            break;
+        }
+    }
+    true
+}
+
+/// ブロックコメント "{-" ... "-}" を読み飛ばす。
+fn skip_block_comment(
+    src: &str,
+    cursor: &mut usize,
+    line_map: &LineMap,
+) -> Result<bool, LexerError> {
+    if !src[*cursor..].starts_with("{-") {
+        return Ok(false);
+    }
+    let mut idx = *cursor + 2; // "{-"
+    let mut closed = false;
+    while idx < src.len() {
+        if src[idx..].starts_with("-}") {
+            idx += 2;
+            closed = true;
+            break;
+        }
+        let Some(ch) = src[idx..].chars().next() else {
+            break;
+        };
+        idx += ch.len_utf8();
+    }
+    if !closed {
+        let pos = idx.min(src.len());
+        let (line, col) = line_map.locate(src, pos);
+        return Err(LexerError::at_with_snippet(
+            "LEX001",
+            "ブロックコメントが閉じていません",
+            Some(pos),
+            Some(line),
+            Some(col),
+            line_map.line_text(src, line).to_string(),
+        ));
+    }
+    *cursor = idx;
+    Ok(true)
+}
+
 /// ソースコードを走査し、位置付きトークン列を返す。
 pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
     let mut toks: Vec<Token> = Vec::new();
@@ -159,61 +233,27 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
     let next_char = |i: usize| -> Option<char> { src[i..].chars().next() };
     let line_map = LineMap::new(src);
     while i < n {
-        let Some(c) = next_char(i) else { break };
-        let c_next_idx = i + c.len_utf8();
-        // 空白文字は読み飛ばす
-        if is_whitespace(c) {
-            i += c.len_utf8();
+        if skip_whitespace(src, &mut i) {
             continue;
         }
-
-        // ブロックコメント "{-" ... "-}"（入れ子無し）をスキップする
-        if c == '{' {
-            if let Some('-') = next_char(c_next_idx) {
-                // 先頭の "{-" を読み飛ばし、終端 "-}" を探す
-                i = c_next_idx + '-'.len_utf8();
-                let mut closed = false;
-                while i < n {
-                    if let Some('-') = next_char(i) {
-                        let dash_next = i + '-'.len_utf8();
-                        if let Some('}') = next_char(dash_next) {
-                            i = dash_next + '}'.len_utf8();
-                            closed = true;
-                            break;
-                        }
-                    }
-                    i += next_char(i).map(|ch| ch.len_utf8()).unwrap_or(1);
-                }
-                if !closed {
-                    let (l, c) = line_map.locate(src, i);
-                    return Err(LexerError::at_with_snippet(
-                        "LEX001",
-                        "ブロックコメントが閉じていません",
-                        Some(i),
-                        Some(l),
-                        Some(c),
-                        line_map.line_text(src, l).to_string(),
-                    ));
-                }
-                continue;
-            }
+        if i >= n {
+            break;
+        }
+        if skip_block_comment(src, &mut i, &line_map)? {
+            continue;
+        }
+        if i >= n {
+            break;
+        }
+        if skip_line_comment(src, &mut i) {
+            continue;
+        }
+        if i >= n {
+            break;
         }
 
-        // 行コメント "--" 以降を改行まで読み飛ばす
-        if c == '-' {
-            if let Some('-') = next_char(c_next_idx) {
-                // "--" を消費して改行まで進む
-                i = c_next_idx + '-'.len_utf8();
-                while i < n {
-                    let ch = next_char(i).expect("安全性保証: 行コメント走査中に EOF へ到達しない");
-                    i += ch.len_utf8();
-                    if ch == '\n' {
-                        break;
-                    }
-                }
-                continue;
-            }
-        }
+        let Some(c) = next_char(i) else { break };
+        let c_next_idx = i + c.len_utf8();
 
         // 2 文字で構成される演算子や記号を処理する
         if c_next_idx <= n {

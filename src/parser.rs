@@ -20,6 +20,50 @@ pub struct Parser {
     i: usize,
 }
 
+#[derive(Clone, Copy)]
+enum Assoc {
+    Left,
+    Right,
+    Non,
+}
+
+struct InfixSpec {
+    tokens: &'static [TokenKind],
+    assoc: Assoc,
+}
+
+impl InfixSpec {
+    fn contains(&self, kind: &TokenKind) -> bool {
+        self.tokens.iter().any(|tk| tk == kind)
+    }
+}
+
+const INFIX_LEVELS: &[InfixSpec] = &[
+    InfixSpec {
+        tokens: &[
+            TokenKind::EQ,
+            TokenKind::NE,
+            TokenKind::LT,
+            TokenKind::LE,
+            TokenKind::GT,
+            TokenKind::GE,
+        ],
+        assoc: Assoc::Non,
+    },
+    InfixSpec {
+        tokens: &[TokenKind::PLUS, TokenKind::MINUS],
+        assoc: Assoc::Left,
+    },
+    InfixSpec {
+        tokens: &[TokenKind::STAR, TokenKind::SLASH],
+        assoc: Assoc::Left,
+    },
+    InfixSpec {
+        tokens: &[TokenKind::CARET, TokenKind::DBLSTAR],
+        assoc: Assoc::Right,
+    },
+];
+
 /// `Parser` が提供する各種解析メソッド。
 impl Parser {
     /// トークン列から新しいパーサインスタンスを構築する。
@@ -140,7 +184,7 @@ impl Parser {
             TokenKind::LAMBDA => self.parse_lambda(),
             TokenKind::LET => self.parse_let_in(),
             TokenKind::IF => self.parse_if(),
-            _ => self.parse_infix_cmp(),
+            _ => self.parse_infix_level(0),
         }
     }
 
@@ -199,34 +243,23 @@ impl Parser {
         })
     }
 
-    /// 比較演算子レベル（非結合）の式を解析する。
-    fn parse_infix_cmp(&mut self) -> Result<Expr, ParseError> {
-        let left = self.parse_infix_add()?;
-        match self.peek().kind {
-            TokenKind::EQ
-            | TokenKind::NE
-            | TokenKind::LT
-            | TokenKind::LE
-            | TokenKind::GT
-            | TokenKind::GE => {
-                let op = self.pop_any().value;
-                let right = self.parse_infix_add()?;
-                Ok(Expr::BinOp {
-                    op,
-                    left: Box::new(left),
-                    right: Box::new(right),
-                })
-            }
-            _ => Ok(left),
+    fn parse_infix_level(&mut self, level: usize) -> Result<Expr, ParseError> {
+        if level >= INFIX_LEVELS.len() {
+            return self.parse_app();
+        }
+        let spec = &INFIX_LEVELS[level];
+        match spec.assoc {
+            Assoc::Left => self.parse_infix_left(level, spec),
+            Assoc::Right => self.parse_infix_right(level, spec),
+            Assoc::Non => self.parse_infix_non(level, spec),
         }
     }
 
-    /// 加算・減算レベル（左結合）の式を解析する。
-    fn parse_infix_add(&mut self) -> Result<Expr, ParseError> {
-        let mut left = self.parse_infix_mul()?;
-        while let TokenKind::PLUS | TokenKind::MINUS = self.peek().kind {
+    fn parse_infix_left(&mut self, level: usize, spec: &InfixSpec) -> Result<Expr, ParseError> {
+        let mut left = self.parse_infix_level(level + 1)?;
+        while spec.contains(&self.peek().kind) {
             let op = self.pop_any().value;
-            let right = self.parse_infix_mul()?;
+            let right = self.parse_infix_level(level + 1)?;
             left = Expr::BinOp {
                 op,
                 left: Box::new(left),
@@ -236,36 +269,33 @@ impl Parser {
         Ok(left)
     }
 
-    /// 乗除レベル（左結合）の式を解析する。
-    fn parse_infix_mul(&mut self) -> Result<Expr, ParseError> {
-        let mut left = self.parse_infix_pow()?;
-        while let TokenKind::STAR | TokenKind::SLASH = self.peek().kind {
+    fn parse_infix_right(&mut self, level: usize, spec: &InfixSpec) -> Result<Expr, ParseError> {
+        let left = self.parse_infix_level(level + 1)?;
+        if spec.contains(&self.peek().kind) {
             let op = self.pop_any().value;
-            let right = self.parse_infix_pow()?;
-            left = Expr::BinOp {
+            let right = self.parse_infix_level(level)?;
+            Ok(Expr::BinOp {
                 op,
                 left: Box::new(left),
                 right: Box::new(right),
-            };
+            })
+        } else {
+            Ok(left)
         }
-        Ok(left)
     }
 
-    /// 累乗演算（右結合）を解析する。
-    fn parse_infix_pow(&mut self) -> Result<Expr, ParseError> {
-        // 文法: app ('^' | '**') infix_pow | app
-        let left = self.parse_app()?;
-        match self.peek().kind {
-            TokenKind::CARET | TokenKind::DBLSTAR => {
-                let op = self.pop_any().value;
-                let right = self.parse_infix_pow()?;
-                Ok(Expr::BinOp {
-                    op,
-                    left: Box::new(left),
-                    right: Box::new(right),
-                })
-            }
-            _ => Ok(left),
+    fn parse_infix_non(&mut self, level: usize, spec: &InfixSpec) -> Result<Expr, ParseError> {
+        let left = self.parse_infix_level(level + 1)?;
+        if spec.contains(&self.peek().kind) {
+            let op = self.pop_any().value;
+            let right = self.parse_infix_level(level + 1)?;
+            Ok(Expr::BinOp {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+            })
+        } else {
+            Ok(left)
         }
     }
 

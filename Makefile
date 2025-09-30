@@ -89,7 +89,7 @@ check: fmt clippy test ## フォーマット＋Lint＋テスト
 full_local: add-tools clean doc fmt clippy test release audit outdated udeps miri coverage ## フルローカルビルド
 	@echo "✅ フルローカルビルド (clean → doc → fmt → clippy → test → release → audit → outdated → udeps → miri → coverage) 完了"
 
-ci: clean fmt-check clippy ## CI: クリーンビルド + fmt-check + clippy + test + release
+ci: clean doc fmt-check clippy ## CIパイプライン
 	RUSTFLAGS="-D warnings" cargo test  --workspace --all-features --frozen --locked --verbose
 	RUSTFLAGS="-D warnings" cargo build --workspace --all-features --frozen --locked --release
-	@echo "✅ CIフロー (clean → fmt-check → clippy → test → release) 完了"
+	@echo "✅ CIフロー (clean → doc → fmt-check → clippy → test → release) 完了"

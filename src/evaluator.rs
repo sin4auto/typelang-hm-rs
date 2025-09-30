@@ -12,6 +12,7 @@ use std::collections::HashMap;
 
 use crate::ast as A;
 use crate::errors::EvalError;
+use crate::primitives::{EqOp, NumericOp, OrdOp, PrimitiveKind, PRIMITIVES};
 
 #[derive(Clone, Debug)]
 /// 評価器が返す値の列挙体。
@@ -45,7 +46,7 @@ pub type Env = HashMap<String, Value>;
 /// REPL とテストで利用する初期プリミティブ環境を構築する。
 pub fn initial_env() -> Env {
     let mut env: Env = HashMap::new();
-    // show: 値を文字列に整形するプリミティブ
+
     /// 値を文字列へ変換し `String` 値として返す。
     fn py_show(v: Value) -> Result<Value, EvalError> {
         Ok(Value::String(match v {
@@ -63,30 +64,28 @@ pub fn initial_env() -> Env {
             _ => return Err(EvalError::new("EVAL050", "show: 未対応の値", None)),
         }))
     }
-    env.insert("show".into(), Value::Prim1(py_show));
 
-    // 二項演算を登録するためのヘルパ
     /// 2 引数関数を `Prim2` ラッパーに変換する。
     fn prim2(f: fn(Value, Value) -> Result<Value, EvalError>) -> Value {
         Value::Prim2(Prim2 { f, a: None })
     }
-    env.insert(
-        "+".into(),
-        prim2(|a, b| Ok(Value::Int(to_int(&a)? + to_int(&b)?))),
-    );
-    env.insert(
-        "-".into(),
-        prim2(|a, b| Ok(Value::Int(to_int(&a)? - to_int(&b)?))),
-    );
-    env.insert(
-        "*".into(),
-        prim2(|a, b| Ok(Value::Int(to_int(&a)? * to_int(&b)?))),
-    );
-    env.insert(
-        "/".into(),
-        prim2(|a, b| Ok(Value::Double(to_double(&a)? / to_double(&b)?))),
-    );
-    // (^) と (**) の振る舞いを実装
+
+    fn add_op(a: Value, b: Value) -> Result<Value, EvalError> {
+        Ok(Value::Int(to_int(&a)? + to_int(&b)?))
+    }
+
+    fn sub_op(a: Value, b: Value) -> Result<Value, EvalError> {
+        Ok(Value::Int(to_int(&a)? - to_int(&b)?))
+    }
+
+    fn mul_op(a: Value, b: Value) -> Result<Value, EvalError> {
+        Ok(Value::Int(to_int(&a)? * to_int(&b)?))
+    }
+
+    fn div_op(a: Value, b: Value) -> Result<Value, EvalError> {
+        Ok(Value::Double(to_double(&a)? / to_double(&b)?))
+    }
+
     /// 整数指数を優先的に扱い、必要に応じて浮動小数へフォールバックする。
     fn powi(a: Value, b: Value) -> Result<Value, EvalError> {
         match (a, b) {
@@ -94,7 +93,6 @@ pub fn initial_env() -> Env {
                 if y > u32::MAX as i64 {
                     return Err(EvalError::new("EVAL060", "(^) の指数が大きすぎます", None));
                 }
-                // オーバーフローは明示的なエラーとして返す
                 x.checked_pow(y as u32).map(Value::Int).ok_or_else(|| {
                     EvalError::new("EVAL060", "(^) の結果が Int の範囲を超えました", None)
                 })
@@ -102,13 +100,12 @@ pub fn initial_env() -> Env {
             (x, y) => Ok(Value::Double(to_double(&x)?.powf(to_double(&y)?))),
         }
     }
+
     /// 常に浮動小数でべき乗を評価する。
     fn powf(a: Value, b: Value) -> Result<Value, EvalError> {
         Ok(Value::Double(to_double(&a)?.powf(to_double(&b)?)))
     }
-    env.insert("^".into(), prim2(powi));
-    env.insert("**".into(), prim2(powf));
-    // 比較演算 (Eq/Ord)
+
     /// リストやタプルを含む値の構造的な等価判定を行う。
     fn eqv(a: &Value, b: &Value) -> Result<bool, EvalError> {
         Ok(match (a, b) {
@@ -152,7 +149,9 @@ pub fn initial_env() -> Env {
             }
         })
     }
+
     use std::cmp::Ordering;
+
     /// 値を辞書式で比較し、必要に応じて再帰的に判定する。
     fn compare(a: &Value, b: &Value) -> Result<Ordering, EvalError> {
         match (a, b) {
@@ -196,34 +195,78 @@ pub fn initial_env() -> Env {
             )),
         }
     }
-    env.insert("==".into(), prim2(|a, b| Ok(Value::Bool(eqv(&a, &b)?))));
-    env.insert("/=".into(), prim2(|a, b| Ok(Value::Bool(!eqv(&a, &b)?))));
-    env.insert(
-        "<".into(),
-        prim2(|a, b| Ok(Value::Bool(compare(&a, &b)? == std::cmp::Ordering::Less))),
-    );
-    env.insert(
-        "<=".into(),
-        prim2(|a, b| {
-            Ok(Value::Bool({
-                let o = compare(&a, &b)?;
-                o == std::cmp::Ordering::Less || o == std::cmp::Ordering::Equal
-            }))
-        }),
-    );
-    env.insert(
-        ">".into(),
-        prim2(|a, b| Ok(Value::Bool(compare(&a, &b)? == std::cmp::Ordering::Greater))),
-    );
-    env.insert(
-        ">=".into(),
-        prim2(|a, b| {
-            Ok(Value::Bool({
-                let o = compare(&a, &b)?;
-                o == std::cmp::Ordering::Greater || o == std::cmp::Ordering::Equal
-            }))
-        }),
-    );
+
+    fn eq_op(a: Value, b: Value) -> Result<Value, EvalError> {
+        Ok(Value::Bool(eqv(&a, &b)?))
+    }
+
+    fn ne_op(a: Value, b: Value) -> Result<Value, EvalError> {
+        Ok(Value::Bool(!eqv(&a, &b)?))
+    }
+
+    fn lt_op(a: Value, b: Value) -> Result<Value, EvalError> {
+        Ok(Value::Bool(compare(&a, &b)? == Ordering::Less))
+    }
+
+    fn le_op(a: Value, b: Value) -> Result<Value, EvalError> {
+        Ok(Value::Bool({
+            let o = compare(&a, &b)?;
+            o == Ordering::Less || o == Ordering::Equal
+        }))
+    }
+
+    fn gt_op(a: Value, b: Value) -> Result<Value, EvalError> {
+        Ok(Value::Bool(compare(&a, &b)? == Ordering::Greater))
+    }
+
+    fn ge_op(a: Value, b: Value) -> Result<Value, EvalError> {
+        Ok(Value::Bool({
+            let o = compare(&a, &b)?;
+            o == Ordering::Greater || o == Ordering::Equal
+        }))
+    }
+
+    for def in PRIMITIVES {
+        match def.kind {
+            PrimitiveKind::Numeric(kind) => {
+                let f: fn(Value, Value) -> Result<Value, EvalError> = match kind {
+                    NumericOp::Add => add_op,
+                    NumericOp::Sub => sub_op,
+                    NumericOp::Mul => mul_op,
+                };
+                env.insert(def.name.into(), prim2(f));
+            }
+            PrimitiveKind::FractionalDiv => {
+                env.insert(def.name.into(), prim2(div_op));
+            }
+            PrimitiveKind::PowInt => {
+                env.insert(def.name.into(), prim2(powi));
+            }
+            PrimitiveKind::PowFloat => {
+                env.insert(def.name.into(), prim2(powf));
+            }
+            PrimitiveKind::Eq(kind) => {
+                let f: fn(Value, Value) -> Result<Value, EvalError> = match kind {
+                    EqOp::Eq => eq_op,
+                    EqOp::Ne => ne_op,
+                };
+                env.insert(def.name.into(), prim2(f));
+            }
+            PrimitiveKind::Ord(kind) => {
+                let f: fn(Value, Value) -> Result<Value, EvalError> = match kind {
+                    OrdOp::Lt => lt_op,
+                    OrdOp::Le => le_op,
+                    OrdOp::Gt => gt_op,
+                    OrdOp::Ge => ge_op,
+                };
+                env.insert(def.name.into(), prim2(f));
+            }
+            PrimitiveKind::Show => {
+                env.insert(def.name.into(), Value::Prim1(py_show));
+            }
+        }
+    }
+
     env
 }
 

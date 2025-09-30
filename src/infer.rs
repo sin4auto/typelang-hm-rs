@@ -10,6 +10,7 @@
 
 use crate::ast as A;
 use crate::errors::TypeError;
+use crate::primitives::{PrimitiveKind, PRIMITIVES};
 use crate::typesys::*;
 
 #[derive(Clone, Debug)]
@@ -50,132 +51,114 @@ pub fn initial_class_env() -> ClassEnv {
 /// 演算子などの既定スキームを備えた型環境を生成する。
 pub fn initial_env() -> TypeEnv {
     let mut env = TypeEnv::new();
-    let mut s = TVarSupply::new();
-    // (+), (-), (*) :: Num a => a -> a -> a
-    /// 数値クラス制約を持つ二項演算子スキームを構築する。
-    fn binop_scheme(cls: &str, s: &mut TVarSupply) -> Scheme {
-        let a = Type::TVar(s.fresh());
-        let ty = Type::TFun(TFun {
-            arg: Box::new(a.clone()),
-            ret: Box::new(Type::TFun(TFun {
-                arg: Box::new(a.clone()),
-                ret: Box::new(a.clone()),
-            })),
-        });
-        let q = qualify(
-            ty,
-            vec![Constraint {
-                classname: cls.into(),
-                r#type: a.clone(),
-            }],
-        );
-        let tv = match &a {
-            Type::TVar(tv) => tv.clone(),
-            _ => unreachable!(),
-        };
-        Scheme {
-            vars: vec![tv],
-            qual: q,
-        }
-    }
-    /// `Fractional` 制約を課す演算子スキームを構築する。
-    fn frlop_scheme(s: &mut TVarSupply) -> Scheme {
-        let a = Type::TVar(s.fresh());
-        let ty = Type::TFun(TFun {
-            arg: Box::new(a.clone()),
-            ret: Box::new(Type::TFun(TFun {
-                arg: Box::new(a.clone()),
-                ret: Box::new(a.clone()),
-            })),
-        });
-        let q = qualify(
-            ty,
-            vec![Constraint {
-                classname: "Fractional".into(),
-                r#type: a.clone(),
-            }],
-        );
-        let tv = match &a {
-            Type::TVar(tv) => tv.clone(),
-            _ => unreachable!(),
-        };
-        Scheme {
-            vars: vec![tv],
-            qual: q,
-        }
-    }
-    /// 整数指数を扱う `(^)` 用のスキームを構築する。
-    fn intpow_scheme(s: &mut TVarSupply) -> Scheme {
-        // (^) :: Num a => a -> Int -> a
-        let a = Type::TVar(s.fresh());
-        let ty = Type::TFun(TFun {
-            arg: Box::new(a.clone()),
-            ret: Box::new(Type::TFun(TFun {
-                arg: Box::new(Type::TCon(TCon { name: "Int".into() })),
-                ret: Box::new(a.clone()),
-            })),
-        });
-        let q = qualify(
-            ty,
-            vec![Constraint {
-                classname: "Num".into(),
-                r#type: a.clone(),
-            }],
-        );
-        let tv = match &a {
-            Type::TVar(tv) => tv.clone(),
-            _ => unreachable!(),
-        };
-        Scheme {
-            vars: vec![tv],
-            qual: q,
+    let mut supply = TVarSupply::new();
+
+    for def in PRIMITIVES {
+        match def.kind {
+            PrimitiveKind::Numeric(_) => env.extend(def.name, binop_scheme("Num", &mut supply)),
+            PrimitiveKind::FractionalDiv => {
+                env.extend(def.name, binop_scheme("Fractional", &mut supply));
+            }
+            PrimitiveKind::PowFloat => {
+                env.extend(def.name, binop_scheme("Fractional", &mut supply));
+            }
+            PrimitiveKind::PowInt => env.extend(def.name, intpow_scheme(&mut supply)),
+            PrimitiveKind::Eq(_) => env.extend(def.name, pred_scheme("Eq", &mut supply)),
+            PrimitiveKind::Ord(_) => env.extend(def.name, pred_scheme("Ord", &mut supply)),
+            PrimitiveKind::Show => env.extend(def.name, show_scheme(&mut supply)),
         }
     }
 
-    env.extend("+", binop_scheme("Num", &mut s));
-    env.extend("-", binop_scheme("Num", &mut s));
-    env.extend("*", binop_scheme("Num", &mut s));
-    env.extend("/", frlop_scheme(&mut s));
-    env.extend("^", intpow_scheme(&mut s));
-    env.extend("**", frlop_scheme(&mut s));
-    // 比較演算: Eq/Ord a => a -> a -> Bool
-    /// `Eq`/`Ord` 制約を持つ比較演算子スキームを構築する。
-    fn pred_scheme(cls: &str, s: &mut TVarSupply) -> Scheme {
-        let a = Type::TVar(s.fresh());
-        let ty = Type::TFun(TFun {
-            arg: Box::new(a.clone()),
-            ret: Box::new(Type::TFun(TFun {
-                arg: Box::new(a.clone()),
-                ret: Box::new(Type::TCon(TCon {
-                    name: "Bool".into(),
-                })),
-            })),
-        });
-        let q = qualify(
-            ty,
-            vec![Constraint {
-                classname: cls.into(),
-                r#type: a.clone(),
-            }],
-        );
-        let tv = match &a {
-            Type::TVar(tv) => tv.clone(),
-            _ => unreachable!(),
-        };
-        Scheme {
-            vars: vec![tv],
-            qual: q,
-        }
-    }
-    env.extend("==", pred_scheme("Eq", &mut s));
-    env.extend("/=", pred_scheme("Eq", &mut s));
-    env.extend("<", pred_scheme("Ord", &mut s));
-    env.extend("<=", pred_scheme("Ord", &mut s));
-    env.extend(">", pred_scheme("Ord", &mut s));
-    env.extend(">=", pred_scheme("Ord", &mut s));
-    // show :: Show a => a -> String
+    env
+}
+
+/// 数値クラス制約を持つ二項演算子スキームを構築する。
+fn binop_scheme(cls: &str, s: &mut TVarSupply) -> Scheme {
     let a = Type::TVar(s.fresh());
-    let show_ty = Type::TFun(TFun {
+    let ty = Type::TFun(TFun {
+        arg: Box::new(a.clone()),
+        ret: Box::new(Type::TFun(TFun {
+            arg: Box::new(a.clone()),
+            ret: Box::new(a.clone()),
+        })),
+    });
+    let q = qualify(
+        ty,
+        vec![Constraint {
+            classname: cls.into(),
+            r#type: a.clone(),
+        }],
+    );
+    let tv = match &a {
+        Type::TVar(tv) => tv.clone(),
+        _ => unreachable!(),
+    };
+    Scheme {
+        vars: vec![tv],
+        qual: q,
+    }
+}
+
+/// 整数指数を扱う `(^)` 用のスキームを構築する。
+fn intpow_scheme(s: &mut TVarSupply) -> Scheme {
+    let a = Type::TVar(s.fresh());
+    let ty = Type::TFun(TFun {
+        arg: Box::new(a.clone()),
+        ret: Box::new(Type::TFun(TFun {
+            arg: Box::new(Type::TCon(TCon { name: "Int".into() })),
+            ret: Box::new(a.clone()),
+        })),
+    });
+    let q = qualify(
+        ty,
+        vec![Constraint {
+            classname: "Num".into(),
+            r#type: a.clone(),
+        }],
+    );
+    let tv = match &a {
+        Type::TVar(tv) => tv.clone(),
+        _ => unreachable!(),
+    };
+    Scheme {
+        vars: vec![tv],
+        qual: q,
+    }
+}
+
+/// `Eq` / `Ord` 制約を持つ比較演算子スキームを構築する。
+fn pred_scheme(cls: &str, s: &mut TVarSupply) -> Scheme {
+    let a = Type::TVar(s.fresh());
+    let ty = Type::TFun(TFun {
+        arg: Box::new(a.clone()),
+        ret: Box::new(Type::TFun(TFun {
+            arg: Box::new(a.clone()),
+            ret: Box::new(Type::TCon(TCon {
+                name: "Bool".into(),
+            })),
+        })),
+    });
+    let q = qualify(
+        ty,
+        vec![Constraint {
+            classname: cls.into(),
+            r#type: a.clone(),
+        }],
+    );
+    let tv = match &a {
+        Type::TVar(tv) => tv.clone(),
+        _ => unreachable!(),
+    };
+    Scheme {
+        vars: vec![tv],
+        qual: q,
+    }
+}
+
+/// `show` プリミティブのスキームを構築する。
+fn show_scheme(s: &mut TVarSupply) -> Scheme {
+    let a = Type::TVar(s.fresh());
+    let ty = Type::TFun(TFun {
         arg: Box::new(a.clone()),
         ret: Box::new(t_string()),
     });
@@ -183,20 +166,16 @@ pub fn initial_env() -> TypeEnv {
         Type::TVar(tv) => tv.clone(),
         _ => unreachable!(),
     };
-    env.extend(
-        "show",
-        Scheme {
-            vars: vec![tv],
-            qual: qualify(
-                show_ty,
-                vec![Constraint {
-                    classname: "Show".into(),
-                    r#type: a.clone(),
-                }],
-            ),
-        },
-    );
-    env
+    Scheme {
+        vars: vec![tv],
+        qual: qualify(
+            ty,
+            vec![Constraint {
+                classname: "Show".into(),
+                r#type: a.clone(),
+            }],
+        ),
+    }
 }
 
 /// 式の主型と制約集合を返すトップレベルの推論関数。

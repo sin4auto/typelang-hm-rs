@@ -19,6 +19,7 @@ pub mod evaluator;
 pub mod infer;
 pub mod lexer;
 pub mod parser;
+pub(crate) mod primitives;
 pub mod repl;
 pub mod typesys;
 
