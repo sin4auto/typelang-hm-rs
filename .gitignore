@@ -1,9 +1,5 @@
 # directories
-target/*
-!target/doc/
-!target/doc/**
-!target/llvm-cov/
-!target/llvm-cov/**
+target/
 
 # files
 **/*.rs.bk
