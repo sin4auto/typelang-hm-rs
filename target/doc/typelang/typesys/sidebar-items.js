@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"enum":["Type"],"fn":["apply_defaulting_simple","bind","compose","ftv","generalize","instantiate","pretty_qual","qualify","t_list","t_string","unify"],"struct":["ClassEnv","Constraint","QualType","Scheme","TApp","TCon","TFun","TTuple","TVar","TVarSupply","TypeEnv","UnifyError"],"trait":["Substitutable"],"type":["Subst"]};
