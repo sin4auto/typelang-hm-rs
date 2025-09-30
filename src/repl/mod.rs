@@ -13,6 +13,7 @@
 pub mod cmd;
 mod line_editor;
 mod loader;
+mod pipeline;
 mod printer;
 mod util;
 

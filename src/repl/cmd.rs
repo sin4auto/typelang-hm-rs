@@ -6,16 +6,16 @@
 //! 利用者の入力をコマンドや式として解釈し、型推論と評価パイプラインへ橋渡しする。
 
 use crate::ast as A;
-use crate::evaluator::{eval_expr, initial_env as value_env_init, Value};
-use crate::infer::{infer_expr, initial_class_env, initial_env as type_env_init, InferState};
+use crate::evaluator::{initial_env as value_env_init, Value};
+use crate::infer::{initial_class_env, initial_env as type_env_init};
 use crate::parser::{parse_expr, parse_program};
-use crate::typesys::{
-    apply_defaulting_simple, generalize, pretty_qual, qualify, Substitutable, TCon, TVarSupply,
-    Type,
-};
+use crate::typesys::{generalize, pretty_qual};
 
 use super::line_editor::{LineEditor, ReadResult};
 use super::loader::load_program_into_env;
+use super::pipeline::{
+    eval_expr_for_pipeline, fallback_qual_from_value, fallback_scheme_from_value, infer_qual_type,
+};
 use super::printer::{print_help, print_value};
 use super::util::normalize_expr;
 
@@ -525,31 +525,13 @@ fn type_string_in_current_env(
     defaulting_on: bool,
     value_env: &mut crate::evaluator::Env,
 ) -> Result<String, String> {
-    let mut st = InferState {
-        supply: TVarSupply::new(),
-        subst: Default::default(),
-    };
-    let e = normalize_expr(expr);
-    match infer_expr(type_env, class_env, &mut st, &e) {
-        Ok((s, q)) => {
-            let mut q2 = q.apply_subst(&s);
-            if defaulting_on {
-                q2 = apply_defaulting_simple(&q2);
-            }
-            Ok(pretty_qual(&q2))
-        }
+    let normalized = normalize_expr(expr);
+    match infer_qual_type(type_env, class_env, &normalized, defaulting_on) {
+        Ok(q) => Ok(pretty_qual(&q)),
         Err(_) => {
-            // 推論に失敗したら値を評価して代表的な型名へフォールバックする。
-            let v = eval_expr(&e, value_env).map_err(|e| e.to_string())?;
-            let name = match v {
-                Value::Int(_) => "Int",
-                Value::Double(_) => "Double",
-                Value::Bool(_) => "Bool",
-                Value::Char(_) => "Char",
-                Value::String(_) => "[Char]",
-                _ => "()",
-            };
-            let qt = qualify(Type::TCon(TCon { name: name.into() }), vec![]);
+            let value =
+                eval_expr_for_pipeline(&normalized, value_env).map_err(|e| e.to_string())?;
+            let qt = fallback_qual_from_value(&value);
             Ok(pretty_qual(&qt))
         }
     }
@@ -564,34 +546,19 @@ fn infer_and_generalize_for_repl(
     defaulting_on: bool,
     value_env: &mut crate::evaluator::Env,
 ) -> Result<(crate::typesys::Scheme, Value), String> {
-    let e = normalize_expr(expr);
-    let mut st = InferState {
-        supply: TVarSupply::new(),
-        subst: Default::default(),
-    };
-    match infer_expr(type_env, class_env, &mut st, &e) {
-        Ok((s, q)) => {
-            let mut q2 = q.apply_subst(&s);
-            if defaulting_on {
-                q2 = apply_defaulting_simple(&q2);
-            }
-            let sch = generalize(type_env, q2);
-            let v = eval_expr(&e, value_env).map_err(|e| e.to_string())?;
-            Ok((sch, v))
+    let normalized = normalize_expr(expr);
+    match infer_qual_type(type_env, class_env, &normalized, defaulting_on) {
+        Ok(q) => {
+            let scheme = generalize(type_env, q);
+            let value =
+                eval_expr_for_pipeline(&normalized, value_env).map_err(|e| e.to_string())?;
+            Ok((scheme, value))
         }
         Err(_) => {
-            let v = eval_expr(&e, value_env).map_err(|e| e.to_string())?;
-            let tname = match v {
-                Value::Int(_) => "Int",
-                Value::Double(_) => "Double",
-                Value::Bool(_) => "Bool",
-                Value::Char(_) => "Char",
-                Value::String(_) => "[Char]",
-                _ => "()",
-            };
-            let q = qualify(Type::TCon(TCon { name: tname.into() }), vec![]);
-            let sch = generalize(type_env, q);
-            Ok((sch, v))
+            let value =
+                eval_expr_for_pipeline(&normalized, value_env).map_err(|e| e.to_string())?;
+            let scheme = fallback_scheme_from_value(type_env, &value);
+            Ok((scheme, value))
         }
     }
 }

@@ -229,6 +229,25 @@ fn skip_block_comment(
     ))
 }
 
+/// 単純なトークンをベクタへ追加するヘルパ。
+fn push_simple_token(
+    toks: &mut Vec<Token>,
+    kind: TokenKind,
+    value: &str,
+    pos: usize,
+    line_map: &LineMap,
+    src: &str,
+) {
+    let (line, col) = line_map.locate(src, pos);
+    toks.push(Token {
+        kind,
+        value: value.into(),
+        pos,
+        line,
+        col,
+    });
+}
+
 /// ソースコードを走査し、位置付きトークン列を返す。
 pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
     let mut toks: Vec<Token> = Vec::new();
@@ -265,98 +284,42 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
             if let Some(c2) = next_char(c_next_idx) {
                 match (c, c2) {
                     ('-', '>') => {
-                        let (l, c) = line_map.locate(src, i);
-                        toks.push(Token {
-                            kind: TokenKind::ARROW,
-                            value: "->".into(),
-                            pos: i,
-                            line: l,
-                            col: c,
-                        });
+                        push_simple_token(&mut toks, TokenKind::ARROW, "->", i, &line_map, src);
                         i = c_next_idx + c2.len_utf8();
                         continue;
                     }
                     (':', ':') => {
-                        let (l, c) = line_map.locate(src, i);
-                        toks.push(Token {
-                            kind: TokenKind::DCOLON,
-                            value: "::".into(),
-                            pos: i,
-                            line: l,
-                            col: c,
-                        });
+                        push_simple_token(&mut toks, TokenKind::DCOLON, "::", i, &line_map, src);
                         i = c_next_idx + c2.len_utf8();
                         continue;
                     }
                     ('=', '>') => {
-                        let (l, c) = line_map.locate(src, i);
-                        toks.push(Token {
-                            kind: TokenKind::DARROW,
-                            value: "=>".into(),
-                            pos: i,
-                            line: l,
-                            col: c,
-                        });
+                        push_simple_token(&mut toks, TokenKind::DARROW, "=>", i, &line_map, src);
                         i = c_next_idx + c2.len_utf8();
                         continue;
                     }
                     ('<', '=') => {
-                        let (l, c) = line_map.locate(src, i);
-                        toks.push(Token {
-                            kind: TokenKind::LE,
-                            value: "<=".into(),
-                            pos: i,
-                            line: l,
-                            col: c,
-                        });
+                        push_simple_token(&mut toks, TokenKind::LE, "<=", i, &line_map, src);
                         i = c_next_idx + c2.len_utf8();
                         continue;
                     }
                     ('>', '=') => {
-                        let (l, c) = line_map.locate(src, i);
-                        toks.push(Token {
-                            kind: TokenKind::GE,
-                            value: ">=".into(),
-                            pos: i,
-                            line: l,
-                            col: c,
-                        });
+                        push_simple_token(&mut toks, TokenKind::GE, ">=", i, &line_map, src);
                         i = c_next_idx + c2.len_utf8();
                         continue;
                     }
                     ('=', '=') => {
-                        let (l, c) = line_map.locate(src, i);
-                        toks.push(Token {
-                            kind: TokenKind::EQ,
-                            value: "==".into(),
-                            pos: i,
-                            line: l,
-                            col: c,
-                        });
+                        push_simple_token(&mut toks, TokenKind::EQ, "==", i, &line_map, src);
                         i = c_next_idx + c2.len_utf8();
                         continue;
                     }
                     ('/', '=') => {
-                        let (l, c) = line_map.locate(src, i);
-                        toks.push(Token {
-                            kind: TokenKind::NE,
-                            value: "/=".into(),
-                            pos: i,
-                            line: l,
-                            col: c,
-                        });
+                        push_simple_token(&mut toks, TokenKind::NE, "/=", i, &line_map, src);
                         i = c_next_idx + c2.len_utf8();
                         continue;
                     }
                     ('*', '*') => {
-                        let (l, c) = line_map.locate(src, i);
-                        toks.push(Token {
-                            kind: TokenKind::DBLSTAR,
-                            value: "**".into(),
-                            pos: i,
-                            line: l,
-                            col: c,
-                        });
+                        push_simple_token(&mut toks, TokenKind::DBLSTAR, "**", i, &line_map, src);
                         i = c_next_idx + c2.len_utf8();
                         continue;
                     }
@@ -368,206 +331,87 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
         // 1 文字記号
         match c {
             '\\' => {
-                let (l, c) = line_map.locate(src, i);
-                toks.push(Token {
-                    kind: TokenKind::LAMBDA,
-                    value: "\\".into(),
-                    pos: i,
-                    line: l,
-                    col: c,
-                });
+                push_simple_token(&mut toks, TokenKind::LAMBDA, "\\", i, &line_map, src);
                 i += 1;
                 continue;
             }
             '<' => {
-                let (l, c) = line_map.locate(src, i);
-                toks.push(Token {
-                    kind: TokenKind::LT,
-                    value: "<".into(),
-                    pos: i,
-                    line: l,
-                    col: c,
-                });
+                push_simple_token(&mut toks, TokenKind::LT, "<", i, &line_map, src);
                 i += 1;
                 continue;
             }
             '>' => {
-                let (l, c) = line_map.locate(src, i);
-                toks.push(Token {
-                    kind: TokenKind::GT,
-                    value: ">".into(),
-                    pos: i,
-                    line: l,
-                    col: c,
-                });
+                push_simple_token(&mut toks, TokenKind::GT, ">", i, &line_map, src);
                 i += 1;
                 continue;
             }
             '+' => {
-                let (l, c) = line_map.locate(src, i);
-                toks.push(Token {
-                    kind: TokenKind::PLUS,
-                    value: "+".into(),
-                    pos: i,
-                    line: l,
-                    col: c,
-                });
+                push_simple_token(&mut toks, TokenKind::PLUS, "+", i, &line_map, src);
                 i += 1;
                 continue;
             }
             '-' => {
-                let (l, c) = line_map.locate(src, i);
-                toks.push(Token {
-                    kind: TokenKind::MINUS,
-                    value: "-".into(),
-                    pos: i,
-                    line: l,
-                    col: c,
-                });
+                push_simple_token(&mut toks, TokenKind::MINUS, "-", i, &line_map, src);
                 i += 1;
                 continue;
             }
             '*' => {
-                let (l, c) = line_map.locate(src, i);
-                toks.push(Token {
-                    kind: TokenKind::STAR,
-                    value: "*".into(),
-                    pos: i,
-                    line: l,
-                    col: c,
-                });
+                push_simple_token(&mut toks, TokenKind::STAR, "*", i, &line_map, src);
                 i += 1;
                 continue;
             }
             '/' => {
-                let (l, c) = line_map.locate(src, i);
-                toks.push(Token {
-                    kind: TokenKind::SLASH,
-                    value: "/".into(),
-                    pos: i,
-                    line: l,
-                    col: c,
-                });
+                push_simple_token(&mut toks, TokenKind::SLASH, "/", i, &line_map, src);
                 i += 1;
                 continue;
             }
             '^' => {
-                let (l, c) = line_map.locate(src, i);
-                toks.push(Token {
-                    kind: TokenKind::CARET,
-                    value: "^".into(),
-                    pos: i,
-                    line: l,
-                    col: c,
-                });
+                push_simple_token(&mut toks, TokenKind::CARET, "^", i, &line_map, src);
                 i += 1;
                 continue;
             }
             '(' => {
-                let (l, c) = line_map.locate(src, i);
-                toks.push(Token {
-                    kind: TokenKind::LPAREN,
-                    value: "(".into(),
-                    pos: i,
-                    line: l,
-                    col: c,
-                });
+                push_simple_token(&mut toks, TokenKind::LPAREN, "(", i, &line_map, src);
                 i += 1;
                 continue;
             }
             ')' => {
-                let (l, c) = line_map.locate(src, i);
-                toks.push(Token {
-                    kind: TokenKind::RPAREN,
-                    value: ")".into(),
-                    pos: i,
-                    line: l,
-                    col: c,
-                });
+                push_simple_token(&mut toks, TokenKind::RPAREN, ")", i, &line_map, src);
                 i += 1;
                 continue;
             }
             '[' => {
-                let (l, c) = line_map.locate(src, i);
-                toks.push(Token {
-                    kind: TokenKind::LBRACK,
-                    value: "[".into(),
-                    pos: i,
-                    line: l,
-                    col: c,
-                });
+                push_simple_token(&mut toks, TokenKind::LBRACK, "[", i, &line_map, src);
                 i += 1;
                 continue;
             }
             ']' => {
-                let (l, c) = line_map.locate(src, i);
-                toks.push(Token {
-                    kind: TokenKind::RBRACK,
-                    value: "]".into(),
-                    pos: i,
-                    line: l,
-                    col: c,
-                });
+                push_simple_token(&mut toks, TokenKind::RBRACK, "]", i, &line_map, src);
                 i += 1;
                 continue;
             }
             ',' => {
-                let (l, c) = line_map.locate(src, i);
-                toks.push(Token {
-                    kind: TokenKind::COMMA,
-                    value: ",".into(),
-                    pos: i,
-                    line: l,
-                    col: c,
-                });
+                push_simple_token(&mut toks, TokenKind::COMMA, ",", i, &line_map, src);
                 i += 1;
                 continue;
             }
             ';' => {
-                let (l, c) = line_map.locate(src, i);
-                toks.push(Token {
-                    kind: TokenKind::SEMI,
-                    value: ";".into(),
-                    pos: i,
-                    line: l,
-                    col: c,
-                });
+                push_simple_token(&mut toks, TokenKind::SEMI, ";", i, &line_map, src);
                 i += 1;
                 continue;
             }
             '=' => {
-                let (l, c) = line_map.locate(src, i);
-                toks.push(Token {
-                    kind: TokenKind::EQUAL,
-                    value: "=".into(),
-                    pos: i,
-                    line: l,
-                    col: c,
-                });
+                push_simple_token(&mut toks, TokenKind::EQUAL, "=", i, &line_map, src);
                 i += 1;
                 continue;
             }
             '?' => {
-                let (l, c) = line_map.locate(src, i);
-                toks.push(Token {
-                    kind: TokenKind::QMARK,
-                    value: "?".into(),
-                    pos: i,
-                    line: l,
-                    col: c,
-                });
+                push_simple_token(&mut toks, TokenKind::QMARK, "?", i, &line_map, src);
                 i += 1;
                 continue;
             }
             '_' => {
-                let (l, c) = line_map.locate(src, i);
-                toks.push(Token {
-                    kind: TokenKind::UNDERSCORE,
-                    value: "_".into(),
-                    pos: i,
-                    line: l,
-                    col: c,
-                });
+                push_simple_token(&mut toks, TokenKind::UNDERSCORE, "_", i, &line_map, src);
                 i += 1;
                 continue;
             }
@@ -959,13 +803,6 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
             line_map.line_text(src, l).to_string(),
         ));
     }
-    let (l, c) = line_map.locate(src, n);
-    toks.push(Token {
-        kind: TokenKind::EOF,
-        value: String::new(),
-        pos: n,
-        line: l,
-        col: c,
-    });
+    push_simple_token(&mut toks, TokenKind::EOF, "", n, &line_map, src);
     Ok(toks)
 }

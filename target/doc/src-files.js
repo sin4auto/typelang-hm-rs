@@ -1,2 +1,2 @@
-createSrcSidebar('[["typelang",["",[["repl",[],["cmd.rs","line_editor.rs","loader.rs","mod.rs","printer.rs","util.rs"]]],["ast.rs","errors.rs","evaluator.rs","infer.rs","lexer.rs","lib.rs","parser.rs","primitives.rs","typesys.rs"]]],["typelang_repl",["",[],["typelang.rs"]]]]');
-//{"start":19,"fragment_lengths":[213,42]}
+createSrcSidebar('[["typelang",["",[["repl",[],["cmd.rs","line_editor.rs","loader.rs","mod.rs","pipeline.rs","printer.rs","util.rs"]]],["ast.rs","errors.rs","evaluator.rs","infer.rs","lexer.rs","lib.rs","parser.rs","primitives.rs","typesys.rs"]]],["typelang_repl",["",[],["typelang.rs"]]]]');
+//{"start":19,"fragment_lengths":[227,42]}

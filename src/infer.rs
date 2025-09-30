@@ -195,6 +195,32 @@ struct InferCtx<'a> {
 }
 
 impl<'a> InferCtx<'a> {
+    fn infer_with_subst(
+        &mut self,
+        env: &TypeEnv,
+        subst: &Subst,
+        expr: &A::Expr,
+    ) -> Result<(Subst, QualType), TypeError> {
+        self.run_with_subst(subst.clone(), |ctx| ctx.infer(env, expr))
+    }
+
+    fn run_with_subst<F>(&mut self, new_subst: Subst, f: F) -> Result<(Subst, QualType), TypeError>
+    where
+        F: FnOnce(&mut Self) -> Result<(Subst, QualType), TypeError>,
+    {
+        let previous = std::mem::replace(&mut self.state.subst, new_subst);
+        let result = f(self);
+        match &result {
+            Ok((updated, _)) => {
+                self.state.subst = updated.clone();
+            }
+            Err(_) => {
+                self.state.subst = previous;
+            }
+        }
+        result
+    }
+
     fn infer(&mut self, env: &TypeEnv, expr: &A::Expr) -> Result<(Subst, QualType), TypeError> {
         match expr {
             A::Expr::Var { name } => self.infer_var(env, name),
@@ -269,8 +295,7 @@ impl<'a> InferCtx<'a> {
         let elem = Type::TVar(self.state.supply.fresh());
         let mut s_acc = self.state.subst.clone();
         for item in items {
-            self.state.subst = s_acc.clone();
-            let (s_new, q) = self.infer(env, item)?;
+            let (s_new, q) = self.infer_with_subst(env, &s_acc, item)?;
             s_acc = s_new;
             let s2 = unify(elem.apply_subst(&s_acc), q.r#type.apply_subst(&s_acc))
                 .map_err(|e| TypeError::new(e.code, e.message, None))?;
@@ -288,8 +313,7 @@ impl<'a> InferCtx<'a> {
         let mut s_acc = self.state.subst.clone();
         let mut tys = Vec::with_capacity(items.len());
         for item in items {
-            self.state.subst = s_acc.clone();
-            let (s_new, q) = self.infer(env, item)?;
+            let (s_new, q) = self.infer_with_subst(env, &s_acc, item)?;
             s_acc = s_new;
             tys.push(q.r#type.apply_subst(&s_acc));
         }
@@ -333,8 +357,7 @@ impl<'a> InferCtx<'a> {
             }
         }
 
-        self.state.subst = s_acc.clone();
-        let (s_body, q_body) = self.infer(&env2, body)?;
+        let (s_body, q_body) = self.infer_with_subst(&env2, &s_acc, body)?;
         s_acc = s_body;
         let mut ty = q_body.r#type.clone();
         for arg in arg_tys.iter().rev() {
@@ -366,14 +389,12 @@ impl<'a> InferCtx<'a> {
                     body: Box::new(rhs.clone()),
                 }
             };
-            self.state.subst = s_acc.clone();
-            let (s_new, q_rhs) = self.infer(&env2, &rhs_expr)?;
+            let (s_new, q_rhs) = self.infer_with_subst(&env2, &s_acc, &rhs_expr)?;
             s_acc = s_new;
             let sch = generalize(&env2, q_rhs.apply_subst(&s_acc));
             env2.extend(name.clone(), sch);
         }
-        self.state.subst = s_acc.clone();
-        let (s_body, q_body) = self.infer(&env2, body)?;
+        let (s_body, q_body) = self.infer_with_subst(&env2, &s_acc, body)?;
         s_acc = s_body;
         Ok((s_acc.clone(), q_body.apply_subst(&s_acc)))
     }
@@ -395,12 +416,10 @@ impl<'a> InferCtx<'a> {
         .map_err(|e| TypeError::new(e.code, e.message, None))?;
         let mut s_acc = compose(&s_bool, &s_cond);
 
-        self.state.subst = s_acc.clone();
-        let (s_then, q_then) = self.infer(env, then_branch)?;
+        let (s_then, q_then) = self.infer_with_subst(env, &s_acc, then_branch)?;
         s_acc = s_then;
 
-        self.state.subst = s_acc.clone();
-        let (s_else, q_else) = self.infer(env, else_branch)?;
+        let (s_else, q_else) = self.infer_with_subst(env, &s_acc, else_branch)?;
         s_acc = s_else;
 
         let s_merge = unify(
@@ -429,10 +448,10 @@ impl<'a> InferCtx<'a> {
         func: &A::Expr,
         arg: &A::Expr,
     ) -> Result<(Subst, QualType), TypeError> {
-        let (s_func, q_func) = self.infer(env, func)?;
+        let base_subst = self.state.subst.clone();
+        let (s_func, q_func) = self.infer_with_subst(env, &base_subst, func)?;
         let mut s_acc = s_func;
-        self.state.subst = s_acc.clone();
-        let (s_arg, q_arg) = self.infer(env, arg)?;
+        let (s_arg, q_arg) = self.infer_with_subst(env, &s_acc, arg)?;
         s_acc = s_arg;
         let result_ty = Type::TVar(self.state.supply.fresh());
         let s_fun = unify(

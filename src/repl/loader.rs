@@ -6,10 +6,10 @@
 //! 型推論・既定化・評価の順に処理し、安全に環境へ取り込む。
 
 use crate::ast as A;
-use crate::evaluator::{eval_expr, Value};
-use crate::infer::{infer_expr, type_from_texpr, InferState};
-use crate::typesys::{generalize, unify, Substitutable, TVarSupply};
+use crate::infer::type_from_texpr;
+use crate::typesys::{generalize, unify};
 
+use super::pipeline::{eval_expr_for_pipeline, fallback_scheme_from_value, infer_qual_type};
 use super::util::normalize_expr;
 /// プログラムを型・クラス・値環境へ段階的に取り込む。
 ///
@@ -37,54 +37,30 @@ pub fn load_program_into_env(
             }
         };
         let body = normalize_expr(&orig);
-        let mut st = InferState {
-            supply: TVarSupply::new(),
-            subst: Default::default(),
-        };
-        let (s, q_rhs0) = match infer_expr(&type_env_tmp, class_env, &mut st, &body) {
-            Ok(ok) => ok,
-            Err(_e) => {
-                // 推論が失敗した場合は値を評価し、代表的な型を一般化して登録する。
-                let val = eval_expr(&body, &mut value_env_tmp).map_err(|e2| e2.to_string())?;
-                let sch = generalize(
-                    &type_env_tmp,
-                    crate::typesys::qualify(
-                        crate::typesys::Type::TCon(crate::typesys::TCon {
-                            name: match val {
-                                Value::Int(_) => "Int".into(),
-                                Value::Double(_) => "Double".into(),
-                                Value::Bool(_) => "Bool".into(),
-                                Value::Char(_) => "Char".into(),
-                                Value::String(_) => "[Char]".into(),
-                                _ => "()".into(),
-                            },
-                        }),
-                        vec![],
-                    ),
-                );
+        let should_default = decl.signature.is_none() && decl.params.is_empty();
+        match infer_qual_type(&type_env_tmp, class_env, &body, should_default) {
+            Ok(q_rhs) => {
+                if let Some(sig) = &decl.signature {
+                    let ty_anno = type_from_texpr(&sig.r#type);
+                    unify(q_rhs.r#type.clone(), ty_anno)
+                        .map_err(|e| format!("[{}] {}", e.code, e.message))?;
+                }
+                let sch = generalize(&type_env_tmp, q_rhs);
+                let val =
+                    eval_expr_for_pipeline(&body, &mut value_env_tmp).map_err(|e| e.to_string())?;
                 type_env_tmp.extend(decl.name.clone(), sch);
                 value_env_tmp.insert(decl.name.clone(), val);
                 loaded.push(decl.name.clone());
-                continue;
             }
-        };
-        let q_rhs1 = q_rhs0.apply_subst(&s);
-        let is_fun = matches!(q_rhs1.r#type, crate::typesys::Type::TFun(_));
-        let q_rhs = if decl.signature.is_none() && !is_fun {
-            crate::typesys::apply_defaulting_simple(&q_rhs1)
-        } else {
-            q_rhs1
-        };
-        if let Some(sig) = &decl.signature {
-            let ty_anno = type_from_texpr(&sig.r#type);
-            let _s2 = unify(q_rhs.r#type.clone(), ty_anno)
-                .map_err(|e| format!("[{}] {}", e.code, e.message))?;
+            Err(_) => {
+                let val =
+                    eval_expr_for_pipeline(&body, &mut value_env_tmp).map_err(|e| e.to_string())?;
+                let sch = fallback_scheme_from_value(&type_env_tmp, &val);
+                type_env_tmp.extend(decl.name.clone(), sch);
+                value_env_tmp.insert(decl.name.clone(), val);
+                loaded.push(decl.name.clone());
+            }
         }
-        let sch = generalize(&type_env_tmp, q_rhs.clone());
-        type_env_tmp.extend(decl.name.clone(), sch);
-        let val = eval_expr(&body, &mut value_env_tmp).map_err(|e| e.to_string())?;
-        value_env_tmp.insert(decl.name.clone(), val);
-        loaded.push(decl.name.clone());
     }
     *type_env = type_env_tmp;
     *value_env = value_env_tmp;
