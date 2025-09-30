@@ -86,8 +86,8 @@ bench: ## ベンチ（criterion 想定）
 check: fmt clippy test ## フォーマット＋Lint＋テスト
 	@echo "✅ コードチェック (fmt → clippy → test) 完了"
 
-full_local: add-tools clean fmt clippy test release audit outdated udeps miri doc coverage ## フルローカルビルド
-	@echo "✅ フルローカルビルド (clean → fmt → clippy → test → release → audit → outdated → udeps → miri → doc → coverage) 完了"
+full_local: add-tools clean doc fmt clippy test release audit outdated udeps miri coverage ## フルローカルビルド
+	@echo "✅ フルローカルビルド (clean → doc → fmt → clippy → test → release → audit → outdated → udeps → miri → coverage) 完了"
 
 ci: clean fmt-check clippy ## CI: クリーンビルド + fmt-check + clippy + test + release
 	RUSTFLAGS="-D warnings" cargo test  --workspace --all-features --frozen --locked --verbose
