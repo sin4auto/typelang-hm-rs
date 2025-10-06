@@ -8,6 +8,8 @@
 //! - 初期環境には演算子や `show` などのスキームを登録し、推論時に再利用する。
 //! - `(^)` など特殊挙動を持つ演算子には直感的な型選択（Double へのフォールバック）を提供する。
 
+use std::collections::HashMap;
+
 use crate::ast as A;
 use crate::errors::TypeError;
 use crate::primitives::{PrimitiveKind, PRIMITIVES};
@@ -333,28 +335,16 @@ impl<'a> InferCtx<'a> {
         let mut arg_tys: Vec<Type> = Vec::with_capacity(params.len());
         let mut env2 = env.clone_env();
 
-        for _ in params {
+        for name in params {
             let tv = Type::TVar(self.state.supply.fresh());
             env2.extend(
-                format!("$p{}", arg_tys.len()),
+                name.clone(),
                 Scheme {
                     vars: vec![],
                     qual: qualify(tv.clone(), vec![]),
                 },
             );
             arg_tys.push(tv);
-        }
-
-        for (idx, name) in params.iter().enumerate() {
-            if let Type::TVar(tv) = &arg_tys[idx] {
-                env2.env.insert(
-                    name.clone(),
-                    Scheme {
-                        vars: vec![],
-                        qual: qualify(Type::TVar(tv.clone()), vec![]),
-                    },
-                );
-            }
         }
 
         let (s_body, q_body) = self.infer_with_subst(&env2, &s_acc, body)?;
@@ -548,44 +538,83 @@ impl<'a> InferCtx<'a> {
 
 /// 構文木上の型式を内部の `Type` へ変換する。
 pub fn type_from_texpr(te: &A::TypeExpr) -> Type {
-    match te {
-        A::TypeExpr::TEVar(name) => {
-            let first = name.chars().next().unwrap_or('a');
-            if first.is_ascii_uppercase() {
-                Type::TCon(TCon { name: name.clone() })
-            } else {
-                let id = (hash_str(name) % 1_000_000_000) as i64;
-                Type::TVar(TVar { id })
-            }
+    let mut lowerer = TypeExprLowering::default();
+    lowerer.lower(te)
+}
+
+struct TypeExprLowering {
+    vars: HashMap<String, TVar>,
+    next_id: i64,
+}
+
+impl Default for TypeExprLowering {
+    fn default() -> Self {
+        Self {
+            vars: HashMap::new(),
+            next_id: -1,
         }
-        A::TypeExpr::TECon(name) => {
-            if name == "String" {
-                t_string()
-            } else {
-                Type::TCon(TCon { name: name.clone() })
-            }
-        }
-        A::TypeExpr::TEApp(f, a) => Type::TApp(TApp {
-            func: Box::new(type_from_texpr(f)),
-            arg: Box::new(type_from_texpr(a)),
-        }),
-        A::TypeExpr::TEFun(a, b) => Type::TFun(TFun {
-            arg: Box::new(type_from_texpr(a)),
-            ret: Box::new(type_from_texpr(b)),
-        }),
-        A::TypeExpr::TEList(inner) => t_list(type_from_texpr(inner)),
-        A::TypeExpr::TETuple(items) => Type::TTuple(TTuple {
-            items: items.iter().map(type_from_texpr).collect(),
-        }),
     }
 }
 
-/// 型変数名を安定した整数 ID に写像する。
-fn hash_str(s: &str) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    s.hash(&mut h);
-    h.finish()
+impl TypeExprLowering {
+    fn lower(&mut self, te: &A::TypeExpr) -> Type {
+        match te {
+            A::TypeExpr::TEVar(name) => self.lower_type_var(name),
+            A::TypeExpr::TECon(name) => self.lower_type_con(name),
+            A::TypeExpr::TEApp(f, a) => Type::TApp(TApp {
+                func: Box::new(self.lower(f)),
+                arg: Box::new(self.lower(a)),
+            }),
+            A::TypeExpr::TEFun(a, b) => Type::TFun(TFun {
+                arg: Box::new(self.lower(a)),
+                ret: Box::new(self.lower(b)),
+            }),
+            A::TypeExpr::TEList(inner) => t_list(self.lower(inner)),
+            A::TypeExpr::TETuple(items) => Type::TTuple(TTuple {
+                items: items.iter().map(|it| self.lower(it)).collect(),
+            }),
+        }
+    }
+
+    fn lower_type_var(&mut self, name: &str) -> Type {
+        if is_type_constructor_like(name) {
+            return Type::TCon(TCon {
+                name: name.to_string(),
+            });
+        }
+        let tv = if let Some(tv) = self.vars.get(name) {
+            tv.clone()
+        } else {
+            let fresh = self.fresh_tvar();
+            self.vars.insert(name.to_string(), fresh.clone());
+            fresh
+        };
+        Type::TVar(tv)
+    }
+
+    fn lower_type_con(&mut self, name: &str) -> Type {
+        if name == "String" {
+            t_string()
+        } else {
+            Type::TCon(TCon {
+                name: name.to_string(),
+            })
+        }
+    }
+
+    fn fresh_tvar(&mut self) -> TVar {
+        // 負の ID を払い出し、推論中に生成される 0 以上の ID と衝突しないようにする。
+        let id = self.next_id;
+        self.next_id -= 1;
+        TVar { id }
+    }
+}
+
+fn is_type_constructor_like(name: &str) -> bool {
+    name.chars()
+        .next()
+        .map(|c| c.is_ascii_uppercase())
+        .unwrap_or(false)
 }
 
 /// 単一の式に対する推論結果を文字列表現で返す。

@@ -1,13 +1,17 @@
 // パス: tests/integration.rs
 // 役割: 例題プログラムと REPL ローダーまわりの統合テスト
 // 意図: ドキュメント掲載コードが読み込めることと REPL の失敗経路を保証する
-// 関連ファイル: examples/basics.tl, examples/advanced.tl, src/repl/loader.rs
+// 関連ファイル: examples/basics.tl, examples/advanced.tl, examples/ebnf_blackbox.tl, src/repl/loader.rs
 use typelang::typesys::TypeEnv;
 use typelang::{evaluator, infer, parser};
 
 const BASICS_TL: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/examples/basics.tl"));
 const ADVANCED_TL: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/examples/advanced.tl"));
+const EBNF_BLACKBOX_TL: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/examples/ebnf_blackbox.tl"
+));
 
 /// テキストを解析して型環境・値環境へロードするヘルパ。
 fn load_program(src: &str) -> (TypeEnv, evaluator::Env, Vec<String>) {
@@ -27,6 +31,29 @@ fn load_examples_program_exports_expected_names() {
     let (_tenv, _venv, loaded) = load_program(BASICS_TL);
     assert!(loaded.contains(&"id".to_owned()));
     assert!(loaded.contains(&"square".to_owned()));
+}
+
+#[test]
+#[cfg_attr(
+    miri,
+    ignore = "Miri では examples_ebnf_blackbox.tl の読込時に大量 Clone が発生し、割り込みが必要になるため無効化"
+)]
+/// EBNF ブラックボックス例が主要束縛をエクスポートするか検証する。
+fn examples_ebnf_blackbox_exports_expected_names() {
+    let (_type_env, _value_env, loaded) = load_program(EBNF_BLACKBOX_TL);
+    for name in [
+        "compareTuple",
+        "shiftNum",
+        "collector",
+        "applyTwice",
+        "debugHole",
+    ] {
+        assert!(
+            loaded.iter().any(|export| export == name),
+            "missing export: {}",
+            name
+        );
+    }
 }
 
 #[test]

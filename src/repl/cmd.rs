@@ -11,12 +11,14 @@ use crate::infer::{initial_class_env, initial_env as type_env_init};
 use crate::parser::{parse_expr, parse_program};
 use crate::typesys::{generalize, pretty_qual};
 
+use std::io::{self, Write};
+
 use super::line_editor::{LineEditor, ReadResult};
 use super::loader::load_program_into_env;
 use super::pipeline::{
     eval_expr_for_pipeline, fallback_qual_from_value, fallback_scheme_from_value, infer_qual_type,
 };
-use super::printer::{print_help, print_value};
+use super::printer::{render_help, write_value};
 use super::util::normalize_expr;
 
 /// TypeLang の対話セッションを開始し、ユーザー入力を処理し続ける。
@@ -28,15 +30,58 @@ use super::util::normalize_expr;
 /// # }
 /// ```
 pub fn run_repl() {
-    println!("TypeLang REPL (Rust) :: :t EXPR で型 :: :help でヘルプ");
+    let mut editor = LineEditor::new();
+    let fs = FsIo;
+    let mut stdout = io::stdout();
+    let mut stderr = io::stderr();
+    if let Err(err) = run_repl_with(&mut editor, &fs, &mut stdout, &mut stderr) {
+        let _ = writeln!(stderr, "REPL 実行中にエラーが発生しました: {}", err);
+    }
+}
+
+pub(crate) trait ReplLineSource {
+    fn read_line(&mut self, prompt: &str) -> io::Result<ReadResult>;
+    fn add_history(&mut self, entry: &str);
+    fn save_history(&mut self) -> io::Result<()>;
+}
+
+impl ReplLineSource for LineEditor {
+    fn read_line(&mut self, prompt: &str) -> io::Result<ReadResult> {
+        LineEditor::read_line(self, prompt)
+    }
+
+    fn add_history(&mut self, entry: &str) {
+        LineEditor::add_history(self, entry);
+    }
+
+    fn save_history(&mut self) -> io::Result<()> {
+        LineEditor::save_history(self)
+    }
+}
+
+fn run_repl_with<S, I, W, E>(
+    editor: &mut S,
+    file_io: &I,
+    out: &mut W,
+    err: &mut E,
+) -> io::Result<()>
+where
+    S: ReplLineSource,
+    I: ReplIo,
+    W: Write,
+    E: Write,
+{
+    writeln!(
+        out,
+        "TypeLang REPL (Rust) :: :t EXPR で型 :: :help でヘルプ"
+    )?;
     let mut type_env = type_env_init();
     let class_env = initial_class_env();
     let mut value_env = value_env_init();
     let mut last_loaded_paths: Vec<String> = Vec::new();
-
-    let mut editor = LineEditor::new();
     let mut buffer = String::new();
     let mut defaulting_on = false;
+
     'repl: loop {
         buffer.clear();
         let mut prompt = "> ";
@@ -55,7 +100,7 @@ pub fn run_repl() {
                 }
                 Ok(ReadResult::Eof) => {
                     if first_line && buffer.trim().is_empty() {
-                        println!();
+                        writeln!(out)?;
                         break 'repl;
                     }
                     break buffer.trim().to_string();
@@ -63,8 +108,8 @@ pub fn run_repl() {
                 Ok(ReadResult::Interrupted) => {
                     continue 'repl;
                 }
-                Err(err) => {
-                    eprintln!("入力エラー: {}", err);
+                Err(e) => {
+                    writeln!(err, "入力エラー: {}", e)?;
                     break 'repl;
                 }
             }
@@ -77,10 +122,9 @@ pub fn run_repl() {
 
         editor.add_history(input);
 
-        // コマンド解釈と副作用の実行を明示的に分離する。
         match parse_repl_command(input) {
             ReplCommand::Help => {
-                print_help();
+                render_help(out)?;
                 continue;
             }
             ReplCommand::Quit => break,
@@ -92,27 +136,36 @@ pub fn run_repl() {
                     last_loaded_paths: last_loaded_paths.clone(),
                     defaulting_on,
                 };
-                let fs = FsIo;
-                let msgs = handle_command(&mut state, other, &fs);
-                // 実行結果を既存のセッション状態へ反映する。
+                let msgs = handle_command(&mut state, other, file_io);
                 type_env = state.type_env;
                 value_env = state.value_env;
                 last_loaded_paths = state.last_loaded_paths;
                 defaulting_on = state.defaulting_on;
-                for m in msgs {
-                    match m {
-                        ReplMsg::Out(s) => println!("{}", s),
-                        ReplMsg::Err(s) => eprintln!("{}", s),
-                        ReplMsg::Value(v) => print_value(&v),
-                    }
-                }
+                dispatch_messages(msgs, out, err)?;
             }
         }
     }
 
-    if let Err(err) = editor.save_history() {
-        eprintln!("ヒストリーの保存に失敗しました: {}", err);
+    if let Err(e) = editor.save_history() {
+        writeln!(err, "ヒストリーの保存に失敗しました: {}", e)?;
     }
+
+    Ok(())
+}
+
+fn dispatch_messages<W: Write, E: Write>(
+    msgs: Vec<ReplMsg>,
+    out: &mut W,
+    err: &mut E,
+) -> io::Result<()> {
+    for msg in msgs {
+        match msg {
+            ReplMsg::Out(s) => writeln!(out, "{}", s)?,
+            ReplMsg::Err(s) => writeln!(err, "{}", s)?,
+            ReplMsg::Value(v) => write_value(out, &v)?,
+        }
+    }
+    Ok(())
 }
 
 // 括弧や文字列リテラルの開放状態をざっくり検知して多行入力を判断する。
@@ -565,9 +618,12 @@ fn infer_and_generalize_for_repl(
 
 #[cfg(test)]
 mod tests {
+    use std::io;
+
+    use super::ReadResult;
     use super::{
-        handle_command, needs_more_input, normalize_let_payload, parse_repl_command, ReplCommand,
-        ReplIo, ReplMsg, ReplState,
+        handle_command, needs_more_input, normalize_let_payload, parse_repl_command, run_repl_with,
+        ReplCommand, ReplIo, ReplLineSource, ReplMsg, ReplState,
     };
     use crate::typesys::{qualify, Scheme, TCon, Type, TypeEnv};
     use crate::{evaluator, infer};
@@ -747,6 +803,53 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct ScriptedLineSource {
+        events: std::collections::VecDeque<ScriptEvent>,
+        history: Vec<String>,
+        saved: bool,
+    }
+
+    impl ScriptedLineSource {
+        fn new(events: impl IntoIterator<Item = ScriptEvent>) -> Self {
+            Self {
+                events: events.into_iter().collect(),
+                history: Vec::new(),
+                saved: false,
+            }
+        }
+    }
+
+    enum ScriptEvent {
+        Line(&'static str),
+        Eof,
+    }
+
+    impl ReplLineSource for ScriptedLineSource {
+        fn read_line(&mut self, _prompt: &str) -> io::Result<ReadResult> {
+            match self.events.pop_front().unwrap_or(ScriptEvent::Eof) {
+                ScriptEvent::Line(s) => Ok(ReadResult::Line(s.to_string())),
+                ScriptEvent::Eof => Ok(ReadResult::Eof),
+            }
+        }
+
+        fn add_history(&mut self, entry: &str) {
+            self.history.push(entry.to_string());
+        }
+
+        fn save_history(&mut self) -> io::Result<()> {
+            self.saved = true;
+            Ok(())
+        }
+    }
+
+    fn first_err(msgs: Vec<ReplMsg>) -> Option<String> {
+        msgs.into_iter().find_map(|m| match m {
+            ReplMsg::Err(s) => Some(s),
+            _ => None,
+        })
+    }
+
     #[test]
     /// `:load` と `:reload` の成功パスで状態が更新されるか検証する。
     fn handle_load_success_and_reload_paths() {
@@ -801,6 +904,81 @@ mod tests {
     }
 
     #[test]
+    /// `:reload` が I/O 失敗を取りこぼさず伝搬することを検証する。
+    fn handle_reload_propagates_io_error() {
+        let mut state = mk_state();
+        state.last_loaded_paths.push("mem://missing".into());
+        let io = MapIo(std::collections::HashMap::new());
+        let msgs = handle_command(&mut state, ReplCommand::Reload, &io);
+        let err = first_err(msgs).expect("error response expected");
+        assert!(err.contains("not found"));
+    }
+
+    #[test]
+    /// `:t` のエラーパス (構文エラー / 推論・評価エラー) を網羅する。
+    fn handle_typeof_error_paths() {
+        let mut state = mk_state();
+        let parse_err = handle_command(&mut state, ReplCommand::TypeOf("(1 +".into()), &NoopIo);
+        assert!(
+            first_err(parse_err).unwrap().contains("PAR"),
+            "parser error expected"
+        );
+
+        let infer_err = handle_command(&mut state, ReplCommand::TypeOf("missing".into()), &NoopIo);
+        let msg = first_err(infer_err).unwrap();
+        assert!(msg.contains("未束縛変数"));
+    }
+
+    #[test]
+    /// `:let` や `:load` の失敗が適切にエラーメッセージを返すことを確認する。
+    fn handle_let_and_load_error_paths() {
+        let mut state = mk_state();
+        let msgs = handle_command(&mut state, ReplCommand::Let("let".into()), &NoopIo);
+        assert!(
+            first_err(msgs).unwrap().contains("PAR"),
+            "parse failure expected"
+        );
+
+        let mut map = std::collections::HashMap::new();
+        map.insert("mem://bad".into(), Ok("let".into()));
+        let io = MapIo(map);
+        let msgs = handle_command(&mut state, ReplCommand::Load("mem://bad".into()), &io);
+        assert!(
+            first_err(msgs).unwrap().contains("PAR"),
+            "load parse failure expected"
+        );
+    }
+
+    #[test]
+    /// 評価系コマンドのエラーブランチ (構文・実行時) を網羅する。
+    fn handle_eval_error_paths() {
+        let mut state = mk_state();
+        let parse_err = handle_command(&mut state, ReplCommand::Eval("let".into()), &NoopIo);
+        assert!(
+            first_err(parse_err).unwrap().contains("PAR"),
+            "parse error expected"
+        );
+
+        let runtime_err = handle_command(&mut state, ReplCommand::Eval("missing".into()), &NoopIo);
+        assert!(first_err(runtime_err).unwrap().contains("未束縛変数"));
+    }
+
+    #[test]
+    /// `Invalid` コマンドが標準化されたエラーメッセージを返すことを検証する。
+    fn handle_invalid_command_variant() {
+        let mut state = mk_state();
+        let msgs = handle_command(&mut state, ReplCommand::Invalid("???".into()), &NoopIo);
+        let err = first_err(msgs).unwrap();
+        assert!(err.contains("コマンド形式が不正"));
+    }
+
+    #[test]
+    /// 空入力が空文字列評価コマンドとして扱われることを確認する。
+    fn parse_repl_command_empty_string_is_eval() {
+        assert_eq!(parse_repl_command(""), ReplCommand::Eval(String::new()));
+    }
+
+    #[test]
     /// `:t`・式評価・`:let` が一連のフローとして機能するか確かめる。
     fn handle_typeof_eval_and_let_flow() {
         let mut state = mk_state();
@@ -818,5 +996,34 @@ mod tests {
             .any(|m| matches!(m, ReplMsg::Out(s) if s.contains("Defined two"))));
         assert!(state.value_env.contains_key("two"));
         assert!(state.type_env.lookup("two").is_some());
+    }
+
+    #[test]
+    /// スクリプト駆動で REPL ループ全体を通し、入出力が記録されることを確認する。
+    fn run_repl_with_script_executes_commands() {
+        let events = vec![
+            ScriptEvent::Line(":help"),
+            ScriptEvent::Line(":set default on"),
+            ScriptEvent::Line("(1 +"),
+            ScriptEvent::Line("2)"),
+            ScriptEvent::Line(":browse"),
+            ScriptEvent::Line(":quit"),
+            ScriptEvent::Eof,
+        ];
+        let mut script = ScriptedLineSource::new(events);
+        let io = NoopIo;
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        run_repl_with(&mut script, &io, &mut out, &mut err).unwrap();
+
+        let stdout = String::from_utf8(out).unwrap();
+        assert!(stdout.contains("TypeLang REPL (Rust)"));
+        assert!(stdout.contains("利用可能なコマンド"));
+        assert!(stdout.contains("set default = on"));
+        assert!(stdout.contains("  it ::"));
+        assert!(stdout.contains("3\n"));
+        assert!(script.saved);
+        assert!(script.history.iter().any(|h| h.contains(":set default on")));
+        assert!(err.is_empty());
     }
 }

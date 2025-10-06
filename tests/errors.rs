@@ -4,7 +4,7 @@
 // 関連ファイル: src/errors.rs, src/lexer.rs, src/parser.rs
 use std::fmt::Display;
 
-use typelang::errors::ErrorInfo;
+use typelang::errors::{ErrorInfo, EvalError, LexerError, TypeError};
 use typelang::{infer, lexer, parser, typesys};
 
 /// `ErrorInfo` から生成された文字列表現を検証するヘルパ。
@@ -67,6 +67,22 @@ fn error_display_snippet_column_one() {
         ErrorInfo::at("E005", "caret", Some(5), Some(1), Some(1)).with_snippet("oops"),
         "[E005] caret @line=1,col=1 @pos=5\noops\n^",
     );
+}
+
+#[test]
+/// ラッパー型経由のコンストラクタが `Display` に反映されることを検証する。
+fn error_wrapper_constructors_render_expected_strings() {
+    let lex = LexerError::at_with_snippet("LEX999", "lex", Some(3), Some(2), Some(4), "code");
+    assert_eq!(
+        format!("{}", lex),
+        "[LEX999] lex @line=2,col=4 @pos=3\ncode\n   ^"
+    );
+
+    let ty = TypeError::at("TYPE123", "type", None, Some(5), Some(6));
+    assert_eq!(format!("{}", ty), "[TYPE123] type @line=5,col=6");
+
+    let eval = EvalError::at("EVAL777", "eval", Some(9), None, None);
+    assert_eq!(format!("{}", eval), "[EVAL777] eval @pos=9");
 }
 
 #[test]
