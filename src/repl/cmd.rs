@@ -75,12 +75,8 @@ where
         out,
         "TypeLang REPL (Rust) :: :t EXPR で型 :: :help でヘルプ"
     )?;
-    let mut type_env = type_env_init();
-    let class_env = initial_class_env();
-    let mut value_env = value_env_init();
-    let mut last_loaded_paths: Vec<String> = Vec::new();
+    let mut session = ReplSession::with_defaults();
     let mut buffer = String::new();
-    let mut defaulting_on = false;
 
     'repl: loop {
         buffer.clear();
@@ -129,18 +125,7 @@ where
             }
             ReplCommand::Quit => break,
             other => {
-                let mut state = ReplState {
-                    type_env,
-                    class_env: class_env.clone(),
-                    value_env,
-                    last_loaded_paths: last_loaded_paths.clone(),
-                    defaulting_on,
-                };
-                let msgs = handle_command(&mut state, other, file_io);
-                type_env = state.type_env;
-                value_env = state.value_env;
-                last_loaded_paths = state.last_loaded_paths;
-                defaulting_on = state.defaulting_on;
+                let msgs = handle_command(&mut session, other, file_io);
                 dispatch_messages(msgs, out, err)?;
             }
         }
@@ -220,13 +205,234 @@ fn needs_more_input(src: &str) -> bool {
 }
 
 #[derive(Clone)]
-/// 型・クラス・値環境を束ねて保持する REPL セッションのスナップショット。
-pub(crate) struct ReplState {
+/// REPL の型・クラス・値環境をまとめて保持するセッション管理構造体。
+pub(crate) struct ReplSession {
     pub type_env: crate::typesys::TypeEnv,
     pub class_env: crate::typesys::ClassEnv,
     pub value_env: crate::evaluator::Env,
     pub last_loaded_paths: Vec<String>,
     pub defaulting_on: bool,
+}
+
+impl ReplSession {
+    /// 既定の初期状態でセッションを構築する。
+    pub(crate) fn with_defaults() -> Self {
+        Self::new(type_env_init(), initial_class_env(), value_env_init())
+    }
+
+    /// 既存の環境を引き継いでセッションを構築する。
+    pub(crate) fn new(
+        type_env: crate::typesys::TypeEnv,
+        class_env: crate::typesys::ClassEnv,
+        value_env: crate::evaluator::Env,
+    ) -> Self {
+        Self {
+            type_env,
+            class_env,
+            value_env,
+            last_loaded_paths: Vec::new(),
+            defaulting_on: false,
+        }
+    }
+
+    /// 解釈済みコマンドを実行し、出力メッセージを返す。
+    pub(crate) fn execute<I: ReplIo>(&mut self, cmd: ReplCommand, io: &I) -> Vec<ReplMsg> {
+        use ReplCommand::*;
+        match cmd {
+            TypeOf(src) => self.exec_type_of(&src),
+            Let(src) => self.exec_let(&src),
+            Load(path) => self.exec_load(&path, io),
+            Reload => self.exec_reload(io),
+            Browse(prefix) => self.exec_browse(prefix),
+            SetDefault(on) => self.exec_set_default(on),
+            Unset(name) => self.exec_unset(&name),
+            Eval(src) => self.exec_eval(&src),
+            Help | Quit => Vec::new(),
+            Invalid(s) => vec![ReplMsg::Err(format!(
+                "エラー: コマンド形式が不正です: {}",
+                s
+            ))],
+        }
+    }
+
+    fn exec_type_of(&mut self, src: &str) -> Vec<ReplMsg> {
+        match parse_expr(src) {
+            Ok(expr) => match type_string_in_current_env(
+                &self.type_env,
+                &self.class_env,
+                &expr,
+                self.defaulting_on,
+                &mut self.value_env,
+            ) {
+                Ok(s) => vec![ReplMsg::Out(format!("-- {}", s))],
+                Err(msg) => vec![ReplMsg::Err(msg)],
+            },
+            Err(e) => vec![ReplMsg::Err(format!("{}", e))],
+        }
+    }
+
+    fn exec_let(&mut self, src: &str) -> Vec<ReplMsg> {
+        match self.parse_program_text(src) {
+            Ok(prog) => match self.apply_program(&prog) {
+                Ok(loaded) => {
+                    if loaded.is_empty() {
+                        Vec::new()
+                    } else {
+                        vec![ReplMsg::Out(format!("Defined {}", loaded.join(", ")))]
+                    }
+                }
+                Err(msg) => vec![ReplMsg::Err(msg)],
+            },
+            Err(err) => vec![ReplMsg::Err(err)],
+        }
+    }
+
+    fn exec_load<I: ReplIo>(&mut self, path: &str, io: &I) -> Vec<ReplMsg> {
+        match self.read_and_apply_path(path, io) {
+            Ok(loaded) => {
+                let mut msgs = vec![ReplMsg::Out(format!(
+                    "Loaded {} def(s) from {}",
+                    loaded.len(),
+                    path
+                ))];
+                self.append_signature_summaries(&loaded, &mut msgs);
+                self.record_load_path(path);
+                msgs
+            }
+            Err(err) => vec![ReplMsg::Err(err)],
+        }
+    }
+
+    fn exec_reload<I: ReplIo>(&mut self, io: &I) -> Vec<ReplMsg> {
+        if self.last_loaded_paths.is_empty() {
+            return vec![ReplMsg::Err("エラー: 直近の :load がありません".into())];
+        }
+
+        let mut msgs = Vec::new();
+        for path in self.last_loaded_paths.clone() {
+            match self.read_and_apply_path(&path, io) {
+                Ok(loaded) => msgs.push(ReplMsg::Out(format!(
+                    "Reloaded {} def(s) from {}",
+                    loaded.len(),
+                    path
+                ))),
+                Err(err) => msgs.push(ReplMsg::Err(err)),
+            }
+        }
+        msgs
+    }
+
+    fn exec_browse(&self, prefix: Option<String>) -> Vec<ReplMsg> {
+        let p = prefix.unwrap_or_default();
+        let mut names: Vec<&String> = self
+            .type_env
+            .env
+            .keys()
+            .filter(|n| n.starts_with(&p))
+            .collect();
+        names.sort();
+        if names.is_empty() {
+            return vec![ReplMsg::Out("(定義なし)".into())];
+        }
+        names
+            .into_iter()
+            .map(|n| {
+                if let Some(sch) = self.type_env.lookup(n) {
+                    ReplMsg::Out(format!("  {} :: {}", n, pretty_qual(&sch.qual)))
+                } else {
+                    ReplMsg::Out(format!("  {}", n))
+                }
+            })
+            .collect()
+    }
+
+    fn exec_set_default(&mut self, on: bool) -> Vec<ReplMsg> {
+        self.defaulting_on = on;
+        vec![ReplMsg::Out(format!(
+            "set default = {}",
+            if on { "on" } else { "off" }
+        ))]
+    }
+
+    fn exec_unset(&mut self, name: &str) -> Vec<ReplMsg> {
+        let mut removed = false;
+        if self.type_env.env.remove(name).is_some() {
+            removed = true;
+        }
+        if self.value_env.remove(name).is_some() {
+            removed = true;
+        }
+        if removed {
+            vec![ReplMsg::Out(format!("Unset {}", name))]
+        } else {
+            vec![ReplMsg::Err(format!("エラー: 未定義です: {}", name))]
+        }
+    }
+
+    fn exec_eval(&mut self, src: &str) -> Vec<ReplMsg> {
+        match parse_expr(src) {
+            Ok(expr) => match infer_and_generalize_for_repl(
+                &self.type_env,
+                &self.class_env,
+                &expr,
+                self.defaulting_on,
+                &mut self.value_env,
+            ) {
+                Ok((sch, val)) => {
+                    self.type_env.extend("it", sch);
+                    self.value_env.insert("it".into(), val.clone());
+                    vec![ReplMsg::Value(val)]
+                }
+                Err(msg) => vec![ReplMsg::Err(msg)],
+            },
+            Err(e) => vec![ReplMsg::Err(format!("{}", e))],
+        }
+    }
+
+    fn read_and_apply_path<I: ReplIo>(
+        &mut self,
+        path: &str,
+        io: &I,
+    ) -> Result<Vec<String>, String> {
+        let src = io.read_to_string(path)?;
+        self.apply_program_from_source(&src)
+    }
+
+    fn apply_program_from_source(&mut self, src: &str) -> Result<Vec<String>, String> {
+        let prog = self.parse_program_text(src)?;
+        self.apply_program(&prog)
+    }
+
+    fn parse_program_text(&self, src: &str) -> Result<A::Program, String> {
+        parse_program(src).map_err(|e| format!("{}", e))
+    }
+
+    fn apply_program(&mut self, prog: &A::Program) -> Result<Vec<String>, String> {
+        load_program_into_env(
+            prog,
+            &mut self.type_env,
+            &self.class_env,
+            &mut self.value_env,
+        )
+    }
+
+    fn append_signature_summaries(&self, names: &[String], msgs: &mut Vec<ReplMsg>) {
+        for name in names {
+            if let Some(sch) = self.type_env.lookup(name) {
+                msgs.push(ReplMsg::Out(format!(
+                    "  {} :: {}",
+                    name,
+                    pretty_qual(&sch.qual)
+                )));
+            }
+        }
+    }
+
+    fn record_load_path(&mut self, path: &str) {
+        if !self.last_loaded_paths.iter().any(|p| p == path) {
+            self.last_loaded_paths.push(path.to_string());
+        }
+    }
 }
 
 /// 対話セッションがユーザーへ返す応答メッセージのカテゴリ。
@@ -253,198 +459,13 @@ impl ReplIo for FsIo {
 
 /// 解釈済みの REPL コマンドを適用し、状態と出力メッセージを更新する。
 pub(crate) fn handle_command<I: ReplIo>(
-    state: &mut ReplState,
+    session: &mut ReplSession,
     cmd: ReplCommand,
     io: &I,
 ) -> Vec<ReplMsg> {
-    use ReplCommand::*;
-    match cmd {
-        TypeOf(src) => handle_type_of(state, &src),
-        Let(src) => handle_let(state, &src),
-        Load(path) => handle_load(state, &path, io),
-        Reload => handle_reload(state, io),
-        Browse(prefix) => handle_browse(state, prefix),
-        SetDefault(on) => handle_set_default(state, on),
-        Unset(name) => handle_unset(state, &name),
-        Eval(src) => handle_eval(state, &src),
-        Help | Quit => Vec::new(),
-        Invalid(s) => vec![ReplMsg::Err(format!(
-            "エラー: コマンド形式が不正です: {}",
-            s
-        ))],
-    }
+    session.execute(cmd, io)
 }
 
-fn handle_type_of(state: &mut ReplState, src: &str) -> Vec<ReplMsg> {
-    match parse_expr(src) {
-        Ok(expr) => match type_string_in_current_env(
-            &state.type_env,
-            &state.class_env,
-            &expr,
-            state.defaulting_on,
-            &mut state.value_env,
-        ) {
-            Ok(s) => vec![ReplMsg::Out(format!("-- {}", s))],
-            Err(msg) => vec![ReplMsg::Err(msg)],
-        },
-        Err(e) => vec![ReplMsg::Err(format!("{}", e))],
-    }
-}
-
-fn handle_let(state: &mut ReplState, src: &str) -> Vec<ReplMsg> {
-    match parse_program(src) {
-        Ok(prog) => match apply_program(state, &prog) {
-            Ok(loaded) => {
-                if loaded.is_empty() {
-                    Vec::new()
-                } else {
-                    vec![ReplMsg::Out(format!("Defined {}", loaded.join(", ")))]
-                }
-            }
-            Err(msg) => vec![ReplMsg::Err(msg)],
-        },
-        Err(e) => vec![ReplMsg::Err(format!("{}", e))],
-    }
-}
-
-fn handle_load<I: ReplIo>(state: &mut ReplState, path: &str, io: &I) -> Vec<ReplMsg> {
-    match io.read_to_string(path) {
-        Ok(src) => match parse_program(&src) {
-            Ok(prog) => match apply_program(state, &prog) {
-                Ok(loaded) => {
-                    let mut msgs = vec![ReplMsg::Out(format!(
-                        "Loaded {} def(s) from {}",
-                        loaded.len(),
-                        path
-                    ))];
-                    append_signature_summaries(state, &loaded, &mut msgs);
-                    if !state.last_loaded_paths.iter().any(|p| p == path) {
-                        state.last_loaded_paths.push(path.to_string());
-                    }
-                    msgs
-                }
-                Err(msg) => vec![ReplMsg::Err(msg)],
-            },
-            Err(e) => vec![ReplMsg::Err(format!("{}", e))],
-        },
-        Err(e) => vec![ReplMsg::Err(e)],
-    }
-}
-
-fn handle_reload<I: ReplIo>(state: &mut ReplState, io: &I) -> Vec<ReplMsg> {
-    if state.last_loaded_paths.is_empty() {
-        return vec![ReplMsg::Err("エラー: 直近の :load がありません".into())];
-    }
-
-    let mut msgs = Vec::new();
-    let paths = state.last_loaded_paths.clone();
-    for path in paths {
-        match io.read_to_string(&path) {
-            Ok(src) => match parse_program(&src) {
-                Ok(prog) => match apply_program(state, &prog) {
-                    Ok(loaded) => msgs.push(ReplMsg::Out(format!(
-                        "Reloaded {} def(s) from {}",
-                        loaded.len(),
-                        path
-                    ))),
-                    Err(msg) => msgs.push(ReplMsg::Err(msg)),
-                },
-                Err(e) => msgs.push(ReplMsg::Err(format!("{}", e))),
-            },
-            Err(e) => msgs.push(ReplMsg::Err(e)),
-        }
-    }
-    msgs
-}
-
-fn handle_browse(state: &ReplState, prefix: Option<String>) -> Vec<ReplMsg> {
-    let p = prefix.unwrap_or_default();
-    let mut names: Vec<&String> = state
-        .type_env
-        .env
-        .keys()
-        .filter(|n| n.starts_with(&p))
-        .collect();
-    names.sort();
-    if names.is_empty() {
-        return vec![ReplMsg::Out("(定義なし)".into())];
-    }
-
-    names
-        .into_iter()
-        .map(|n| {
-            if let Some(sch) = state.type_env.lookup(n) {
-                ReplMsg::Out(format!("  {} :: {}", n, pretty_qual(&sch.qual)))
-            } else {
-                ReplMsg::Out(format!("  {}", n))
-            }
-        })
-        .collect()
-}
-
-fn handle_set_default(state: &mut ReplState, on: bool) -> Vec<ReplMsg> {
-    state.defaulting_on = on;
-    vec![ReplMsg::Out(format!(
-        "set default = {}",
-        if on { "on" } else { "off" }
-    ))]
-}
-
-fn handle_unset(state: &mut ReplState, name: &str) -> Vec<ReplMsg> {
-    let mut removed = false;
-    if state.type_env.env.remove(name).is_some() {
-        removed = true;
-    }
-    if state.value_env.remove(name).is_some() {
-        removed = true;
-    }
-    if removed {
-        vec![ReplMsg::Out(format!("Unset {}", name))]
-    } else {
-        vec![ReplMsg::Err(format!("エラー: 未定義です: {}", name))]
-    }
-}
-
-fn handle_eval(state: &mut ReplState, src: &str) -> Vec<ReplMsg> {
-    match parse_expr(src) {
-        Ok(expr) => match infer_and_generalize_for_repl(
-            &state.type_env,
-            &state.class_env,
-            &expr,
-            state.defaulting_on,
-            &mut state.value_env,
-        ) {
-            Ok((sch, val)) => {
-                state.type_env.extend("it", sch);
-                state.value_env.insert("it".into(), val.clone());
-                vec![ReplMsg::Value(val)]
-            }
-            Err(msg) => vec![ReplMsg::Err(msg)],
-        },
-        Err(e) => vec![ReplMsg::Err(format!("{}", e))],
-    }
-}
-
-fn append_signature_summaries(state: &ReplState, names: &[String], msgs: &mut Vec<ReplMsg>) {
-    for name in names {
-        if let Some(sch) = state.type_env.lookup(name) {
-            msgs.push(ReplMsg::Out(format!(
-                "  {} :: {}",
-                name,
-                pretty_qual(&sch.qual)
-            )));
-        }
-    }
-}
-
-fn apply_program(state: &mut ReplState, prog: &A::Program) -> Result<Vec<String>, String> {
-    load_program_into_env(
-        prog,
-        &mut state.type_env,
-        &state.class_env,
-        &mut state.value_env,
-    )
-}
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 /// REPL が解釈できるトップレベルコマンドの集合。
@@ -623,7 +644,7 @@ mod tests {
     use super::ReadResult;
     use super::{
         handle_command, needs_more_input, normalize_let_payload, parse_repl_command, run_repl_with,
-        ReplCommand, ReplIo, ReplLineSource, ReplMsg, ReplState,
+        ReplCommand, ReplIo, ReplLineSource, ReplMsg, ReplSession,
     };
     use crate::typesys::{qualify, Scheme, TCon, Type, TypeEnv};
     use crate::{evaluator, infer};
@@ -731,14 +752,12 @@ mod tests {
     }
 
     /// テスト実行時に利用する空の REPL 状態を生成する。
-    fn mk_state() -> ReplState {
-        ReplState {
-            type_env: TypeEnv::new(),
-            class_env: infer::initial_class_env(),
-            value_env: evaluator::initial_env(),
-            last_loaded_paths: vec![],
-            defaulting_on: false,
-        }
+    fn mk_state() -> ReplSession {
+        ReplSession::new(
+            TypeEnv::new(),
+            infer::initial_class_env(),
+            evaluator::initial_env(),
+        )
     }
 
     #[test]
