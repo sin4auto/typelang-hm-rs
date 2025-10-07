@@ -200,9 +200,92 @@ fn expr_display_variants_render_expected_strings() {
             },
             "(x :: TECon(\"Int\"))",
         ),
+        (
+            Expr::Case {
+                scrutinee: Box::new(Expr::Var {
+                    name: "value".into(),
+                    span: Span::new(10, 1, 11),
+                }),
+                arms: vec![
+                    typelang::ast::CaseArm {
+                        pattern: typelang::ast::Pattern::Constructor {
+                            name: "Just".into(),
+                            args: vec![typelang::ast::Pattern::Var {
+                                name: "x".into(),
+                                span: Span::new(11, 1, 12),
+                            }],
+                            span: Span::new(10, 1, 11),
+                        },
+                        body: Expr::Var {
+                            name: "x".into(),
+                            span: Span::new(11, 1, 12),
+                        },
+                    },
+                    typelang::ast::CaseArm {
+                        pattern: typelang::ast::Pattern::Wildcard {
+                            span: Span::new(12, 1, 13),
+                        },
+                        body: Expr::IntLit {
+                            value: 0,
+                            base: IntBase::Dec,
+                            span: Span::new(12, 1, 13),
+                        },
+                    },
+                ],
+                span: Span::dummy(),
+            },
+            "case value of Just x -> x; _ -> 0",
+        ),
     ];
 
     for (expr, expected) in cases {
         assert_fmt(expr, expected);
     }
+}
+
+#[test]
+/// Pattern::Display と span アクセサを広く網羅する。
+fn pattern_display_and_span_metadata() {
+    use typelang::ast::Pattern;
+
+    let wildcard = Pattern::Wildcard {
+        span: Span::new(1, 1, 1),
+    };
+    assert_eq!(format!("{}", wildcard), "_");
+    assert_eq!(wildcard.span(), Span::new(1, 1, 1));
+
+    let constructor = Pattern::Constructor {
+        name: "Pair".into(),
+        args: vec![
+            Pattern::Int {
+                value: 1,
+                base: IntBase::Dec,
+                span: Span::new(2, 1, 2),
+            },
+            Pattern::Var {
+                name: "y".into(),
+                span: Span::new(3, 1, 3),
+            },
+        ],
+        span: Span::new(2, 1, 2),
+    };
+    assert_eq!(format!("{}", constructor), "Pair 1 y");
+    assert_eq!(constructor.span(), Span::new(2, 1, 2));
+
+    let expr = Expr::If {
+        cond: Box::new(Expr::BoolLit {
+            value: true,
+            span: Span::new(4, 1, 4),
+        }),
+        then_branch: Box::new(Expr::Var {
+            name: "x".into(),
+            span: Span::new(5, 1, 5),
+        }),
+        else_branch: Box::new(Expr::Var {
+            name: "y".into(),
+            span: Span::new(6, 1, 6),
+        }),
+        span: Span::new(4, 1, 4),
+    };
+    assert_eq!(expr.span(), Span::new(4, 1, 4));
 }

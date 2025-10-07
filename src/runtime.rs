@@ -367,3 +367,151 @@ pub fn make_data_ctor(name: &str, arity: usize) -> Value {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn err_code(result: Result<Value, EvalError>) -> Option<&'static str> {
+        result.err().map(|e| e.0.code)
+    }
+
+    #[test]
+    fn primop_variants_apply_and_wrap_values() {
+        let show = PrimOp::unary(py_show);
+        let displayed = show.clone().apply(Value::Int(7)).expect("py_show succeeds");
+        match displayed {
+            Value::String(s) => assert_eq!(s, "7"),
+            other => panic!("expected string from show, got {:?}", other),
+        }
+
+        let plus = PrimOp::binary(add_op);
+        let partially_applied = plus
+            .clone()
+            .apply(Value::Int(10))
+            .expect("partial application succeeds");
+        let second = match partially_applied {
+            Value::Prim(op) => op,
+            other => panic!("expected Prim after partial application, got {:?}", other),
+        };
+        let total = second.apply(Value::Int(32)).expect("apply second argument");
+        assert!(matches!(total, Value::Int(42)));
+
+        let ctor = PrimOp::DataCtor {
+            name: "Pair".into(),
+            arity: 2,
+            collected: Vec::new(),
+        };
+        let first = ctor.clone().apply(Value::Int(1)).expect("first arg");
+        let data = match first {
+            Value::Prim(op) => op.apply(Value::Int(2)).expect("second arg"),
+            other => panic!("expected Prim from first ctor apply, got {:?}", other),
+        };
+        match data {
+            Value::Data {
+                constructor,
+                fields,
+            } => {
+                assert_eq!(constructor, "Pair");
+                assert_eq!(fields.len(), 2);
+                assert!(matches!(fields[0], Value::Int(1)));
+                assert!(matches!(fields[1], Value::Int(2)));
+            }
+            other => panic!("constructor should yield data, got {:?}", other),
+        }
+
+        let prim_value = PrimOp::binary(sub_op).into_value();
+        match prim_value {
+            Value::Prim(op) => {
+                let value = op.to_value();
+                assert!(matches!(value, Value::Prim(_)));
+            }
+            other => panic!("PrimOp::into_value must return Prim, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn py_show_formats_data_and_reports_errors() {
+        let value = Value::Data {
+            constructor: "Just".into(),
+            fields: vec![Value::Int(5)],
+        };
+        let rendered = py_show(value).expect("show Just 5");
+        assert!(matches!(rendered, Value::String(s) if s == "Just 5"));
+
+        let unsupported = Value::List(vec![Value::Prim(PrimOp::binary(add_op))]);
+        let err = py_show(unsupported).expect_err("show should fail on unsupported list");
+        assert_eq!(err.0.code, "EVAL050");
+    }
+
+    #[test]
+    fn arithmetic_helpers_cover_success_and_failure_paths() {
+        assert!(matches!(
+            add_op(Value::Int(1), Value::Int(2)).unwrap(),
+            Value::Int(3)
+        ));
+        assert!(
+            matches!(div_op(Value::Int(8), Value::Int(4)).unwrap(), Value::Double(d) if (d - 2.0).abs() < 1e-12)
+        );
+
+        let bad = add_op(Value::Bool(true), Value::Int(1));
+        assert_eq!(err_code(bad), Some("EVAL050"));
+
+        let div_zero = div_int_op(Value::Int(1), Value::Int(0));
+        assert_eq!(err_code(div_zero), Some("EVAL061"));
+        let mod_zero = mod_int_op(Value::Int(1), Value::Int(0));
+        assert_eq!(err_code(mod_zero), Some("EVAL061"));
+
+        let pow_large = powi(Value::Int(2), Value::Int(16));
+        assert!(pow_large.is_ok(), "small exponent stays in range");
+        let pow_error = powi(Value::Int(2), Value::Int((u32::MAX as i64) + 1));
+        assert_eq!(err_code(pow_error), Some("EVAL060"));
+    }
+
+    #[test]
+    fn comparison_helpers_cover_mismatch_and_nan_cases() {
+        let eq_true = eq_op(Value::Int(1), Value::Int(1)).unwrap();
+        assert!(matches!(eq_true, Value::Bool(true)));
+        let eq_false = eq_op(Value::Int(1), Value::Int(2)).unwrap();
+        assert!(matches!(eq_false, Value::Bool(false)));
+
+        let mismatch = eq_op(Value::Int(1), Value::String("x".into()));
+        assert_eq!(err_code(mismatch), Some("EVAL050"));
+
+        let nan_compare = lt_op(Value::Double(f64::NAN), Value::Double(0.0));
+        assert_eq!(err_code(nan_compare), Some("EVAL090"));
+    }
+
+    #[test]
+    fn make_data_ctor_returns_immediate_or_curried_value() {
+        match make_data_ctor("Unit", 0) {
+            Value::Data {
+                constructor,
+                fields,
+            } => {
+                assert_eq!(constructor, "Unit");
+                assert!(fields.is_empty());
+            }
+            other => panic!(
+                "zero arity ctor should yield Data immediately, got {:?}",
+                other
+            ),
+        }
+
+        match make_data_ctor("Pair", 2) {
+            Value::Prim(op) => {
+                let mid = op.clone().apply(Value::Int(1)).expect("first arg");
+                let final_value = match mid {
+                    Value::Prim(op2) => op2.apply(Value::Int(2)).expect("second arg"),
+                    other => panic!("expected Prim after first apply, got {:?}", other),
+                };
+                if let Value::Data { fields, .. } = final_value {
+                    assert_eq!(fields.len(), 2);
+                } else {
+                    panic!("expected Pair data after applications");
+                }
+            }
+            other => panic!("curried ctor should start as Prim, got {:?}", other),
+        }
+    }
+}
