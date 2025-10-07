@@ -11,60 +11,98 @@
 
 use std::fmt;
 
+/// ソース上の位置情報を保持する軽量な構造体。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Span {
+    pub pos: usize,
+    pub line: usize,
+    pub col: usize,
+}
+
+impl Span {
+    /// スパンを明示指定して構築する。
+    pub const fn new(pos: usize, line: usize, col: usize) -> Self {
+        Self { pos, line, col }
+    }
+
+    /// 位置情報が未収集の場合に利用するダミー値。
+    pub const fn dummy() -> Self {
+        Self {
+            pos: 0,
+            line: 0,
+            col: 0,
+        }
+    }
+}
+
 // 式を構成する列挙体
 #[derive(Clone, Debug, PartialEq)]
 /// 言語内の式を表す AST ノードの集合。
 pub enum Expr {
     Var {
         name: String,
+        span: Span,
     },
     IntLit {
         value: i64,
         base: IntBase,
+        span: Span,
     },
     FloatLit {
         value: f64,
+        span: Span,
     },
     CharLit {
         value: char,
+        span: Span,
     },
     StringLit {
         value: String,
+        span: Span,
     },
     BoolLit {
         value: bool,
+        span: Span,
     },
     ListLit {
         items: Vec<Expr>,
+        span: Span,
     },
     TupleLit {
         items: Vec<Expr>,
+        span: Span,
     },
     Lambda {
         params: Vec<String>,
         body: Box<Expr>,
+        span: Span,
     },
     LetIn {
         bindings: Vec<(String, Vec<String>, Expr)>,
         body: Box<Expr>,
+        span: Span,
     },
     If {
         cond: Box<Expr>,
         then_branch: Box<Expr>,
         else_branch: Box<Expr>,
+        span: Span,
     },
     App {
         func: Box<Expr>,
         arg: Box<Expr>,
+        span: Span,
     },
     BinOp {
         op: String,
         left: Box<Expr>,
         right: Box<Expr>,
+        span: Span,
     },
     Annot {
         expr: Box<Expr>,
         type_expr: TypeExpr,
+        span: Span,
     },
 }
 
@@ -125,22 +163,22 @@ impl fmt::Display for Expr {
     /// デバッグしやすい括弧付きの表記に変換する。
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Expr::Var { name } => write!(f, "{name}"),
+            Expr::Var { name, .. } => write!(f, "{name}"),
             Expr::IntLit { value, .. } => write!(f, "{value}"),
-            Expr::FloatLit { value } => write!(f, "{value}"),
-            Expr::CharLit { value } => write!(f, "'{value}'"),
-            Expr::StringLit { value } => write!(f, "\"{value}\""),
-            Expr::BoolLit { value } => write!(f, "{}", if *value { "True" } else { "False" }),
-            Expr::ListLit { items } => {
+            Expr::FloatLit { value, .. } => write!(f, "{value}"),
+            Expr::CharLit { value, .. } => write!(f, "'{value}'"),
+            Expr::StringLit { value, .. } => write!(f, "\"{value}\""),
+            Expr::BoolLit { value, .. } => write!(f, "{}", if *value { "True" } else { "False" }),
+            Expr::ListLit { items, .. } => {
                 let parts: Vec<String> = items.iter().map(|e| format!("{}", e)).collect();
                 write!(f, "[{}]", parts.join(", "))
             }
-            Expr::TupleLit { items } => {
+            Expr::TupleLit { items, .. } => {
                 let parts: Vec<String> = items.iter().map(|e| format!("{}", e)).collect();
                 write!(f, "({})", parts.join(", "))
             }
-            Expr::Lambda { params, body } => write!(f, "\\{} -> {}", params.join(" "), body),
-            Expr::LetIn { bindings, body } => {
+            Expr::Lambda { params, body, .. } => write!(f, "\\{} -> {}", params.join(" "), body),
+            Expr::LetIn { bindings, body, .. } => {
                 let mut parts = Vec::new();
                 for (n, ps, e) in bindings {
                     if ps.is_empty() {
@@ -155,12 +193,39 @@ impl fmt::Display for Expr {
                 cond,
                 then_branch,
                 else_branch,
+                ..
             } => {
                 write!(f, "if {} then {} else {}", cond, then_branch, else_branch)
             }
-            Expr::App { func, arg } => write!(f, "({} {})", func, arg),
-            Expr::BinOp { op, left, right } => write!(f, "({} {} {})", left, op, right),
-            Expr::Annot { expr, type_expr } => write!(f, "({} :: {:?})", expr, type_expr),
+            Expr::App { func, arg, .. } => write!(f, "({} {})", func, arg),
+            Expr::BinOp {
+                op, left, right, ..
+            } => write!(f, "({} {} {})", left, op, right),
+            Expr::Annot {
+                expr, type_expr, ..
+            } => write!(f, "({} :: {:?})", expr, type_expr),
+        }
+    }
+}
+
+impl Expr {
+    /// 現在の式に紐づく開始位置を返す。
+    pub fn span(&self) -> Span {
+        match self {
+            Expr::Var { span, .. }
+            | Expr::IntLit { span, .. }
+            | Expr::FloatLit { span, .. }
+            | Expr::CharLit { span, .. }
+            | Expr::StringLit { span, .. }
+            | Expr::BoolLit { span, .. }
+            | Expr::ListLit { span, .. }
+            | Expr::TupleLit { span, .. }
+            | Expr::Lambda { span, .. }
+            | Expr::LetIn { span, .. }
+            | Expr::If { span, .. }
+            | Expr::App { span, .. }
+            | Expr::BinOp { span, .. }
+            | Expr::Annot { span, .. } => *span,
         }
     }
 }

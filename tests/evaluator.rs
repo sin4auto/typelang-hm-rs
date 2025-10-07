@@ -6,7 +6,7 @@
 mod support;
 
 use support::{approx_eq, eval_result, eval_value};
-use typelang::ast::{Expr, IntBase};
+use typelang::ast::{Expr, IntBase, Span};
 use typelang::errors::EvalError;
 use typelang::evaluator::{self, Value};
 
@@ -170,11 +170,16 @@ fn evaluator_smoke_suite() {
 
     // PrimOp 部分適用を AST 直接指定で検証する。
     let partial_expr = Expr::App {
-        func: Box::new(Expr::Var { name: "+".into() }),
+        func: Box::new(Expr::Var {
+            name: "+".into(),
+            span: Span::dummy(),
+        }),
         arg: Box::new(Expr::IntLit {
             value: 1,
             base: IntBase::Dec,
+            span: Span::dummy(),
         }),
+        span: Span::dummy(),
     };
     let mut env = evaluator::initial_env();
     let partial = evaluator::eval_expr(&partial_expr, &mut env).expect("partial eval");
@@ -187,11 +192,16 @@ fn evaluator_smoke_suite() {
     }
 
     let eq_partial_expr = Expr::App {
-        func: Box::new(Expr::Var { name: "==".into() }),
+        func: Box::new(Expr::Var {
+            name: "==".into(),
+            span: Span::dummy(),
+        }),
         arg: Box::new(Expr::IntLit {
             value: 2,
             base: IntBase::Dec,
+            span: Span::dummy(),
         }),
+        span: Span::dummy(),
     };
     let mut env = evaluator::initial_env();
     let eq_partial = evaluator::eval_expr(&eq_partial_expr, &mut env).expect("eq partial eval");
@@ -206,4 +216,23 @@ fn evaluator_smoke_suite() {
         },
         other => panic!("partial equality should yield Prim, got {:?}", other),
     }
+}
+
+#[test]
+/// 実行時エラーに位置情報とスタックトレースが含まれることを検証する。
+fn eval_error_reports_stack_with_location() {
+    let err = eval_result("1 2").expect_err("非関数適用エラー");
+    let rendered = err.to_string();
+    assert!(
+        rendered.contains("@line=1"),
+        "line metadata missing: {rendered}"
+    );
+    assert!(
+        rendered.contains("Stack trace:"),
+        "stack trace missing: {rendered}"
+    );
+    assert!(
+        rendered.contains("(1 2)"),
+        "stack summary missing expression: {rendered}"
+    );
 }

@@ -20,6 +20,33 @@ pub struct ErrorInfo {
     pub line: Option<usize>,     // 1 始まりの行番号
     pub col: Option<usize>,      // 1 始まりの列番号
     pub snippet: Option<String>, // 問題行の抜粋文字列
+    pub stack: Vec<FrameInfo>,   // スタックトレース情報
+}
+
+#[derive(Debug, Clone)]
+/// 評価や解析の呼び出し位置を表現する 1 フレーム分の情報。
+pub struct FrameInfo {
+    pub summary: String,
+    pub pos: Option<usize>,
+    pub line: Option<usize>,
+    pub col: Option<usize>,
+}
+
+impl FrameInfo {
+    /// 表示用のサマリと位置を指定してフレームを生成する。
+    pub fn new(
+        summary: impl Into<String>,
+        pos: Option<usize>,
+        line: Option<usize>,
+        col: Option<usize>,
+    ) -> Self {
+        Self {
+            summary: summary.into(),
+            pos,
+            line,
+            col,
+        }
+    }
 }
 
 /// `ErrorInfo` 生成を簡潔にするためのファクトリ群。
@@ -33,6 +60,7 @@ impl ErrorInfo {
             line: None,
             col: None,
             snippet: None,
+            stack: Vec::new(),
         }
     }
     /// 行・列などの位置情報を付与してエラー情報を構築する。
@@ -50,12 +78,39 @@ impl ErrorInfo {
             line,
             col,
             snippet: None,
+            stack: Vec::new(),
         }
     }
     /// エラー周辺の抜粋を追加してチェーン可能にする。
     pub fn with_snippet(mut self, snippet: impl Into<String>) -> Self {
         self.snippet = Some(snippet.into());
         self
+    }
+    /// フレームを追加してチェーン可能にする。
+    pub fn with_frame(mut self, frame: FrameInfo) -> Self {
+        self.stack.push(frame);
+        self
+    }
+    /// スタックへフレームを後置する。
+    pub fn push_frame(&mut self, frame: FrameInfo) {
+        self.stack.push(frame);
+    }
+    /// 既存の位置が未設定なら指定値で埋める。
+    pub fn fill_position_if_absent(
+        &mut self,
+        pos: Option<usize>,
+        line: Option<usize>,
+        col: Option<usize>,
+    ) {
+        if self.pos.is_none() {
+            self.pos = pos;
+        }
+        if self.line.is_none() {
+            self.line = line;
+        }
+        if self.col.is_none() {
+            self.col = col;
+        }
     }
 }
 
@@ -85,18 +140,33 @@ impl Display for ErrorInfo {
             };
             write!(f, "\n{}\n{}", s, caret)?;
         }
+        if !self.stack.is_empty() {
+            write!(f, "\nStack trace:")?;
+            for frame in self.stack.iter().rev() {
+                write!(f, "\n  at {}", frame.summary)?;
+                match (frame.line, frame.col, frame.pos) {
+                    (Some(l), Some(c), Some(p)) => {
+                        write!(f, " (line {}, col {}, pos {})", l, c, p)?
+                    }
+                    (Some(l), Some(c), None) => write!(f, " (line {}, col {})", l, c)?,
+                    (Some(l), None, _) => write!(f, " (line {})", l)?,
+                    (_, _, Some(p)) => write!(f, " (pos {})", p)?,
+                    _ => {}
+                }
+            }
+        }
         Ok(())
     }
 }
 
 #[derive(Debug, Clone)]
 /// 字句解析で報告されるエラー型。
-pub struct LexerError(pub ErrorInfo);
+pub struct LexerError(pub Box<ErrorInfo>);
 /// `LexerError` を生成するためのラッパー関数群。
 impl LexerError {
     /// コードと位置を指定して字句解析エラーを作成する。
     pub fn new(code: &'static str, msg: impl Into<String>, pos: Option<usize>) -> Self {
-        Self(ErrorInfo::new(code, msg, pos))
+        Self(Box::new(ErrorInfo::new(code, msg, pos)))
     }
     /// 行・列を含めた字句解析エラーを作成する。
     pub fn at(
@@ -106,7 +176,7 @@ impl LexerError {
         line: Option<usize>,
         col: Option<usize>,
     ) -> Self {
-        Self(ErrorInfo::at(code, msg, pos, line, col))
+        Self(Box::new(ErrorInfo::at(code, msg, pos, line, col)))
     }
     /// スニペット付きの字句解析エラーを作成する。
     pub fn at_with_snippet(
@@ -117,18 +187,20 @@ impl LexerError {
         col: Option<usize>,
         snippet: impl Into<String>,
     ) -> Self {
-        Self(ErrorInfo::at(code, msg, pos, line, col).with_snippet(snippet))
+        Self(Box::new(
+            ErrorInfo::at(code, msg, pos, line, col).with_snippet(snippet),
+        ))
     }
 }
 
 #[derive(Debug, Clone)]
 /// 構文解析で用いるエラー型。
-pub struct ParseError(pub ErrorInfo);
+pub struct ParseError(pub Box<ErrorInfo>);
 /// `ParseError` を構築するヘルパーメソッド集。
 impl ParseError {
     /// コードと本文だけで構文解析エラーを作成する。
     pub fn new(code: &'static str, msg: impl Into<String>, pos: Option<usize>) -> Self {
-        Self(ErrorInfo::new(code, msg, pos))
+        Self(Box::new(ErrorInfo::new(code, msg, pos)))
     }
     /// 位置情報付きの構文解析エラーを作成する。
     pub fn at(
@@ -138,18 +210,18 @@ impl ParseError {
         line: Option<usize>,
         col: Option<usize>,
     ) -> Self {
-        Self(ErrorInfo::at(code, msg, pos, line, col))
+        Self(Box::new(ErrorInfo::at(code, msg, pos, line, col)))
     }
 }
 
 #[derive(Debug, Clone)]
 /// 型推論や型検査で利用するエラー型。
-pub struct TypeError(pub ErrorInfo);
+pub struct TypeError(pub Box<ErrorInfo>);
 /// `TypeError` 向けの生成ショートカット。
 impl TypeError {
     /// コードのみを指定して型エラーを作成する。
     pub fn new(code: &'static str, msg: impl Into<String>, pos: Option<usize>) -> Self {
-        Self(ErrorInfo::new(code, msg, pos))
+        Self(Box::new(ErrorInfo::new(code, msg, pos)))
     }
     /// 位置情報付きの型エラーを作成する。
     pub fn at(
@@ -159,7 +231,7 @@ impl TypeError {
         line: Option<usize>,
         col: Option<usize>,
     ) -> Self {
-        Self(ErrorInfo::at(code, msg, pos, line, col))
+        Self(Box::new(ErrorInfo::at(code, msg, pos, line, col)))
     }
     /// スニペットを添えて型エラーを作成する。
     pub fn at_with_snippet(
@@ -170,18 +242,20 @@ impl TypeError {
         col: Option<usize>,
         snippet: impl Into<String>,
     ) -> Self {
-        Self(ErrorInfo::at(code, msg, pos, line, col).with_snippet(snippet))
+        Self(Box::new(
+            ErrorInfo::at(code, msg, pos, line, col).with_snippet(snippet),
+        ))
     }
 }
 
 #[derive(Debug, Clone)]
 /// 評価器で発生するエラー型。
-pub struct EvalError(pub ErrorInfo);
+pub struct EvalError(pub Box<ErrorInfo>);
 /// `EvalError` を作成するヘルパメソッド。
 impl EvalError {
     /// 評価時の汎用エラーを作成する。
     pub fn new(code: &'static str, msg: impl Into<String>, pos: Option<usize>) -> Self {
-        Self(ErrorInfo::new(code, msg, pos))
+        Self(Box::new(ErrorInfo::new(code, msg, pos)))
     }
     /// 位置情報付きの評価エラーを作成する。
     pub fn at(
@@ -191,7 +265,7 @@ impl EvalError {
         line: Option<usize>,
         col: Option<usize>,
     ) -> Self {
-        Self(ErrorInfo::at(code, msg, pos, line, col))
+        Self(Box::new(ErrorInfo::at(code, msg, pos, line, col)))
     }
 }
 

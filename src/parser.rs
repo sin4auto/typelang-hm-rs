@@ -9,7 +9,7 @@
 //! - 単項マイナスなどの糖衣は `0 - x` など正規化した AST へ変換する。
 
 use crate::ast::{
-    Constraint as AConstraint, Expr, IntBase, Program, SigmaType, TopLevel, TypeExpr,
+    Constraint as AConstraint, Expr, IntBase, Program, SigmaType, Span, TopLevel, TypeExpr,
 };
 use crate::errors::ParseError;
 use crate::lexer::{lex, Token, TokenKind};
@@ -171,11 +171,12 @@ impl Parser {
     /// ```
     pub fn parse_expr(&mut self) -> Result<Expr, ParseError> {
         let expr = self.parse_expr_no_annot()?;
-        if self.accept(TokenKind::DCOLON).is_some() {
+        if let Some(colon_tok) = self.accept(TokenKind::DCOLON) {
             let ty = self.parse_type()?;
             Ok(Expr::Annot {
                 expr: Box::new(expr),
                 type_expr: ty,
+                span: span_from_token(&colon_tok),
             })
         } else {
             Ok(expr)
@@ -194,7 +195,7 @@ impl Parser {
 
     /// ラムダ式（`\ params -> expr`）を解析する。
     fn parse_lambda(&mut self) -> Result<Expr, ParseError> {
-        self.pop(TokenKind::LAMBDA)?;
+        let lambda_tok = self.pop(TokenKind::LAMBDA)?;
         let mut params: Vec<String> = Vec::new();
         while self.peek().kind == TokenKind::VARID {
             params.push(self.pop_any().value);
@@ -204,12 +205,13 @@ impl Parser {
         Ok(Expr::Lambda {
             params,
             body: Box::new(body),
+            span: span_from_token(&lambda_tok),
         })
     }
 
     /// `let ... in ...` 式を解析し、束縛を収集する。
     fn parse_let_in(&mut self) -> Result<Expr, ParseError> {
-        self.pop(TokenKind::LET)?;
+        let let_tok = self.pop(TokenKind::LET)?;
         let mut bindings: Vec<(String, Vec<String>, Expr)> = Vec::new();
         loop {
             let name = self.pop(TokenKind::VARID)?.value;
@@ -229,12 +231,13 @@ impl Parser {
         Ok(Expr::LetIn {
             bindings,
             body: Box::new(body),
+            span: span_from_token(&let_tok),
         })
     }
 
     /// `if ... then ... else ...` 式を解析する。
     fn parse_if(&mut self) -> Result<Expr, ParseError> {
-        self.pop(TokenKind::IF)?;
+        let if_tok = self.pop(TokenKind::IF)?;
         let cond = self.parse_expr()?;
         self.pop(TokenKind::THEN)?;
         let th = self.parse_expr()?;
@@ -244,6 +247,7 @@ impl Parser {
             cond: Box::new(cond),
             then_branch: Box::new(th),
             else_branch: Box::new(el),
+            span: span_from_token(&if_tok),
         })
     }
 
@@ -256,26 +260,26 @@ impl Parser {
         match spec.assoc {
             Assoc::Left => {
                 while spec.contains(&self.peek().kind) {
-                    let op = self.pop_any().value;
+                    let op_token = self.pop_any();
                     let right = self.parse_infix_level(level + 1)?;
-                    left = Self::mk_binop(left, op, right);
+                    left = Self::mk_binop(left, op_token, right);
                 }
                 Ok(left)
             }
             Assoc::Right => {
                 if spec.contains(&self.peek().kind) {
-                    let op = self.pop_any().value;
+                    let op_token = self.pop_any();
                     let right = self.parse_infix_level(level)?;
-                    Ok(Self::mk_binop(left, op, right))
+                    Ok(Self::mk_binop(left, op_token, right))
                 } else {
                     Ok(left)
                 }
             }
             Assoc::Non => {
                 if spec.contains(&self.peek().kind) {
-                    let op = self.pop_any().value;
+                    let op_token = self.pop_any();
                     let right = self.parse_infix_level(level + 1)?;
-                    Ok(Self::mk_binop(left, op, right))
+                    Ok(Self::mk_binop(left, op_token, right))
                 } else {
                     Ok(left)
                 }
@@ -283,11 +287,14 @@ impl Parser {
         }
     }
 
-    fn mk_binop(left: Expr, op: String, right: Expr) -> Expr {
+    fn mk_binop(left: Expr, op_token: Token, right: Expr) -> Expr {
+        let span = span_from_token(&op_token);
+        let op_value = op_token.value;
         Expr::BinOp {
-            op,
+            op: op_value,
             left: Box::new(left),
             right: Box::new(right),
+            span,
         }
     }
 
@@ -296,9 +303,12 @@ impl Parser {
         let mut left = self.parse_atom()?;
         while Self::is_atom_start(&self.peek().kind) {
             let right = self.parse_atom()?;
+            let func = left;
+            let span = func.span();
             left = Expr::App {
-                func: Box::new(left),
+                func: Box::new(func),
                 arg: Box::new(right),
+                span,
             };
         }
         Ok(left)
@@ -316,8 +326,10 @@ impl Parser {
                     left: Box::new(Expr::IntLit {
                         value: 0,
                         base: IntBase::Dec,
+                        span: Span::dummy(),
                     }),
                     right: Box::new(rhs),
+                    span: span_from_token(&t),
                 })
             }
             TokenKind::INT | TokenKind::HEX | TokenKind::OCT | TokenKind::BIN => {
@@ -337,7 +349,11 @@ impl Parser {
                             TokenKind::BIN => IntBase::Bin,
                             _ => IntBase::Dec,
                         };
-                        Ok(Expr::IntLit { value: v, base })
+                        Ok(Expr::IntLit {
+                            value: v,
+                            base,
+                            span: span_from_token(&t),
+                        })
                     }
                     Err(_) => Err(ParseError::new(
                         "PAR210",
@@ -349,7 +365,10 @@ impl Parser {
             TokenKind::FLOAT => {
                 self.pop_any();
                 match t.value.parse::<f64>() {
-                    Ok(v) => Ok(Expr::FloatLit { value: v }),
+                    Ok(v) => Ok(Expr::FloatLit {
+                        value: v,
+                        span: span_from_token(&t),
+                    }),
                     Err(_) => Err(ParseError::at(
                         "PAR220",
                         "浮動小数リテラルが不正",
@@ -362,35 +381,55 @@ impl Parser {
             TokenKind::CHAR => {
                 self.pop_any();
                 let ch = decode_char(&t.value)?;
-                Ok(Expr::CharLit { value: ch })
+                Ok(Expr::CharLit {
+                    value: ch,
+                    span: span_from_token(&t),
+                })
             }
             TokenKind::STRING => {
                 self.pop_any();
                 let s = decode_string(&t.value)?;
-                Ok(Expr::StringLit { value: s })
+                Ok(Expr::StringLit {
+                    value: s,
+                    span: span_from_token(&t),
+                })
             }
             TokenKind::TRUE => {
                 self.pop_any();
-                Ok(Expr::BoolLit { value: true })
+                Ok(Expr::BoolLit {
+                    value: true,
+                    span: span_from_token(&t),
+                })
             }
             TokenKind::FALSE => {
                 self.pop_any();
-                Ok(Expr::BoolLit { value: false })
+                Ok(Expr::BoolLit {
+                    value: false,
+                    span: span_from_token(&t),
+                })
             }
             TokenKind::VARID => {
                 self.pop_any();
-                Ok(Expr::Var { name: t.value })
+                let span = span_from_token(&t);
+                Ok(Expr::Var {
+                    name: t.value,
+                    span,
+                })
             }
             TokenKind::QMARK => {
                 self.pop_any();
                 let name = self.pop(TokenKind::VARID)?.value;
                 Ok(Expr::Var {
                     name: format!("?{}", name),
+                    span: span_from_token(&t),
                 })
             }
             TokenKind::UNDERSCORE => {
                 self.pop_any();
-                Ok(Expr::Var { name: "_".into() })
+                Ok(Expr::Var {
+                    name: "_".into(),
+                    span: span_from_token(&t),
+                })
             }
             TokenKind::LPAREN => {
                 self.pop_any();
@@ -401,7 +440,10 @@ impl Parser {
                         items.push(self.parse_expr()?);
                     }
                     self.pop(TokenKind::RPAREN)?;
-                    Ok(Expr::TupleLit { items })
+                    Ok(Expr::TupleLit {
+                        items,
+                        span: span_from_token(&t),
+                    })
                 } else {
                     self.pop(TokenKind::RPAREN)?;
                     Ok(e)
@@ -417,7 +459,10 @@ impl Parser {
                     }
                 }
                 self.pop(TokenKind::RBRACK)?;
-                Ok(Expr::ListLit { items })
+                Ok(Expr::ListLit {
+                    items,
+                    span: span_from_token(&t),
+                })
             }
             _ => Err(ParseError::new(
                 "PAR002",
@@ -650,6 +695,10 @@ fn decode_char(quoted: &str) -> Result<char, ParseError> {
             .ok_or_else(|| ParseError::new("PAR205", "空の文字", None))?
     };
     Ok(ch)
+}
+
+fn span_from_token(token: &Token) -> Span {
+    Span::new(token.pos, token.line, token.col)
 }
 
 // エントリヘルパ

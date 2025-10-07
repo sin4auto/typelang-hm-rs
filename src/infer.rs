@@ -257,7 +257,7 @@ impl<'a> InferCtx<'a> {
 
     fn infer(&mut self, env: &TypeEnv, expr: &A::Expr) -> Result<(Subst, QualType), TypeError> {
         match expr {
-            A::Expr::Var { name } => self.infer_var(env, name),
+            A::Expr::Var { name, .. } => self.infer_var(env, name),
             A::Expr::IntLit { .. } => self.infer_constrained_literal("Num"),
             A::Expr::FloatLit { .. } => self.infer_constrained_literal("Fractional"),
             A::Expr::CharLit { .. } => self.infer_concrete_type(Type::TCon(TCon {
@@ -267,18 +267,23 @@ impl<'a> InferCtx<'a> {
             A::Expr::BoolLit { .. } => self.infer_concrete_type(Type::TCon(TCon {
                 name: "Bool".into(),
             })),
-            A::Expr::ListLit { items } => self.infer_list(env, items),
-            A::Expr::TupleLit { items } => self.infer_tuple(env, items),
-            A::Expr::Lambda { params, body } => self.infer_lambda(env, params, body),
-            A::Expr::LetIn { bindings, body } => self.infer_let(env, bindings, body),
+            A::Expr::ListLit { items, .. } => self.infer_list(env, items),
+            A::Expr::TupleLit { items, .. } => self.infer_tuple(env, items),
+            A::Expr::Lambda { params, body, .. } => self.infer_lambda(env, params, body),
+            A::Expr::LetIn { bindings, body, .. } => self.infer_let(env, bindings, body),
             A::Expr::If {
                 cond,
                 then_branch,
                 else_branch,
+                ..
             } => self.infer_if(env, cond, then_branch, else_branch),
-            A::Expr::App { func, arg } => self.infer_app(env, func, arg),
-            A::Expr::BinOp { op, left, right } => self.infer_binop(env, op, left, right),
-            A::Expr::Annot { expr, type_expr } => self.infer_annot(env, expr, type_expr),
+            A::Expr::App { func, arg, .. } => self.infer_app(env, func, arg),
+            A::Expr::BinOp {
+                op, left, right, ..
+            } => self.infer_binop(env, op, left, right),
+            A::Expr::Annot {
+                expr, type_expr, ..
+            } => self.infer_annot(env, expr, type_expr),
         }
     }
 
@@ -409,6 +414,7 @@ impl<'a> InferCtx<'a> {
                 A::Expr::Lambda {
                     params: params.clone(),
                     body: Box::new(rhs.clone()),
+                    span: A::Span::dummy(),
                 }
             };
             let (s_new, q_rhs) = self.infer_with_subst(&env2, &s_acc, &rhs_expr)?;
@@ -528,10 +534,13 @@ impl<'a> InferCtx<'a> {
             func: Box::new(A::Expr::App {
                 func: Box::new(A::Expr::Var {
                     name: op.to_string(),
+                    span: A::Span::dummy(),
                 }),
                 arg: Box::new(left.clone()),
+                span: A::Span::dummy(),
             }),
             arg: Box::new(right.clone()),
+            span: A::Span::dummy(),
         };
         self.infer(env, &applied)
     }
@@ -560,7 +569,7 @@ impl<'a> InferCtx<'a> {
     fn is_negative_exponent(&mut self, right: &A::Expr) -> bool {
         matches!(
             right,
-            A::Expr::BinOp { op, left, right }
+            A::Expr::BinOp { op, left, right, .. }
                 if op == "-"
                     && matches!(**left, A::Expr::IntLit { value: 0, .. })
                     && matches!(**right, A::Expr::IntLit { .. })

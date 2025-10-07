@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 
 use crate::ast as A;
-use crate::errors::EvalError;
+use crate::errors::{EvalError, FrameInfo};
 use crate::primitives::PRIMITIVES;
 pub use crate::runtime::{Env, Value};
 
@@ -53,37 +53,44 @@ fn apply(f: &Value, x: Value) -> Result<Value, EvalError> {
 
 /// 抽象構文木の式を評価して `Value` へ還元するメインルーチン。
 pub fn eval_expr(e: &A::Expr, env: &mut Env) -> Result<Value, EvalError> {
+    eval_expr_inner(e, env).map_err(|mut err| {
+        attach_frame(&mut err, e);
+        err
+    })
+}
+
+fn eval_expr_inner(e: &A::Expr, env: &mut Env) -> Result<Value, EvalError> {
     use A::Expr::*;
     match e {
-        Var { name } => env
+        Var { name, .. } => env
             .get(name)
             .cloned()
             .ok_or_else(|| EvalError::new("EVAL010", format!("未束縛変数: {name}"), None)),
         IntLit { value, .. } => Ok(Value::Int(*value)),
-        FloatLit { value } => Ok(Value::Double(*value)),
-        CharLit { value } => Ok(Value::Char(*value)),
-        StringLit { value } => Ok(Value::String(value.clone())),
-        BoolLit { value } => Ok(Value::Bool(*value)),
-        ListLit { items } => {
+        FloatLit { value, .. } => Ok(Value::Double(*value)),
+        CharLit { value, .. } => Ok(Value::Char(*value)),
+        StringLit { value, .. } => Ok(Value::String(value.clone())),
+        BoolLit { value, .. } => Ok(Value::Bool(*value)),
+        ListLit { items, .. } => {
             let mut vs = Vec::new();
             for it in items {
                 vs.push(eval_expr(it, env)?);
             }
             Ok(Value::List(vs))
         }
-        TupleLit { items } => {
+        TupleLit { items, .. } => {
             let mut vs = Vec::new();
             for it in items {
                 vs.push(eval_expr(it, env)?);
             }
             Ok(Value::Tuple(vs))
         }
-        Lambda { params, body } => Ok(Value::Closure {
+        Lambda { params, body, .. } => Ok(Value::Closure {
             params: params.clone(),
             body: body.clone(),
             env: env.clone(),
         }),
-        LetIn { bindings, body } => {
+        LetIn { bindings, body, .. } => {
             let mut env2 = env.clone();
             for (name, params, rhs) in bindings {
                 let val = if params.is_empty() {
@@ -103,6 +110,7 @@ pub fn eval_expr(e: &A::Expr, env: &mut Env) -> Result<Value, EvalError> {
             cond,
             then_branch,
             else_branch,
+            ..
         } => {
             let c = eval_expr(cond, env)?;
             if let Value::Bool(b) = c {
@@ -119,18 +127,45 @@ pub fn eval_expr(e: &A::Expr, env: &mut Env) -> Result<Value, EvalError> {
                 ))
             }
         }
-        App { func, arg } => {
+        App { func, arg, .. } => {
             let f = eval_expr(func, env)?;
             let x = eval_expr(arg, env)?;
             apply(&f, x)
         }
-        BinOp { op, left, right } => {
-            let f = eval_expr(&A::Expr::Var { name: op.clone() }, env)?;
+        BinOp {
+            op, left, right, ..
+        } => {
+            let f = eval_expr(
+                &A::Expr::Var {
+                    name: op.clone(),
+                    span: A::Span::dummy(),
+                },
+                env,
+            )?;
             let l = eval_expr(left, env)?;
             let r = eval_expr(right, env)?;
             let tmp = apply(&f, l)?;
             apply(&tmp, r)
         }
         Annot { expr, .. } => eval_expr(expr, env),
+    }
+}
+
+fn attach_frame(err: &mut EvalError, expr: &A::Expr) {
+    let span = expr.span();
+    let pos = nonzero(span.pos);
+    let line = nonzero(span.line);
+    let col = nonzero(span.col);
+    let info = err.0.as_mut();
+    info.fill_position_if_absent(pos, line, col);
+    let summary = format!("{}", expr);
+    info.push_frame(FrameInfo::new(summary, pos, line, col));
+}
+
+fn nonzero(value: usize) -> Option<usize> {
+    if value == 0 {
+        None
+    } else {
+        Some(value)
     }
 }

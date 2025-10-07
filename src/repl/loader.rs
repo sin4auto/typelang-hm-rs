@@ -34,6 +34,7 @@ pub fn load_program_into_env(
             A::Expr::Lambda {
                 params: decl.params.clone(),
                 body: Box::new(decl.expr.clone()),
+                span: A::Span::dummy(),
             }
         };
         let body = normalize_expr(&orig);
