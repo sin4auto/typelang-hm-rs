@@ -252,75 +252,49 @@ impl Parser {
             return self.parse_app();
         }
         let spec = &INFIX_LEVELS[level];
-        match spec.assoc {
-            Assoc::Left => self.parse_infix_left(level, spec),
-            Assoc::Right => self.parse_infix_right(level, spec),
-            Assoc::Non => self.parse_infix_non(level, spec),
-        }
-    }
-
-    fn parse_infix_left(&mut self, level: usize, spec: &InfixSpec) -> Result<Expr, ParseError> {
         let mut left = self.parse_infix_level(level + 1)?;
-        while spec.contains(&self.peek().kind) {
-            let op = self.pop_any().value;
-            let right = self.parse_infix_level(level + 1)?;
-            left = Expr::BinOp {
-                op,
-                left: Box::new(left),
-                right: Box::new(right),
-            };
+        match spec.assoc {
+            Assoc::Left => {
+                while spec.contains(&self.peek().kind) {
+                    let op = self.pop_any().value;
+                    let right = self.parse_infix_level(level + 1)?;
+                    left = Self::mk_binop(left, op, right);
+                }
+                Ok(left)
+            }
+            Assoc::Right => {
+                if spec.contains(&self.peek().kind) {
+                    let op = self.pop_any().value;
+                    let right = self.parse_infix_level(level)?;
+                    Ok(Self::mk_binop(left, op, right))
+                } else {
+                    Ok(left)
+                }
+            }
+            Assoc::Non => {
+                if spec.contains(&self.peek().kind) {
+                    let op = self.pop_any().value;
+                    let right = self.parse_infix_level(level + 1)?;
+                    Ok(Self::mk_binop(left, op, right))
+                } else {
+                    Ok(left)
+                }
+            }
         }
-        Ok(left)
     }
 
-    fn parse_infix_right(&mut self, level: usize, spec: &InfixSpec) -> Result<Expr, ParseError> {
-        let left = self.parse_infix_level(level + 1)?;
-        if spec.contains(&self.peek().kind) {
-            let op = self.pop_any().value;
-            let right = self.parse_infix_level(level)?;
-            Ok(Expr::BinOp {
-                op,
-                left: Box::new(left),
-                right: Box::new(right),
-            })
-        } else {
-            Ok(left)
-        }
-    }
-
-    fn parse_infix_non(&mut self, level: usize, spec: &InfixSpec) -> Result<Expr, ParseError> {
-        let left = self.parse_infix_level(level + 1)?;
-        if spec.contains(&self.peek().kind) {
-            let op = self.pop_any().value;
-            let right = self.parse_infix_level(level + 1)?;
-            Ok(Expr::BinOp {
-                op,
-                left: Box::new(left),
-                right: Box::new(right),
-            })
-        } else {
-            Ok(left)
+    fn mk_binop(left: Expr, op: String, right: Expr) -> Expr {
+        Expr::BinOp {
+            op,
+            left: Box::new(left),
+            right: Box::new(right),
         }
     }
 
     /// 関数適用（左結合）を解析する。
     fn parse_app(&mut self) -> Result<Expr, ParseError> {
         let mut left = self.parse_atom()?;
-        while let TokenKind::INT
-        | TokenKind::HEX
-        | TokenKind::OCT
-        | TokenKind::BIN
-        | TokenKind::FLOAT
-        | TokenKind::CHAR
-        | TokenKind::STRING
-        | TokenKind::VARID
-        | TokenKind::UNDERSCORE
-        | TokenKind::QMARK
-        | TokenKind::LPAREN
-        | TokenKind::LBRACK
-        | TokenKind::TRUE
-        | TokenKind::FALSE = self.peek().kind
-        {
+        while Self::is_atom_start(&self.peek().kind) {
             let right = self.parse_atom()?;
             left = Expr::App {
                 func: Box::new(left),
@@ -451,6 +425,26 @@ impl Parser {
                 Some(t.pos),
             )),
         }
+    }
+
+    fn is_atom_start(kind: &TokenKind) -> bool {
+        matches!(
+            kind,
+            TokenKind::INT
+                | TokenKind::HEX
+                | TokenKind::OCT
+                | TokenKind::BIN
+                | TokenKind::FLOAT
+                | TokenKind::CHAR
+                | TokenKind::STRING
+                | TokenKind::VARID
+                | TokenKind::UNDERSCORE
+                | TokenKind::QMARK
+                | TokenKind::LPAREN
+                | TokenKind::LBRACK
+                | TokenKind::TRUE
+                | TokenKind::FALSE
+        )
     }
 
     // ===== 型式 =====

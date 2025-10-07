@@ -63,9 +63,7 @@ fn fallback_type_from_value(value: &Value) -> Type {
         }),
         Value::String(_) => t_string(),
         Value::List(_) | Value::Tuple(_) => Type::TTuple(TTuple { items: vec![] }),
-        Value::Closure { .. } | Value::Prim1(_) | Value::Prim2(_) => {
-            Type::TTuple(TTuple { items: vec![] })
-        }
+        Value::Closure { .. } | Value::Prim(_) => Type::TTuple(TTuple { items: vec![] }),
     }
 }
 

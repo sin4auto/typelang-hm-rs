@@ -12,7 +12,7 @@ use std::collections::HashMap;
 
 use crate::ast as A;
 use crate::errors::TypeError;
-use crate::primitives::{PrimitiveKind, PRIMITIVES};
+use crate::primitives::{PrimitiveTypeSpec, PRIMITIVES};
 use crate::typesys::*;
 
 #[derive(Clone, Debug)]
@@ -56,18 +56,17 @@ pub fn initial_env() -> TypeEnv {
     let mut supply = TVarSupply::new();
 
     for def in PRIMITIVES {
-        match def.kind {
-            PrimitiveKind::Numeric(_) => env.extend(def.name, binop_scheme("Num", &mut supply)),
-            PrimitiveKind::FractionalDiv => {
-                env.extend(def.name, binop_scheme("Fractional", &mut supply));
+        match def.type_spec {
+            PrimitiveTypeSpec::BinOp { classname } => {
+                env.extend(def.name, binop_scheme(classname, &mut supply));
             }
-            PrimitiveKind::PowFloat => {
-                env.extend(def.name, binop_scheme("Fractional", &mut supply));
+            PrimitiveTypeSpec::IntPow => {
+                env.extend(def.name, intpow_scheme(&mut supply));
             }
-            PrimitiveKind::PowInt => env.extend(def.name, intpow_scheme(&mut supply)),
-            PrimitiveKind::Eq(_) => env.extend(def.name, pred_scheme("Eq", &mut supply)),
-            PrimitiveKind::Ord(_) => env.extend(def.name, pred_scheme("Ord", &mut supply)),
-            PrimitiveKind::Show => env.extend(def.name, show_scheme(&mut supply)),
+            PrimitiveTypeSpec::Pred { classname } => {
+                env.extend(def.name, pred_scheme(classname, &mut supply));
+            }
+            PrimitiveTypeSpec::Show => env.extend(def.name, show_scheme(&mut supply)),
         }
     }
 
@@ -196,6 +195,50 @@ struct InferCtx<'a> {
     state: &'a mut InferState,
 }
 
+// NOTE: uses raw pointerを介し、`infer` 呼び出し中に `InferCtx` 全体を再借用せずに置換を差し替える。
+struct SubstGuard<'a> {
+    state: *mut InferState,
+    previous: Option<Subst>,
+    committed: bool,
+    _marker: std::marker::PhantomData<&'a InferState>,
+}
+
+impl<'a> SubstGuard<'a> {
+    /// # Safety
+    /// `state` は呼び出し元で借用中の `InferState` を指し、ガードの存続期間中も有効でなければならない。
+    unsafe fn new(state: *mut InferState, next: Subst) -> Self {
+        let previous = std::mem::replace(&mut (*state).subst, next);
+        Self {
+            state,
+            previous: Some(previous),
+            committed: false,
+            _marker: std::marker::PhantomData,
+        }
+    }
+
+    fn commit(mut self, updated: Subst) {
+        // SAFETY: `state` は呼び出し時に得たポインタで、ガード破棄まで有効。
+        unsafe {
+            (*self.state).subst = updated;
+        }
+        self.committed = true;
+        self.previous = None;
+    }
+}
+
+impl<'a> Drop for SubstGuard<'a> {
+    fn drop(&mut self) {
+        if !self.committed {
+            if let Some(prev) = self.previous.take() {
+                // SAFETY: 同上。ガード破棄時点まで `state` は有効。
+                unsafe {
+                    (*self.state).subst = prev;
+                }
+            }
+        }
+    }
+}
+
 impl<'a> InferCtx<'a> {
     fn infer_with_subst(
         &mut self,
@@ -203,22 +246,11 @@ impl<'a> InferCtx<'a> {
         subst: &Subst,
         expr: &A::Expr,
     ) -> Result<(Subst, QualType), TypeError> {
-        self.run_with_subst(subst.clone(), |ctx| ctx.infer(env, expr))
-    }
-
-    fn run_with_subst<F>(&mut self, new_subst: Subst, f: F) -> Result<(Subst, QualType), TypeError>
-    where
-        F: FnOnce(&mut Self) -> Result<(Subst, QualType), TypeError>,
-    {
-        let previous = std::mem::replace(&mut self.state.subst, new_subst);
-        let result = f(self);
-        match &result {
-            Ok((updated, _)) => {
-                self.state.subst = updated.clone();
-            }
-            Err(_) => {
-                self.state.subst = previous;
-            }
+        let state_ptr = self.state as *mut InferState;
+        let guard = unsafe { SubstGuard::new(state_ptr, subst.clone()) };
+        let result = self.infer(env, expr);
+        if let Ok((updated, _)) = &result {
+            guard.commit(updated.clone());
         }
         result
     }

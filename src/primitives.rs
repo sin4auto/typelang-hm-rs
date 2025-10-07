@@ -5,104 +5,100 @@
 //! プリミティブ定義モジュール
 //!
 //! - 名前と分類情報を一元管理し、型推論・評価で重複列挙を防ぐ。
-//! - 各モジュールは `PrimitiveKind` をマッチして必要な初期化を行う。
+//! - 各モジュールは `type_spec` / `op` を利用して必要な初期化を行う。
 //! - 実装ロジックは個別モジュール側に残しつつ、一覧のみ共有する。
 
-/// 数値演算子の種別。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum NumericOp {
-    Add,
-    Sub,
-    Mul,
-}
+use crate::runtime::{
+    add_op, div_op, eq_op, ge_op, gt_op, le_op, lt_op, mul_op, ne_op, powf, powi, py_show, sub_op,
+    PrimOp,
+};
 
-/// Eq 制約を持つ比較演算子の種別。
+/// 型推論側で利用するスキーム分類。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum EqOp {
-    Eq,
-    Ne,
-}
-
-/// Ord 制約を持つ比較演算子の種別。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum OrdOp {
-    Lt,
-    Le,
-    Gt,
-    Ge,
-}
-
-/// プリミティブの分類。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PrimitiveKind {
-    Numeric(NumericOp),
-    FractionalDiv,
-    PowInt,
-    PowFloat,
-    Eq(EqOp),
-    Ord(OrdOp),
+pub enum PrimitiveTypeSpec {
+    BinOp { classname: &'static str },
+    IntPow,
+    Pred { classname: &'static str },
     Show,
 }
 
 /// プリミティブ定義。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct PrimitiveDef {
     pub name: &'static str,
-    pub kind: PrimitiveKind,
+    pub type_spec: PrimitiveTypeSpec,
+    pub op: PrimOp,
 }
 
 /// 言語が標準で提供するプリミティブの一覧。
 pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "+",
-        kind: PrimitiveKind::Numeric(NumericOp::Add),
+        type_spec: PrimitiveTypeSpec::BinOp { classname: "Num" },
+        op: PrimOp::binary(add_op),
     },
     PrimitiveDef {
         name: "-",
-        kind: PrimitiveKind::Numeric(NumericOp::Sub),
+        type_spec: PrimitiveTypeSpec::BinOp { classname: "Num" },
+        op: PrimOp::binary(sub_op),
     },
     PrimitiveDef {
         name: "*",
-        kind: PrimitiveKind::Numeric(NumericOp::Mul),
+        type_spec: PrimitiveTypeSpec::BinOp { classname: "Num" },
+        op: PrimOp::binary(mul_op),
     },
     PrimitiveDef {
         name: "/",
-        kind: PrimitiveKind::FractionalDiv,
+        type_spec: PrimitiveTypeSpec::BinOp {
+            classname: "Fractional",
+        },
+        op: PrimOp::binary(div_op),
     },
     PrimitiveDef {
         name: "^",
-        kind: PrimitiveKind::PowInt,
+        type_spec: PrimitiveTypeSpec::IntPow,
+        op: PrimOp::binary(powi),
     },
     PrimitiveDef {
         name: "**",
-        kind: PrimitiveKind::PowFloat,
+        type_spec: PrimitiveTypeSpec::BinOp {
+            classname: "Fractional",
+        },
+        op: PrimOp::binary(powf),
     },
     PrimitiveDef {
         name: "==",
-        kind: PrimitiveKind::Eq(EqOp::Eq),
+        type_spec: PrimitiveTypeSpec::Pred { classname: "Eq" },
+        op: PrimOp::binary(eq_op),
     },
     PrimitiveDef {
         name: "/=",
-        kind: PrimitiveKind::Eq(EqOp::Ne),
+        type_spec: PrimitiveTypeSpec::Pred { classname: "Eq" },
+        op: PrimOp::binary(ne_op),
     },
     PrimitiveDef {
         name: "<",
-        kind: PrimitiveKind::Ord(OrdOp::Lt),
+        type_spec: PrimitiveTypeSpec::Pred { classname: "Ord" },
+        op: PrimOp::binary(lt_op),
     },
     PrimitiveDef {
         name: "<=",
-        kind: PrimitiveKind::Ord(OrdOp::Le),
+        type_spec: PrimitiveTypeSpec::Pred { classname: "Ord" },
+        op: PrimOp::binary(le_op),
     },
     PrimitiveDef {
         name: ">",
-        kind: PrimitiveKind::Ord(OrdOp::Gt),
+        type_spec: PrimitiveTypeSpec::Pred { classname: "Ord" },
+        op: PrimOp::binary(gt_op),
     },
     PrimitiveDef {
         name: ">=",
-        kind: PrimitiveKind::Ord(OrdOp::Ge),
+        type_spec: PrimitiveTypeSpec::Pred { classname: "Ord" },
+        op: PrimOp::binary(ge_op),
     },
     PrimitiveDef {
         name: "show",
-        kind: PrimitiveKind::Show,
+        type_spec: PrimitiveTypeSpec::Show,
+        op: PrimOp::unary(py_show),
     },
 ];

@@ -2,202 +2,200 @@
 // 役割: Lexer と parser の基本〜境界テストを一本化
 // 意図: 字句解析と構文解析の重要ケースをシンプルに網羅する
 // 関連ファイル: src/lexer.rs, src/parser.rs, tests/types_infer.rs
-use typelang::ast;
+#[path = "test_support.rs"]
+mod support;
+
+use support::{lex_ok, parse_expr, parse_program};
 use typelang::lexer::{self, TokenKind};
 use typelang::parser;
 
-/// 字句解析が成功することを前提としたヘルパ。
-fn lex_ok(src: &str) -> Vec<lexer::Token> {
-    lexer::lex(src).expect("lex")
+fn assert_token_presence(tokens: &[lexer::Token], kinds: &[TokenKind], note: &str) {
+    for kind in kinds {
+        assert!(
+            tokens.iter().any(|t| &t.kind == kind),
+            "{note}: expected token {:?}",
+            kind
+        );
+    }
 }
 
 #[test]
-/// キーワードと数値が適切にトークン化されることを検証する。
-fn lexer_keywords_and_numbers() {
-    let toks = lex_ok("let x = 0xFF; if True then 10 else 0b101");
-    assert!(toks.iter().any(|t| matches!(t.kind, TokenKind::LET)));
-    assert!(toks.iter().any(|t| matches!(t.kind, TokenKind::HEX)));
-    assert!(toks.iter().any(|t| matches!(t.kind, TokenKind::BIN)));
+/// 代表的な字句パターンをテーブル駆動で検証する。
+fn lexer_happy_paths() {
+    #[derive(Clone)]
+    struct Case<'a> {
+        src: &'a str,
+        kinds: &'a [TokenKind],
+        note: &'a str,
+    }
+
+    let cases = [
+        Case {
+            src: "let x = 0xFF; if True then 10 else 0b101",
+            kinds: &[
+                TokenKind::LET,
+                TokenKind::HEX,
+                TokenKind::BIN,
+                TokenKind::TRUE,
+                TokenKind::ELSE,
+            ],
+            note: "キーワードと基数付き整数",
+        },
+        Case {
+            src: "-- comment\nlet s = \"a\\n\\\"\"; {- block -}\n",
+            kinds: &[TokenKind::STRING, TokenKind::LET],
+            note: "コメント + 文字列",
+        },
+        Case {
+            src: "{- outer {- inner -} -} let _tmp = (\\x -> x);",
+            kinds: &[TokenKind::LET, TokenKind::UNDERSCORE, TokenKind::LAMBDA],
+            note: "入れ子コメントとラムダ・ワイルドカード",
+        },
+        Case {
+            src: "let a = 0x1f; let b = 0o77; let c = 0b1010;",
+            kinds: &[TokenKind::HEX, TokenKind::OCT, TokenKind::BIN],
+            note: "数値プレフィックス",
+        },
+        Case {
+            src: "let a = 1.0; let b = 1e0; let c = 1.2e-3;",
+            kinds: &[TokenKind::FLOAT],
+            note: "浮動小数フォーマット",
+        },
+        Case {
+            src: "let c = '\\n'; let q = ?foo;",
+            kinds: &[TokenKind::CHAR, TokenKind::QMARK, TokenKind::VARID],
+            note: "文字リテラルと ? 識別子",
+        },
+    ];
+
+    for case in cases {
+        let tokens = lex_ok(case.src);
+        assert_token_presence(&tokens, case.kinds, case.note);
+    }
 }
 
 #[test]
-/// コメントと文字列リテラルが処理できることを検証する。
-fn lexer_comments_and_strings() {
-    let src = "-- comment\nlet s = \"a\\n\\\"\"; {- block -}\n";
-    let toks = lex_ok(src);
-    assert!(toks.iter().any(|t| matches!(t.kind, TokenKind::STRING)));
+/// 誤った入力がエラーになることを検証する。
+fn lexer_error_paths() {
+    for src in [
+        "let x = 0b;",
+        "let y = 0o;",
+        "let z = 0x;",
+        "\"abc",
+        "{- never closed",
+    ] {
+        assert!(
+            lexer::lex(src).is_err(),
+            "期待通り字句エラーになりません: {src}"
+        );
+    }
 }
 
 #[test]
-/// ブロックコメントが入れ子でも正しくスキップされることを確認する。
-fn lexer_nested_block_comments() {
-    let src = "{- outer {- inner -} still outer -} let x = 1;";
-    let toks = lex_ok(src);
-    assert!(toks.iter().any(|t| matches!(t.kind, TokenKind::LET)));
-    assert!(toks.iter().any(|t| matches!(t.kind, TokenKind::VARID)));
-}
-
-#[test]
-/// 基数プレフィックスを伴う整数リテラルを検証する。
-fn lexer_numeric_prefixes() {
-    let toks = lex_ok("let a = 0x1f; let b = 0o77; let c = 0b1010;");
-    assert!(toks.iter().any(|t| matches!(t.kind, TokenKind::HEX)));
-    assert!(toks.iter().any(|t| matches!(t.kind, TokenKind::OCT)));
-    assert!(toks.iter().any(|t| matches!(t.kind, TokenKind::BIN)));
-}
-
-#[test]
-/// 無効な数値プレフィックスでエラーになることを確認する。
-fn lexer_invalid_numeric_prefixes_error() {
-    assert!(lexer::lex("let x = 0b;").is_err());
-    assert!(lexer::lex("let y = 0o;").is_err());
-    assert!(lexer::lex("let z = 0x;").is_err());
-}
-
-#[test]
-/// 浮動小数表記のバリエーションを検証する。
-fn lexer_float_forms() {
-    let t1 = lex_ok("let a = 1.0;");
-    let t2 = lex_ok("let b = 1e0;");
-    let t3 = lex_ok("let c = 1.2e-3;");
-    assert!(t1.iter().any(|t| matches!(t.kind, TokenKind::FLOAT)));
-    assert!(t2.iter().any(|t| matches!(t.kind, TokenKind::FLOAT)));
-    assert!(t3.iter().any(|t| matches!(t.kind, TokenKind::FLOAT)));
-}
-
-#[test]
-/// 文字列と文字リテラルのエスケープが処理されることを検証する。
-fn lexer_string_and_char_escapes() {
-    let s = lex_ok("let s = \"a\\n\\\"b\";");
-    let c = lex_ok("let c = '\\n';");
-    assert!(s.iter().any(|t| matches!(t.kind, TokenKind::STRING)));
-    assert!(c.iter().any(|t| matches!(t.kind, TokenKind::CHAR)));
-}
-
-#[test]
-/// 未閉鎖の構造がエラーになることを確認する。
-fn lexer_reports_unclosed_constructs() {
-    assert!(lexer::lex("\"abc").is_err());
-    assert!(lexer::lex("{- never closed").is_err());
-}
-
-#[test]
-/// Unicode が混在する場合の挙動を検証する。
-fn lexer_handles_unicode_boundaries() {
+/// Unicode や非 ASCII 境界の扱いを検証する。
+fn lexer_unicode_handling() {
     assert!(lexer::lex("let x = 1 -ー 2").is_err());
     assert!(lexer::lex(r#"let f = \\x -> 'あ'"#).is_ok());
 }
 
-/// テスト用に式を解析するヘルパ。
-fn parse_expr(src: &str) -> ast::Expr {
-    parser::parse_expr(src).expect("parse expr")
+#[test]
+/// 各種式が期待通りにパースされ文字列化できることを検証する。
+fn parser_expr_round_trips() {
+    struct ExprCase<'a> {
+        src: &'a str,
+        fragments: &'a [&'a str],
+        exact: Option<&'a str>,
+        note: &'a str,
+    }
+
+    let cases = [
+        ExprCase {
+            src: "2 ^ 3 ^ 2",
+            fragments: &["^"],
+            exact: None,
+            note: "累乗は右結合",
+        },
+        ExprCase {
+            src: "-1",
+            fragments: &["- 1"],
+            exact: None,
+            note: "単項マイナスの糖衣展開",
+        },
+        ExprCase {
+            src: "f 2 ^ 3 * 4 + 5",
+            fragments: &["f 2", "^", "*", "+"],
+            exact: None,
+            note: "関数適用と中置演算子の優先順位",
+        },
+        ExprCase {
+            src: "let a = 1; b x = x in b a",
+            fragments: &["let", "in"],
+            exact: None,
+            note: "let-in の複数束縛",
+        },
+        ExprCase {
+            src: "?x",
+            fragments: &[],
+            exact: Some("?x"),
+            note: "? 識別子の保持",
+        },
+    ];
+
+    for case in cases {
+        let expr = parse_expr(case.src);
+        let rendered = format!("{}", expr);
+        if let Some(expected) = case.exact {
+            assert_eq!(rendered, expected, "{}", case.note);
+        }
+        for fragment in case.fragments {
+            assert!(
+                rendered.contains(fragment),
+                "{}: missing fragment `{fragment}`",
+                case.note
+            );
+        }
+    }
 }
 
 #[test]
-/// 累乗演算子が右結合であることを検証する。
-fn parser_pow_is_right_associative() {
-    let expr = parse_expr("2 ^ 3 ^ 2");
-    let printed = format!("{}", expr);
-    assert!(printed.contains("^"));
-}
-
-#[test]
-/// 単項マイナスの糖衣が展開されることを検証する。
-fn parser_unary_minus_sugar() {
-    let expr = parse_expr("-1");
-    let printed = format!("{}", expr);
-    assert!(printed.contains("- 1"));
-}
-
-#[test]
-/// 関数適用と中置演算子の優先順位を検証する。
-fn parser_application_vs_infix_precedence() {
-    let expr = parse_expr("f 2 ^ 3 * 4 + 5");
-    let printed = format!("{}", expr);
-    assert!(printed.contains("f 2"));
-    assert!(printed.contains("^") && printed.contains("*") && printed.contains("+"));
-}
-
-#[test]
-/// リストの閉じ忘れがエラーになることを確認する。
-fn parser_rejects_unclosed_list() {
-    assert!(parser::parse_expr("[1,2").is_err());
-}
-
-#[test]
-/// if式が必ずelseを要求することを確認する。
-fn parser_requires_else_branch() {
-    assert!(parser::parse_expr("if True then 1").is_err());
-}
-
-#[test]
-/// let-in で複数束縛が扱えることを検証する。
-fn parser_let_in_multiple_bindings() {
-    let expr = parse_expr("let a = 1; b x = x in b a");
-    let printed = format!("{}", expr);
-    assert!(printed.contains("let"));
-    assert!(printed.contains("in"));
-}
-
-#[test]
-/// `?` 付き変数が保持されることを確認する。
-fn parser_question_variable_is_preserved() {
-    let expr = parse_expr("?x");
-    assert_eq!(format!("{}", expr), "?x");
-}
-
-#[test]
-/// 大文字で始まる型注釈が `::` 直後でも解釈できることを検証する。
-fn parser_accepts_capitalized_type_signature() {
-    let src = "foo :: Int -> Int;\nlet foo x = x;";
-    let prog = parser::parse_program(src).expect("parse capitalized signature");
-    assert_eq!(prog.decls.len(), 1);
-    let sig = prog.decls[0]
+/// プログラム単位のパースとシグネチャ解釈を検証する。
+fn parser_program_cases() {
+    let plain = parse_program("foo :: Int -> Int\nlet foo x = x");
+    assert_eq!(plain.decls.len(), 1);
+    let sig = plain.decls[0]
         .signature
         .as_ref()
-        .expect("signature should be present");
-    assert!(sig.constraints.is_empty());
-}
+        .expect("signature should exist");
+    assert!(sig.constraints.is_empty(), "制約なしシグネチャの保持");
 
-#[test]
-/// 型クラス制約付きシグネチャが既存どおり解釈できることを確認する。
-fn parser_retains_constraint_type_signature() {
-    let src = "bar :: Num a => a -> a;\nlet bar x = x;";
-    let prog = parser::parse_program(src).expect("parse constrained signature");
-    assert_eq!(prog.decls.len(), 1);
-    let sig = prog.decls[0]
+    let constrained = parse_program("bar :: Num a => a -> a\nlet bar x = x");
+    let sig = constrained.decls[0]
         .signature
         .as_ref()
-        .expect("signature should be present");
+        .expect("signature should exist");
     assert_eq!(sig.constraints.len(), 1);
     assert_eq!(sig.constraints[0].classname, "Num");
-    assert_eq!(sig.constraints[0].typevar, "a");
+
+    let long_string = parse_program(&format!("let s = \"{}\";", "a".repeat(5000)));
+    assert_eq!(long_string.decls.len(), 1, "長い文字列の解析");
 }
 
 #[test]
-/// 巨大な整数リテラルがエラーになることを検証する。
-fn parser_huge_integer_reports_error() {
+/// 不正な構文が適切に弾かれることを検証する。
+fn parser_error_cases() {
+    assert!(parser::parse_expr("[1,2").is_err());
+    assert!(parser::parse_expr("if True then 1").is_err());
+
     let big = "9".repeat(50);
     let src = format!("let x = {};", big);
-    let tokens = lex_ok(&src);
-    assert!(tokens.iter().any(|t| matches!(t.kind, TokenKind::INT)));
     let err = parser::parse_program(&src).expect_err("expect parse error for huge int");
-    let s = err.to_string();
-    assert!(s.contains("[PAR210]"));
-    assert!(s.contains("範囲外"));
+    let rendered = err.to_string();
+    assert!(rendered.contains("[PAR210]"));
+    assert!(rendered.contains("範囲外"));
 }
 
 #[test]
-/// 非常に長い文字列リテラルを解析できることを検証する。
-fn parser_handles_very_long_string_literal() {
-    let s = "a".repeat(5000);
-    let src = format!("let s = \"{}\";", s);
-    let prog = parser::parse_program(&src).expect("parse long string");
-    assert_eq!(prog.decls.len(), 1);
-}
-
-#[test]
-/// 深い括弧のネストを解析できることを検証する。
+/// 深い括弧ネストでもパースできることを確認する。
 fn parser_handles_deep_parentheses() {
     let depth = 64;
     let mut src = String::new();

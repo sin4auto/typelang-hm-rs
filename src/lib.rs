@@ -21,6 +21,7 @@ pub mod lexer;
 pub mod parser;
 pub(crate) mod primitives;
 pub mod repl;
+pub mod runtime;
 pub mod typesys;
 
 // 便利な再エクスポート（必要最小限: 利用側からAST/エラー/パーサのみ直接参照可）
