@@ -16,6 +16,19 @@ const EBNF_BLACKBOX_TL: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/examples/ebnf_blackbox.tl"
 ));
+const ADT_TL: &str = r#"
+data Maybe a = Nothing | Just a;
+
+let fromMaybe default m =
+  case m of
+    Nothing -> default;
+    Just x -> x;
+
+let isJust m =
+  case m of
+    Just _ -> True;
+    Nothing -> False;
+"#;
 
 /// テキストを解析して型環境・値環境へロードするヘルパ。
 fn load_program(src: &str) -> (TypeEnv, evaluator::Env, Vec<String>) {
@@ -51,13 +64,19 @@ fn load_examples_and_validate_types() {
         ExportCase {
             src: EBNF_BLACKBOX_TL,
             expected: &[
-                "compareTuple",
-                "shiftNum",
-                "collector",
-                "applyTwice",
-                "debugHole",
+                "maybeDefault",
+                "patternJudge",
+                "arithSeries",
+                "floatingCombo",
+                "structurePack",
+                "pipeline",
             ],
             note: "ebnf exports",
+        },
+        ExportCase {
+            src: ADT_TL,
+            expected: &["fromMaybe", "isJust"],
+            note: "maybe exports",
         },
     ];
 
@@ -132,4 +151,27 @@ fn evaluate_with_loaded_env_and_failure_paths() {
     let res =
         typelang::repl::load_program_into_env(&prog, &mut type_env, &class_env, &mut value_env);
     assert!(res.is_err());
+}
+
+#[test]
+/// data 宣言と case 式を含むプログラムをロードして評価する。
+fn load_data_and_case_evaluate() {
+    let (type_env, mut value_env, loaded) = load_program(ADT_TL);
+    assert!(loaded.iter().any(|name| name == "fromMaybe"));
+    assert!(type_env.lookup("Nothing").is_some());
+    let expr_default = parse_expr("fromMaybe 0 Nothing");
+    match evaluator::eval_expr(&expr_default, &mut value_env).expect("eval fromMaybe Nothing") {
+        evaluator::Value::Int(i) => assert_eq!(i, 0),
+        other => panic!("expected Int 0, got {:?}", other),
+    }
+    let expr_just = parse_expr("fromMaybe 0 (Just 42)");
+    match evaluator::eval_expr(&expr_just, &mut value_env).expect("eval fromMaybe Just") {
+        evaluator::Value::Int(i) => assert_eq!(i, 42),
+        other => panic!("expected Int 42, got {:?}", other),
+    }
+    let expr_isjust = parse_expr("isJust (Just 1)");
+    match evaluator::eval_expr(&expr_isjust, &mut value_env).expect("eval isJust") {
+        evaluator::Value::Bool(b) => assert!(b),
+        other => panic!("expected Bool True, got {:?}", other),
+    }
 }

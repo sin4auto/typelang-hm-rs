@@ -104,6 +104,11 @@ pub enum Expr {
         type_expr: TypeExpr,
         span: Span,
     },
+    Case {
+        scrutinee: Box<Expr>,
+        arms: Vec<CaseArm>,
+        span: Span,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -125,6 +130,39 @@ pub enum TypeExpr {
     TEFun(Box<TypeExpr>, Box<TypeExpr>),
     TEList(Box<TypeExpr>),
     TETuple(Vec<TypeExpr>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+/// パターンマッチングで使用されるパターン表現。
+pub enum Pattern {
+    Wildcard {
+        span: Span,
+    },
+    Var {
+        name: String,
+        span: Span,
+    },
+    Int {
+        value: i64,
+        base: IntBase,
+        span: Span,
+    },
+    Bool {
+        value: bool,
+        span: Span,
+    },
+    Constructor {
+        name: String,
+        args: Vec<Pattern>,
+        span: Span,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+/// `case` 式の 1 アームを表現する構造体。
+pub struct CaseArm {
+    pub pattern: Pattern,
+    pub body: Expr,
 }
 
 // 型クラス制約とシグマ型
@@ -153,8 +191,26 @@ pub struct TopLevel {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+/// データコンストラクタの宣言を表現する。
+pub struct DataConstructor {
+    pub name: String,
+    pub args: Vec<TypeExpr>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+/// 代数的データ型の宣言を格納するレコード。
+pub struct DataDecl {
+    pub name: String,
+    pub params: Vec<String>,
+    pub constructors: Vec<DataConstructor>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 /// トップレベル定義の集まりとしてのプログラム。
 pub struct Program {
+    pub data_decls: Vec<DataDecl>,
     pub decls: Vec<TopLevel>,
 }
 
@@ -204,6 +260,16 @@ impl fmt::Display for Expr {
             Expr::Annot {
                 expr, type_expr, ..
             } => write!(f, "({} :: {:?})", expr, type_expr),
+            Expr::Case {
+                scrutinee, arms, ..
+            } => {
+                write!(f, "case {} of ", scrutinee)?;
+                let mut parts = Vec::new();
+                for arm in arms {
+                    parts.push(format!("{} -> {}", arm.pattern, arm.body));
+                }
+                write!(f, "{}", parts.join("; "))
+            }
         }
     }
 }
@@ -225,7 +291,43 @@ impl Expr {
             | Expr::If { span, .. }
             | Expr::App { span, .. }
             | Expr::BinOp { span, .. }
-            | Expr::Annot { span, .. } => *span,
+            | Expr::Annot { span, .. }
+            | Expr::Case { span, .. } => *span,
+        }
+    }
+}
+
+impl fmt::Display for Pattern {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Pattern::Wildcard { .. } => write!(f, "_"),
+            Pattern::Var { name, .. } => write!(f, "{}", name),
+            Pattern::Int { value, .. } => write!(f, "{}", value),
+            Pattern::Bool { value, .. } => write!(f, "{}", if *value { "True" } else { "False" }),
+            Pattern::Constructor { name, args, .. } => {
+                if args.is_empty() {
+                    write!(f, "{}", name)
+                } else {
+                    let mut parts = Vec::new();
+                    for pat in args {
+                        parts.push(format!("{}", pat));
+                    }
+                    write!(f, "{} {}", name, parts.join(" "))
+                }
+            }
+        }
+    }
+}
+
+impl Pattern {
+    /// パターンに付随するスパンを返す。
+    pub fn span(&self) -> Span {
+        match self {
+            Pattern::Wildcard { span }
+            | Pattern::Var { span, .. }
+            | Pattern::Int { span, .. }
+            | Pattern::Bool { span, .. }
+            | Pattern::Constructor { span, .. } => *span,
         }
     }
 }

@@ -5,16 +5,16 @@
 
 # TypeLang HM (Rust) Overview
 
-- TypeLang HM は Hindley–Milner 型推論をコアに据えた教育向け関数型言語処理系です。Rust 標準ライブラリのみで構築し、読みやすさと壊しにくさを重視しています。
-- Codex を活用した AI エージェント利用開発のリファレンスとしても役立ちます。プログラミング言語開発は E2E テストに依存せず、`BNF≒仕様書` とした仕様駆動開発の一例として参考にしてください。
-- 独自のMakefileを作成しています。
+- TypeLang HM は Hindley–Milner 型推論とアルゴリズム W を核にした教育向け関数型言語処理系です。Rust 標準ライブラリのみで構築し、読みやすさと壊しにくさを最優先にしています。
+- `data` 宣言／`case ... of`／パターンマッチまで含む最小実装を備え、式・型・字句仕様は `EBNF.md` を唯一のソースとして管理しています。
+- Codex を活用した AI エージェント開発のリファレンスとしても利用でき、Makefile で `fmt` / `clippy` / `test` を一括オーケストレーションできます。
 
-## 特徴ハイライト
-- Algorithm W をベースにした HM 型推論と単一化エンジン
-- `Eq` / `Ord` / `Show` / `Num` / `Fractional` など学習に必要な型クラスを同梱
-- 基本演算、条件分岐、リスト操作など必修トピックを優先実装
-- 整数累乗 `^` と実数指数 `**` の両方をサポート
-- 履歴・矢印キー・複数行入力に対応した対話型 REPL
+## ハイライト
+- HM 型推論 + 型クラス (`Eq` / `Ord` / `Show` / `Num` / `Fractional`) による宣言的な型付け
+- 代数的データ型 (`data`) と `case` パターンマッチ、ワイルドカード・コンストラクタ・ネスト対応
+- 整数演算の強化: `div` / `mod` (Euclid) と `quot` / `rem` (切り捨て) に加え `^` / `**` を提供
+- REPL はヒストリ・矢印キー・多行入力・`:load` に対応し、`EBNF` テンプレート全体の即時確認が可能
+- `examples/ebnf_blackbox.tl` を用いた仕様ブラックボックステストと、`tests/` 以下の自動回帰群
 
 ## クイックスタート
 ```bash
@@ -22,56 +22,70 @@
 cargo run
 
 # セッション例
-> :let inc n = n + 1
-> inc 5
-6
-> :t inc
--- Num a => a -> a
-> :load examples/step2_functions.tl
-Loaded 5 def(s)
+> data Maybe a = Nothing | Just a
+> :let fromMaybe def opt = case opt of { Nothing -> def; Just x -> x }
+> :t fromMaybe
+-- a -> Maybe a -> a
+> fromMaybe 0 (Just 42)
+42
+> div 7 3
+2
+> :load examples/ebnf_blackbox.tl
+Loaded 24 def(s)
 ```
-`Ctrl+C` で現在の入力をキャンセル、`Ctrl+D` で REPL を終了できます。継続行は `.. ` プロンプトで示されます。
+`Ctrl+C` で現在入力をキャンセル、`Ctrl+D` で REPL を終了。継続行は `.. ` プロンプトで表示されます。
 
-## ディレクトリガイド
-- **`EBNF.md` — 言語仕様の正準 EBNF**
-- `src/ast.rs` — 抽象構文木の定義と表示補助
-- `src/lexer.rs` / `src/parser.rs` — UTF-8 対応の字句/構文解析
-- `src/typesys.rs` / `src/infer.rs` — 型表現、制約解決、defaulting
-- `src/evaluator.rs` — 正格評価器とプリミティブ実装
-- `src/repl/` — コマンド、レンダラ、履歴管理
-- `examples/*.tl` — 段階別の教材スクリプト
-- `tests/` — lexer / parser / infer / evaluator / repl の回帰テスト群
+## 言語機能スナップショット
+- **データ定義**: `data Color = Red | Green | Blue` / パラメトリック `data Box a = Box a`
+- **パターン**: ワイルドカード `_`、変数、リテラル、コンストラクタ (`Just (Box x)` など)
+- **式**: `case`、`let-in`、ラムダ、部分適用、リスト／タプル／型注釈
+- **プリミティブ**: 算術 `+ - * /`、冪乗 `^` / `**`、比較、`div/mod/quot/rem`
+- **型クラス**: `Num` / `Fractional` に応じて数値推論・defaulting を制御 (`:t` / `--defaulting`)
 
 ## 学習ロードマップ
-1. `examples/step1_numbers.tl` で数値演算とリテラルに慣れる。
-2. `examples/step2_functions.tl` で関数定義と部分適用を体験。
-3. `examples/step3_conditionals.tl` で条件式と論理演算を復習。
-4. `tests/` を参照して仕様ベースのテスト作法を学ぶ。
+1. `examples/step1_numbers.tl` — リテラルと基本演算
+2. `examples/step2_functions.tl` — 一階関数・部分適用
+3. `examples/step3_conditionals.tl` — 条件分岐と論理演算
+4. `examples/ebnf_blackbox.tl` — 文法全体の総合確認 (data / case / プリミティブ含む)
+5. `tests/` — 仕様ベーステストを読み、追加シナリオを設計
+
+## プロジェクト構成
+- **`EBNF.md`** — 文法仕様の一次ソース
+- `examples/` — 教材兼ブラックボックス検証スクリプト
+- `src/ast.rs` / `src/lexer.rs` / `src/parser.rs` — AST と UTF-8 対応フロントエンド
+- `src/typesys.rs` / `src/infer.rs` — 型表現・単一化・defaulting・パターン推論
+- `src/runtime.rs` / `src/evaluator.rs` — 値表現と評価器 (`Value::Data` 等)
+- `src/primitives.rs` — プリミティブ定義メタデータ
+- `src/repl/` — REPL コマンド・ローダ・レンダラ
+- `tests/` — lexer / parser / infer / evaluator / repl をカバーする統合テスト
 
 ## 開発ワークフロー
 | フェーズ | コマンド | 目的 |
 | --- | --- | --- |
 | 日常開発 | `make check` | `cargo fmt` → `cargo clippy -D warnings` → `cargo test` を一括実行 |
-| CI 確認 | `make ci` | `clean` → `fmt-check` → `clippy` → `test` → `release` を `cargo build/test --frozen --locked` 付きで再現性チェック |
-| リリース前整備 | `make full_local` | クリーンビルド・テスト・ドキュメント・監査までを包括実行 |
-| カバレッジ | `make coverage` | `cargo llvm-cov` による HTML/JSON/LCOV 出力 |
+| CI 確認 | `make ci` | `clean` → `fmt-check` → `clippy` → `test` → `release` (`--frozen --locked`) |
+| リリース前整備 | `make full_local` | ビルド・テスト・ドキュメント・監査をワンコマンドで再現 |
+| カバレッジ | `make coverage` | `cargo llvm-cov` による HTML / JSON / LCOV 生成 |
 
 ## 開発ポリシー
-- 運用上の詳細は `AGENTS.md` に集約されています（クイックスタート, チェックリスト等）。
-- コメント・ドキュメントは日本語で、識別子は英語で統一します。
+- 詳細な運用手順・テンプレは `AGENTS.md` を参照
+- コメント・ドキュメントは日本語、識別子は英語で統一
+- 仕様変更時は **EBNF → 実装 → テスト → examples** の順で同期
 
-## ドキュメントリソース
-- `AGENTS.md` — オペレーションガイドとテンプレート
-- `EBNF.md` — 文法仕様の一次ソース
+## ドキュメント & テストリソース
+- `EBNF.md` — 公式仕様
+- `examples/ebnf_blackbox.tl` — 仕様網羅テスト (ゼロベースで整備済み)
+- `tests/integration.rs` — `:load` / REPL パイプライン / `data` 読み込み検証
 
 ## トラブルシューティング
 | 症状 | 対応策 |
 | --- | --- |
-| `make check` が失敗する | 直近の変更ファイルを確認し、`cargo test --test <name>` で局所再検証。 |
-| REPL が固まる | `Ctrl+C` で現在の入力を一旦破棄し、多行入力が継続していないか確認。 |
-| 推論結果が意図しない | `:t` で型を確認し、`Num` / `Fractional` 制約の残り具合をチェック。 |
+| `make check` が失敗 | 変更箇所に絞って `cargo test --test <name>` / `cargo clippy -p typelang-hm-rs` を実行 |
+| `:load` で型エラー | `EBNF.md` と `examples/ebnf_blackbox.tl` の差分を確認し、仕様と実装の乖離を解消 |
+| `case` が該当しない | パターン重複や抜け漏れを確認し、ワイルドカード `_` を追加 |
+| `div/mod/quot/rem` の挙動が不明 | Euclid (`div`/`mod`) と trunc (`quot`/`rem`) の違いを `tests/evaluator.rs` に沿って検証 |
 
 ## ライセンス
-- ライセンスは MIT（`LICENSE` を確認）。
+- MIT License（詳細は `LICENSE` を参照）
 
 Happy hacking!

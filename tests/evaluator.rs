@@ -130,6 +130,36 @@ fn evaluator_smoke_suite() {
             note: "powf の負指数",
         },
         EvalCase {
+            expr: "div 7 3",
+            expect: Expect::Int(2),
+            note: "整数 Euclid 除算",
+        },
+        EvalCase {
+            expr: "mod 7 3",
+            expect: Expect::Int(1),
+            note: "整数 Euclid 剰余",
+        },
+        EvalCase {
+            expr: "div (-7) 3",
+            expect: Expect::Int(-3),
+            note: "負値の Euclid 除算",
+        },
+        EvalCase {
+            expr: "mod (-7) 3",
+            expect: Expect::Int(2),
+            note: "負値の Euclid 剰余",
+        },
+        EvalCase {
+            expr: "quot (-7) 3",
+            expect: Expect::Int(-2),
+            note: "quot のゼロ方向切り捨て",
+        },
+        EvalCase {
+            expr: "rem (-7) 3",
+            expect: Expect::Int(-1),
+            note: "rem は被除数と同符号",
+        },
+        EvalCase {
             expr: "(0.0 / 0.0) == (0.0 / 0.0)",
             expect: Expect::Bool(false),
             note: "NaN 同士の比較は false",
@@ -138,6 +168,16 @@ fn evaluator_smoke_suite() {
             expr: "show 42",
             expect: Expect::String("42"),
             note: "show が文字列を返す",
+        },
+        EvalCase {
+            expr: "case True of True -> 1; False -> 0",
+            expect: Expect::Int(1),
+            note: "case 式で Bool を分岐",
+        },
+        EvalCase {
+            expr: "case 42 of x -> x",
+            expect: Expect::Int(42),
+            note: "case 変数束縛",
         },
     ];
 
@@ -161,6 +201,21 @@ fn evaluator_smoke_suite() {
             expr: "1 2",
             expect: Expect::Error("EVAL020"),
             note: "非関数値の適用",
+        },
+        EvalCase {
+            expr: "div 1 0",
+            expect: Expect::Error("EVAL061"),
+            note: "div のゼロ除算",
+        },
+        EvalCase {
+            expr: "quot 1 0",
+            expect: Expect::Error("EVAL061"),
+            note: "quot のゼロ除算",
+        },
+        EvalCase {
+            expr: "case False of True -> 1",
+            expect: Expect::Error("EVAL070"),
+            note: "case で該当分岐なし",
         },
     ];
 

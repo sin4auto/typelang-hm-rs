@@ -102,7 +102,6 @@ fn type_error_if_condition_not_bool() {
     let ce = infer::initial_class_env();
     let mut st = infer::InferState {
         supply: typesys::TVarSupply::new(),
-        subst: Default::default(),
     };
     assert!(infer::infer_expr(&env, &ce, &mut st, &expr).is_err());
 }

@@ -127,6 +127,25 @@ fn eval_expr_inner(e: &A::Expr, env: &mut Env) -> Result<Value, EvalError> {
                 ))
             }
         }
+        Case {
+            scrutinee, arms, ..
+        } => {
+            let value = eval_expr(scrutinee, env)?;
+            for arm in arms {
+                if let Some(bindings) = match_pattern(&arm.pattern, &value) {
+                    let mut env_branch = env.clone();
+                    for (name, val) in bindings {
+                        env_branch.insert(name, val);
+                    }
+                    return eval_expr(&arm.body, &mut env_branch);
+                }
+            }
+            Err(EvalError::new(
+                "EVAL070",
+                "case 式で適用可能な分岐がありません",
+                None,
+            ))
+        }
         App { func, arg, .. } => {
             let f = eval_expr(func, env)?;
             let x = eval_expr(arg, env)?;
@@ -167,5 +186,58 @@ fn nonzero(value: usize) -> Option<usize> {
         None
     } else {
         Some(value)
+    }
+}
+
+fn merge_bindings(
+    mut base: HashMap<String, Value>,
+    extra: HashMap<String, Value>,
+) -> Option<HashMap<String, Value>> {
+    for (k, v) in extra {
+        if base.contains_key(&k) {
+            return None;
+        }
+        base.insert(k, v);
+    }
+    Some(base)
+}
+
+fn match_pattern(pattern: &A::Pattern, value: &Value) -> Option<HashMap<String, Value>> {
+    match pattern {
+        A::Pattern::Wildcard { .. } => Some(HashMap::new()),
+        A::Pattern::Var { name, .. } => {
+            let mut map = HashMap::new();
+            map.insert(name.clone(), value.clone());
+            Some(map)
+        }
+        A::Pattern::Int {
+            value: expected, ..
+        } => match value {
+            Value::Int(v) if v == expected => Some(HashMap::new()),
+            _ => None,
+        },
+        A::Pattern::Bool {
+            value: expected, ..
+        } => match value {
+            Value::Bool(v) if v == expected => Some(HashMap::new()),
+            _ => None,
+        },
+        A::Pattern::Constructor { name, args, .. } => match value {
+            Value::Data {
+                constructor,
+                fields,
+            } => {
+                if constructor != name || fields.len() != args.len() {
+                    return None;
+                }
+                let mut bindings = HashMap::new();
+                for (subpat, field) in args.iter().zip(fields.iter()) {
+                    let sub = match_pattern(subpat, field)?;
+                    bindings = merge_bindings(bindings, sub)?;
+                }
+                Some(bindings)
+            }
+            _ => None,
+        },
     }
 }

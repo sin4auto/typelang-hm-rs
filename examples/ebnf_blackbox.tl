@@ -1,91 +1,106 @@
 -- パス: examples/ebnf_blackbox.tl
--- 役割: TypeLang HM EBNF を網羅するブラックボックステスト
--- 意図: 字句・型・式の仕様を 1 ファイルで検証する
--- 関連ファイル: EBNF.md, src/parser.rs, examples/advanced.tl
+-- 役割: TypeLang HM EBNF を網羅するブラックボックス仕様テスト
+-- 意図: 字句・構文・式・型の全要素を 1 ファイルで検証する
+-- 関連ファイル: EBNF.md, src/parser.rs, tests/integration.rs
 
 {- ブロックコメントのネスト確認
    {- 入れ子も許容される -}
 -}
 
--- 多重制約と比較演算子の網羅
-compareTuple :: (Eq a, Ord a) => a -> a -> (Bool, Bool, Bool, Bool, Bool, Bool);
-let compareTuple left right =
-  ( left == right
-  , left /= right
-  , left < right
-  , left <= right
-  , left > right
-  , left >= right
-  );
+data Maybe a = Nothing | Just a;
+data Color = Red | Green | Blue;
+data Box a = Box a;
 
--- 単一制約と数値演算の網羅
-shiftNum :: Num n => n -> n;
-let shiftNum n = ((n + 1) - 2) * 3 / 3;
+arithSeries :: Integer -> (Integer, Integer, Integer, Integer);
+let arithSeries n =
+  let euclidQ = div (n + 9) 4;
+      euclidR = mod (n + 9) 4;
+      truncQ = quot (n - 9) 4;
+      truncR = rem (n - 9) 4
+  in (euclidQ, euclidR, truncQ, truncR);
 
--- let-in と複数 bind、タプル・リスト型注釈を含む例
-collector :: a -> (a, [a], (a, a, a));
-let collector item =
-  let repeated = [item, item];
-      triplet x = (item, x, item)
-  in (item, (repeated :: [a]), triplet item);
+floatingCombo :: Fractional f => f -> f;
+let floatingCombo x = (x / 2) + (x ** 0.5);
 
--- λ式と関数適用の確認
+structurePack :: a -> (a, [a], (a, a, a));
+let structurePack value =
+  let duplicate = [value, value];
+      embed y = (value, y, value)
+  in (value, (duplicate :: [a]), embed value);
+
 applyTwice :: (a -> a) -> a -> a;
 let applyTwice fn seed = (\g x -> g (g x)) fn seed;
 
--- 未使用引数と varid に `'` を含む例
-let dropFirst unused rest = rest;
-let counter' start = start + 1;
+let colorFlag shade =
+  case shade of
+    Red -> 1;
+    Green -> 2;
+    Blue -> 3;
+    _ -> 0;
 
-let decimal = (42 :: Int);
-let hexadecimal = (0x2A :: Int);
-let octal = (0o77 :: Int);
-let binary = (0b101010 :: Int);
-let negativeHex = (-0xF :: Int);
-
--- 浮動小数点リテラルと指数表記
-let floatPoint = 3.1415;
-let floatExponent = 6.02e23;
-let floatMixed = 1.0e-2;
-
--- 文字・文字列リテラルとエスケープ
-let newlineChar = '\n';
-let quoteChar = '\'';
-let escapedString = "Line1\nLine2\t\"quoted\"\\";
-
--- True / False と if-then-else の網羅
 let classifyNumber n =
   if n < 0 then "negative"
   else if n == 0 then "zero"
   else "positive";
 
--- let-in の追加例と型注釈付き式
+let shiftNum n = ((n + 1) - 2) * 3 / 3;
+
+let patternJudge candidate =
+  case candidate of
+    Just 0 -> "zero";
+    Just n -> classifyNumber n;
+    Nothing -> "missing"
+
+maybeDefault :: a -> Maybe a -> a;
+let maybeDefault fallback option =
+  case option of
+    Nothing -> fallback;
+    Just value -> value;
+
+let boxUnwrap box =
+  case box of
+    Box value -> value;
+
+let escapedText = "Line1\nLine2\t\"quoted\"\\";
+let newlineChar = '\n';
+let quoteChar = '\'';
+
+let decimal = (42 :: Int);
+let hexadecimal = (0x2A :: Int);
+let octal = (0o77 :: Int);
+let binary = (0b101010 :: Int);
+negativeHex :: Int;
+let negativeHex = -0xF;
+
+let typedList = ([decimal, hexadecimal, octal, binary] :: [Int]);
+let typedTuple = ((colorFlag Red, colorFlag Green, colorFlag Blue) :: (Int, Int, Int));
+
+let counter' start = start + 1;
+
+let pipeline =
+  applyTwice (\value -> let scaled = value * 2 in scaled + 1) 3;
+
 let scopedComputation flag =
   let base = if flag then (1 :: Int) else (0 :: Int);
-      adjust v = v + shiftNum base
+      shift m = m + 1;
+      adjust v = v + shift base
   in (adjust base) :: Int;
 
--- リスト・タプル・型注釈の網羅
-let typedList = ([decimal, hexadecimal, octal, binary] :: [Int]);
-let typedTuple = ((compareTuple True False) :: (Bool, Bool, Bool, Bool, Bool, Bool));
+let typedCase = (maybeDefault decimal (Just decimal)) :: Int;
 
--- 型注釈を伴うシンプルな束縛
-phantomMaybe :: Int;
-let phantomMaybe = decimal;
+let boxSample = Box decimal;
+let boxValue = boxUnwrap boxSample;
 
--- 冪乗演算子と連鎖適用
+let maybeBox = Just (Box decimal);
+let nestedCase =
+  case maybeBox of
+    Just (Box x) -> x;
+    Nothing -> decimal
+
+let boolList = [True, False];
+
 let powerInt = 2 ^ 8;
 let powerNegative = 2 ^ -1;
 let powerFloat = 16 ** 0.5;
 
--- アプリケーション連鎖の例
-let pipeline = applyTwice (
-  \value ->
-    let scaled = value * 2
-    in scaled + 1
-  ) 3;
-
-let sequential = shiftNum 10; let annotated = (collector True);
-
--- '?' プレースホルダ文字列の例
-let debugHole = "?todo";
+let debugString = "?todo";

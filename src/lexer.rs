@@ -50,6 +50,7 @@ pub enum TokenKind {
     EQUAL,
     QMARK,
     UNDERSCORE,
+    BAR,
     // リテラル分類
     CHAR,
     STRING,
@@ -67,6 +68,9 @@ pub enum TokenKind {
     IF,
     THEN,
     ELSE,
+    CASE,
+    OF,
+    DATA,
     TRUE,
     FALSE,
 }
@@ -402,6 +406,11 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
             }
             '=' => {
                 push_simple_token(&mut toks, TokenKind::EQUAL, "=", i, &line_map, src);
+                i += 1;
+                continue;
+            }
+            '|' => {
+                push_simple_token(&mut toks, TokenKind::BAR, "|", i, &line_map, src);
                 i += 1;
                 continue;
             }
@@ -746,6 +755,27 @@ pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
                 },
                 "else" => Token {
                     kind: TokenKind::ELSE,
+                    value: s.into(),
+                    pos: start,
+                    line,
+                    col,
+                },
+                "case" => Token {
+                    kind: TokenKind::CASE,
+                    value: s.into(),
+                    pos: start,
+                    line,
+                    col,
+                },
+                "of" => Token {
+                    kind: TokenKind::OF,
+                    value: s.into(),
+                    pos: start,
+                    line,
+                    col,
+                },
+                "data" => Token {
+                    kind: TokenKind::DATA,
                     value: s.into(),
                     pos: start,
                     line,

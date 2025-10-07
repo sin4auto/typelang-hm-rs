@@ -9,8 +9,8 @@
 //! - 実装ロジックは個別モジュール側に残しつつ、一覧のみ共有する。
 
 use crate::runtime::{
-    add_op, div_op, eq_op, ge_op, gt_op, le_op, lt_op, mul_op, ne_op, powf, powi, py_show, sub_op,
-    PrimOp,
+    add_op, div_int_op, div_op, eq_op, ge_op, gt_op, le_op, lt_op, mod_int_op, mul_op, ne_op, powf,
+    powi, py_show, quot_int_op, rem_int_op, sub_op, PrimOp,
 };
 
 /// 型推論側で利用するスキーム分類。
@@ -20,6 +20,7 @@ pub enum PrimitiveTypeSpec {
     IntPow,
     Pred { classname: &'static str },
     Show,
+    IntBin,
 }
 
 /// プリミティブ定義。
@@ -53,6 +54,26 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
             classname: "Fractional",
         },
         op: PrimOp::binary(div_op),
+    },
+    PrimitiveDef {
+        name: "div",
+        type_spec: PrimitiveTypeSpec::IntBin,
+        op: PrimOp::binary(div_int_op),
+    },
+    PrimitiveDef {
+        name: "mod",
+        type_spec: PrimitiveTypeSpec::IntBin,
+        op: PrimOp::binary(mod_int_op),
+    },
+    PrimitiveDef {
+        name: "quot",
+        type_spec: PrimitiveTypeSpec::IntBin,
+        op: PrimOp::binary(quot_int_op),
+    },
+    PrimitiveDef {
+        name: "rem",
+        type_spec: PrimitiveTypeSpec::IntBin,
+        op: PrimOp::binary(rem_int_op),
     },
     PrimitiveDef {
         name: "^",

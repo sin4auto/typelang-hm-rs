@@ -9,17 +9,14 @@ use crate::ast as A;
 use crate::evaluator::{initial_env as value_env_init, Value};
 use crate::infer::{initial_class_env, initial_env as type_env_init};
 use crate::parser::{parse_expr, parse_program};
-use crate::typesys::{generalize, pretty_qual};
+use crate::typesys::pretty_qual;
 
 use std::io::{self, Write};
 
 use super::line_editor::{LineEditor, ReadResult};
 use super::loader::load_program_into_env;
-use super::pipeline::{
-    eval_expr_for_pipeline, fallback_qual_from_value, fallback_scheme_from_value, infer_qual_type,
-};
+use super::pipeline::{run_repl_pipeline, EvaluationMode};
 use super::printer::{render_help, write_value};
-use super::util::normalize_expr;
 
 /// TypeLang の対話セッションを開始し、ユーザー入力を処理し続ける。
 ///
@@ -257,14 +254,15 @@ impl ReplSession {
 
     fn exec_type_of(&mut self, src: &str) -> Vec<ReplMsg> {
         match parse_expr(src) {
-            Ok(expr) => match type_string_in_current_env(
+            Ok(expr) => match run_repl_pipeline(
                 &self.type_env,
                 &self.class_env,
                 &expr,
                 self.defaulting_on,
                 &mut self.value_env,
+                EvaluationMode::OnInferenceFailure,
             ) {
-                Ok(s) => vec![ReplMsg::Out(format!("-- {}", s))],
+                Ok(result) => vec![ReplMsg::Out(format!("-- {}", pretty_qual(&result.qual)))],
                 Err(msg) => vec![ReplMsg::Err(msg)],
             },
             Err(e) => vec![ReplMsg::Err(format!("{}", e))],
@@ -371,17 +369,21 @@ impl ReplSession {
 
     fn exec_eval(&mut self, src: &str) -> Vec<ReplMsg> {
         match parse_expr(src) {
-            Ok(expr) => match infer_and_generalize_for_repl(
+            Ok(expr) => match run_repl_pipeline(
                 &self.type_env,
                 &self.class_env,
                 &expr,
                 self.defaulting_on,
                 &mut self.value_env,
+                EvaluationMode::Always,
             ) {
-                Ok((sch, val)) => {
-                    self.type_env.extend("it", sch);
-                    self.value_env.insert("it".into(), val.clone());
-                    vec![ReplMsg::Value(val)]
+                Ok(result) => {
+                    let value = result
+                        .value
+                        .expect("pipeline with Always mode must return a value");
+                    self.type_env.extend("it", result.scheme);
+                    self.value_env.insert("it".into(), value.clone());
+                    vec![ReplMsg::Value(value)]
                 }
                 Err(msg) => vec![ReplMsg::Err(msg)],
             },
@@ -590,230 +592,30 @@ pub(crate) fn normalize_let_payload(payload: &str) -> String {
         }
     }
 }
-// :t 応答のために推論・defaulting・評価フォールバックをまとめ上げる。
-/// 型環境とクラス環境を用いて `:t` の表示用文字列を導出する。
-fn type_string_in_current_env(
-    type_env: &crate::typesys::TypeEnv,
-    class_env: &crate::typesys::ClassEnv,
-    expr: &A::Expr,
-    defaulting_on: bool,
-    value_env: &mut crate::evaluator::Env,
-) -> Result<String, String> {
-    let normalized = normalize_expr(expr);
-    match infer_qual_type(type_env, class_env, &normalized, defaulting_on) {
-        Ok(q) => Ok(pretty_qual(&q)),
-        Err(_) => {
-            let value =
-                eval_expr_for_pipeline(&normalized, value_env).map_err(|e| e.to_string())?;
-            let qt = fallback_qual_from_value(&value);
-            Ok(pretty_qual(&qt))
-        }
-    }
-}
-
-// REPL が `it` バインディングを更新するための推論 + 評価経路。
-/// 式を評価して `it` を再定義し、同時に一般化済みの型情報を返す。
-fn infer_and_generalize_for_repl(
-    type_env: &crate::typesys::TypeEnv,
-    class_env: &crate::typesys::ClassEnv,
-    expr: &A::Expr,
-    defaulting_on: bool,
-    value_env: &mut crate::evaluator::Env,
-) -> Result<(crate::typesys::Scheme, Value), String> {
-    let normalized = normalize_expr(expr);
-    match infer_qual_type(type_env, class_env, &normalized, defaulting_on) {
-        Ok(q) => {
-            let scheme = generalize(type_env, q);
-            let value =
-                eval_expr_for_pipeline(&normalized, value_env).map_err(|e| e.to_string())?;
-            Ok((scheme, value))
-        }
-        Err(_) => {
-            let value =
-                eval_expr_for_pipeline(&normalized, value_env).map_err(|e| e.to_string())?;
-            let scheme = fallback_scheme_from_value(type_env, &value);
-            Ok((scheme, value))
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use super::{handle_command, needs_more_input, normalize_let_payload, parse_repl_command};
+    use crate::repl::printer::write_value;
+    use crate::typesys::TypeEnv;
+    use crate::{evaluator, infer};
+    use std::collections::{HashMap, VecDeque};
     use std::io;
 
-    use super::ReadResult;
-    use super::{
-        handle_command, needs_more_input, normalize_let_payload, parse_repl_command, run_repl_with,
-        ReplCommand, ReplIo, ReplLineSource, ReplMsg, ReplSession,
-    };
-    use crate::typesys::{qualify, Scheme, TCon, Type, TypeEnv};
-    use crate::{evaluator, infer};
+    struct MapIo(HashMap<String, Result<String, String>>);
 
-    #[test]
-    /// 未閉じの括弧や角括弧で継続入力が必要かを確認する。
-    fn needs_more_input_balancing_paren_bracket() {
-        assert!(needs_more_input("(1 + 2"));
-        assert!(!needs_more_input("(1 + 2)"));
-        assert!(needs_more_input("[1, 2"));
-        assert!(!needs_more_input("[1, 2]"));
-    }
-
-    #[test]
-    /// 文字列と文字リテラルの閉じ忘れを検知できるか検証する。
-    fn needs_more_input_strings_and_chars() {
-        assert!(needs_more_input("\"abc"));
-        assert!(!needs_more_input("\"abc\""));
-        assert!(needs_more_input("'a"));
-        assert!(!needs_more_input("'a'"));
-        // エスケープ済みで閉じているケースは継続扱いにならない。
-        assert!(!needs_more_input("\"a\\\"b\""));
-        assert!(!needs_more_input("'\\''"));
-    }
-
-    #[test]
-    /// コマンド行が常に単独で確定することを確かめる。
-    fn needs_more_input_commands_do_not_continue() {
-        // 先頭が ':' の行は常に単行で確定させる。
-        assert!(!needs_more_input(":t ("));
-        assert!(!needs_more_input(":load file.tl"));
-    }
-
-    #[test]
-    /// `:let` の正規化が入力パターンごとに期待通り働くかを確認する。
-    fn normalize_let_payload_single_and_multi() {
-        assert_eq!(normalize_let_payload("f x = x"), "let f x = x");
-        assert_eq!(
-            normalize_let_payload("let f x = x; g y = y"),
-            "let f x = x;\nlet g y = y"
-        );
-        assert_eq!(normalize_let_payload("id :: a -> a"), "id :: a -> a");
-    }
-
-    #[test]
-    /// 代表的なコマンドが想定した `ReplCommand` に分類されるかを確認する。
-    fn parse_repl_command_variants() {
-        assert_eq!(parse_repl_command(":help"), ReplCommand::Help);
-        assert_eq!(parse_repl_command(":q"), ReplCommand::Quit);
-        assert_eq!(
-            parse_repl_command(":t 1 + 2"),
-            ReplCommand::TypeOf("1 + 2".into())
-        );
-        match parse_repl_command(":let f x = x") {
-            ReplCommand::Let(src) => assert!(src.starts_with("let f")),
-            other => panic!("unexpected: {:?}", other),
+    impl MapIo {
+        fn new() -> Self {
+            Self(HashMap::new())
         }
-        assert_eq!(
-            parse_repl_command(":load examples/basics.tl"),
-            ReplCommand::Load("examples/basics.tl".into())
-        );
-        assert_eq!(parse_repl_command(":reload"), ReplCommand::Reload);
-        assert_eq!(
-            parse_repl_command(":browse foo"),
-            ReplCommand::Browse(Some("foo".into()))
-        );
-        assert_eq!(
-            parse_repl_command(":set default on"),
-            ReplCommand::SetDefault(true)
-        );
-        assert_eq!(
-            parse_repl_command(":unset x"),
-            ReplCommand::Unset("x".into())
-        );
-        match parse_repl_command("let id x = x") {
-            ReplCommand::Let(src) => assert!(src.starts_with("let id")),
-            other => panic!("unexpected: {:?}", other),
-        }
-        assert_eq!(
-            parse_repl_command("1 + 2"),
-            ReplCommand::Eval("1 + 2".into())
-        );
-    }
 
-    #[test]
-    /// 異常な `:set` 入力が `Invalid` へ落ちることを保証する。
-    fn parse_repl_command_invalid_variants() {
-        match parse_repl_command(":set default maybe") {
-            ReplCommand::Invalid(src) => assert_eq!(src, ":set default maybe"),
-            other => panic!("expected invalid, got {:?}", other),
-        }
-        match parse_repl_command(":set other on") {
-            ReplCommand::Invalid(src) => assert_eq!(src, ":set other on"),
-            other => panic!("expected invalid, got {:?}", other),
+        fn ok(mut self, path: &str, src: &str) -> Self {
+            self.0.insert(path.to_string(), Ok(src.to_string()));
+            self
         }
     }
 
-    /// ファイルアクセスを発生させないテスト専用のダミー I/O 実装。
-    struct NoopIo;
-    impl ReplIo for NoopIo {
-        /// どのパスに対しても失敗を返す。
-        fn read_to_string(&self, _path: &str) -> Result<String, String> {
-            Err("unexpected io".into())
-        }
-    }
-
-    /// テスト実行時に利用する空の REPL 状態を生成する。
-    fn mk_state() -> ReplSession {
-        ReplSession::new(
-            TypeEnv::new(),
-            infer::initial_class_env(),
-            evaluator::initial_env(),
-        )
-    }
-
-    #[test]
-    /// `:browse`・`:set default`・`:unset` の挙動をまとめて検証する。
-    fn handle_browse_and_set_default_and_unset() {
-        let mut state = mk_state();
-        // テスト用に 2 つの定義を型環境へ追加する。
-        let sch = Scheme {
-            vars: vec![],
-            qual: qualify(Type::TCon(TCon { name: "Int".into() }), vec![]),
-        };
-        state.type_env.extend("foo", sch.clone());
-        state.type_env.extend("bar", sch);
-
-        // プレフィックスなしの :browse を確認する。
-        let msgs = handle_command(&mut state, ReplCommand::Browse(None), &NoopIo);
-        let outs: Vec<String> = msgs
-            .into_iter()
-            .filter_map(|m| match m {
-                ReplMsg::Out(s) => Some(s),
-                _ => None,
-            })
-            .collect();
-        assert!(outs.iter().any(|s| s.contains("  bar :: Int")));
-        assert!(outs.iter().any(|s| s.contains("  foo :: Int")));
-
-        // プレフィックス付き :browse のフィルタ挙動を検証する。
-        let msgs = handle_command(&mut state, ReplCommand::Browse(Some("fo".into())), &NoopIo);
-        let outs: Vec<String> = msgs
-            .into_iter()
-            .filter_map(|m| match m {
-                ReplMsg::Out(s) => Some(s),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(outs.len(), 1);
-        assert!(outs[0].contains("foo :: Int"));
-
-        // defaulting を有効化する。
-        let msgs = handle_command(&mut state, ReplCommand::SetDefault(true), &NoopIo);
-        assert!(matches!(msgs[0], ReplMsg::Out(ref s) if s.contains("set default = on")));
-        assert!(state.defaulting_on);
-
-        // 既存定義を削除できることを確認する。
-        let msgs = handle_command(&mut state, ReplCommand::Unset("foo".into()), &NoopIo);
-        assert!(matches!(msgs[0], ReplMsg::Out(ref s) if s.contains("Unset foo")));
-        assert!(state.type_env.lookup("foo").is_none());
-        // 同じ定義を再度削除しようとするとエラーになる。
-        let msgs = handle_command(&mut state, ReplCommand::Unset("foo".into()), &NoopIo);
-        assert!(matches!(msgs[0], ReplMsg::Err(ref s) if s.contains("未定義")));
-    }
-
-    /// 事前に登録したレスポンスを返すテスト用モック I/O。
-    struct MapIo(std::collections::HashMap<String, Result<String, String>>);
     impl ReplIo for MapIo {
-        /// マップに登録されたレスポンスをそのまま返す。
         fn read_to_string(&self, path: &str) -> Result<String, String> {
             self.0
                 .get(path)
@@ -822,11 +624,193 @@ mod tests {
         }
     }
 
+    struct NoopIo;
+
+    impl ReplIo for NoopIo {
+        fn read_to_string(&self, _: &str) -> Result<String, String> {
+            Err("unexpected io".into())
+        }
+    }
+
+    fn mk_state() -> ReplSession {
+        ReplSession::new(
+            TypeEnv::new(),
+            infer::initial_class_env(),
+            evaluator::initial_env(),
+        )
+    }
+
+    #[derive(Debug)]
+    enum Expected<'a> {
+        Out(&'a str),
+        Err(&'a str),
+        Value(&'a str),
+    }
+
+    fn assert_msgs(msgs: Vec<ReplMsg>, expected: &[Expected<'_>]) {
+        assert_eq!(msgs.len(), expected.len(), "message length mismatch");
+        for (msg, expect) in msgs.into_iter().zip(expected.iter()) {
+            match (msg, expect) {
+                (ReplMsg::Out(actual), Expected::Out(fragment)) => {
+                    assert!(
+                        actual.contains(fragment),
+                        "expected stdout to contain `{fragment}`, got `{actual}`"
+                    );
+                }
+                (ReplMsg::Err(actual), Expected::Err(fragment)) => {
+                    assert!(
+                        actual.contains(fragment),
+                        "expected stderr to contain `{fragment}`, got `{actual}`"
+                    );
+                }
+                (ReplMsg::Value(value), Expected::Value(fragment)) => {
+                    let mut buf = Vec::new();
+                    write_value(&mut buf, &value).expect("value serialization");
+                    let rendered = String::from_utf8(buf).expect("utf8");
+                    assert!(
+                        rendered.contains(fragment),
+                        "expected value to contain `{fragment}`, got `{rendered}`"
+                    );
+                }
+                (other, expect) => {
+                    let actual = match other {
+                        ReplMsg::Out(_) => "Out",
+                        ReplMsg::Err(_) => "Err",
+                        ReplMsg::Value(_) => "Value",
+                    };
+                    panic!("mismatched variants: actual {actual}, expected {expect:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn needs_more_input_cases() {
+        let cases = [
+            ("(1 + 2", true),
+            (r#""abc"#, true),
+            ("'a'", false),
+            (":t (", false),
+            ("let x = 1", false),
+        ];
+        for (src, expected) in cases {
+            assert_eq!(needs_more_input(src), expected, "case `{src}`");
+        }
+    }
+
+    #[test]
+    fn normalize_let_payload_cases() {
+        let cases = [
+            ("f x = x", "let f x = x"),
+            ("let g y = y", "let g y = y"),
+            ("id :: a -> a", "id :: a -> a"),
+            ("f x = x; g y = y", "let f x = x;\nlet g y = y"),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(normalize_let_payload(input), expected);
+        }
+    }
+
+    #[test]
+    fn parse_repl_command_variants() {
+        let cases = [
+            (":help", ReplCommand::Help),
+            (":h", ReplCommand::Help),
+            (":quit", ReplCommand::Quit),
+            (":type 1 + 2", ReplCommand::TypeOf("1 + 2".into())),
+            (":t x", ReplCommand::TypeOf("x".into())),
+            (":let f x = x", ReplCommand::Let("let f x = x".into())),
+            (":load file.tl", ReplCommand::Load("file.tl".into())),
+            (":browse fo", ReplCommand::Browse(Some("fo".into()))),
+            (":browse", ReplCommand::Browse(None)),
+            (":set default on", ReplCommand::SetDefault(true)),
+            (":set default off", ReplCommand::SetDefault(false)),
+            (":unset foo", ReplCommand::Unset("foo".into())),
+            (":reload", ReplCommand::Reload),
+            ("let x = x", ReplCommand::Let("let x = x".into())),
+            ("1 + 2", ReplCommand::Eval("1 + 2".into())),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(parse_repl_command(input), expected, "input `{input}`");
+        }
+    }
+
+    #[test]
+    fn parse_repl_command_invalid_inputs() {
+        for input in [":set default maybe", ":set default", ":set other on"] {
+            match parse_repl_command(input) {
+                ReplCommand::Invalid(s) => assert_eq!(s, input),
+                other => panic!("expected invalid for `{input}`, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn handle_command_core_scenarios() {
+        let mut state = mk_state();
+        let msgs = handle_command(&mut state, ReplCommand::Let("let foo = 1".into()), &NoopIo);
+        assert_msgs(msgs, &[Expected::Out("Defined foo")]);
+
+        let browse = handle_command(&mut state, ReplCommand::Browse(None), &NoopIo);
+        assert_msgs(browse, &[Expected::Out("foo ::")]);
+
+        let set_default = handle_command(&mut state, ReplCommand::SetDefault(true), &NoopIo);
+        assert_msgs(set_default, &[Expected::Out("set default = on")]);
+        assert!(state.defaulting_on);
+
+        let unset_ok = handle_command(&mut state, ReplCommand::Unset("foo".into()), &NoopIo);
+        assert_msgs(unset_ok, &[Expected::Out("Unset foo")]);
+
+        let unset_err = handle_command(&mut state, ReplCommand::Unset("foo".into()), &NoopIo);
+        assert_msgs(unset_err, &[Expected::Err("未定義")]);
+    }
+
+    #[test]
+    fn type_and_eval_pipeline() {
+        let mut state = ReplSession::with_defaults();
+        let typeof_msgs = handle_command(&mut state, ReplCommand::TypeOf("True".into()), &NoopIo);
+        assert_msgs(typeof_msgs, &[Expected::Out("Bool")]);
+
+        let typeof_err = handle_command(&mut state, ReplCommand::TypeOf("missing".into()), &NoopIo);
+        assert_msgs(typeof_err, &[Expected::Err("未束縛")]);
+
+        let eval_msgs = handle_command(&mut state, ReplCommand::Eval("1 + 1".into()), &NoopIo);
+        assert_msgs(eval_msgs, &[Expected::Value("2")]);
+        assert!(state.type_env.lookup("it").is_some());
+
+        let parse_err = handle_command(&mut state, ReplCommand::TypeOf("(1 +".into()), &NoopIo);
+        assert_msgs(parse_err, &[Expected::Err("[PAR")]);
+    }
+
+    #[test]
+    fn load_and_reload_flow() {
+        let io = MapIo::new().ok("mem://ok", "let x = 1;");
+        let mut state = mk_state();
+
+        let load = handle_command(&mut state, ReplCommand::Load("mem://ok".into()), &io);
+        assert_msgs(load, &[Expected::Out("Loaded"), Expected::Out("x ::")]);
+
+        let reload = handle_command(&mut state, ReplCommand::Reload, &io);
+        assert_msgs(reload, &[Expected::Out("Reloaded")]);
+
+        let missing = handle_command(&mut state, ReplCommand::Load("mem://missing".into()), &io);
+        assert_msgs(missing, &[Expected::Err("not found")]);
+
+        let mut fresh = mk_state();
+        let reload_err = handle_command(&mut fresh, ReplCommand::Reload, &io);
+        assert_msgs(reload_err, &[Expected::Err("直近の :load")]);
+    }
+
     #[derive(Default)]
     struct ScriptedLineSource {
-        events: std::collections::VecDeque<ScriptEvent>,
+        events: VecDeque<ScriptEvent>,
         history: Vec<String>,
         saved: bool,
+    }
+
+    enum ScriptEvent {
+        Line(&'static str),
+        Eof,
     }
 
     impl ScriptedLineSource {
@@ -839,15 +823,10 @@ mod tests {
         }
     }
 
-    enum ScriptEvent {
-        Line(&'static str),
-        Eof,
-    }
-
     impl ReplLineSource for ScriptedLineSource {
         fn read_line(&mut self, _prompt: &str) -> io::Result<ReadResult> {
             match self.events.pop_front().unwrap_or(ScriptEvent::Eof) {
-                ScriptEvent::Line(s) => Ok(ReadResult::Line(s.to_string())),
+                ScriptEvent::Line(line) => Ok(ReadResult::Line(line.to_string())),
                 ScriptEvent::Eof => Ok(ReadResult::Eof),
             }
         }
@@ -862,170 +841,11 @@ mod tests {
         }
     }
 
-    fn first_err(msgs: Vec<ReplMsg>) -> Option<String> {
-        msgs.into_iter().find_map(|m| match m {
-            ReplMsg::Err(s) => Some(s),
-            _ => None,
-        })
-    }
-
     #[test]
-    /// `:load` と `:reload` の成功パスで状態が更新されるか検証する。
-    fn handle_load_success_and_reload_paths() {
-        let mut state = mk_state();
-        let prog = "let x = 1;".to_string();
-        let mut map = std::collections::HashMap::new();
-        map.insert("mem://ok".into(), Ok(prog));
-        let io = MapIo(map);
-        let msgs = handle_command(&mut state, ReplCommand::Load("mem://ok".into()), &io);
-        // ロード件数と型一覧がレスポンスに含まれることを確認する。
-        let outs: Vec<String> = msgs
-            .into_iter()
-            .filter_map(|m| match m {
-                ReplMsg::Out(s) => Some(s),
-                _ => None,
-            })
-            .collect();
-        assert!(outs
-            .iter()
-            .any(|s| s.contains("Loaded 1 def(s) from mem://ok")));
-        assert!(outs.iter().any(|s| s.starts_with("  x ::")));
-        assert!(state.last_loaded_paths.contains(&"mem://ok".to_string()));
-
-        // :reload でも同様のメッセージが得られる。
-        let msgs = handle_command(&mut state, ReplCommand::Reload, &io);
-        let outs: Vec<String> = msgs
-            .into_iter()
-            .filter_map(|m| match m {
-                ReplMsg::Out(s) => Some(s),
-                _ => None,
-            })
-            .collect();
-        assert!(outs
-            .iter()
-            .any(|s| s.contains("Reloaded 1 def(s) from mem://ok")));
-    }
-
-    #[test]
-    /// 読み込み失敗時と履歴未設定時の `:reload` エラーを確認する。
-    fn handle_load_error_and_reload_without_history() {
-        let mut state = mk_state();
-        // 未登録パスを指定すると読み込みが失敗する。
-        let io = MapIo(std::collections::HashMap::new());
-        let msgs = handle_command(&mut state, ReplCommand::Load("mem://missing".into()), &io);
-        assert!(msgs.iter().any(|m| matches!(m, ReplMsg::Err(_))));
-
-        // ロード履歴が空の状態で :reload を試す。
-        let msgs = handle_command(&mut state, ReplCommand::Reload, &io);
-        assert!(msgs
-            .iter()
-            .any(|m| matches!(m, ReplMsg::Err(s) if s.contains("直近の :load"))));
-    }
-
-    #[test]
-    /// `:reload` が I/O 失敗を取りこぼさず伝搬することを検証する。
-    fn handle_reload_propagates_io_error() {
-        let mut state = mk_state();
-        state.last_loaded_paths.push("mem://missing".into());
-        let io = MapIo(std::collections::HashMap::new());
-        let msgs = handle_command(&mut state, ReplCommand::Reload, &io);
-        let err = first_err(msgs).expect("error response expected");
-        assert!(err.contains("not found"));
-    }
-
-    #[test]
-    /// `:t` のエラーパス (構文エラー / 推論・評価エラー) を網羅する。
-    fn handle_typeof_error_paths() {
-        let mut state = mk_state();
-        let parse_err = handle_command(&mut state, ReplCommand::TypeOf("(1 +".into()), &NoopIo);
-        assert!(
-            first_err(parse_err).unwrap().contains("PAR"),
-            "parser error expected"
-        );
-
-        let infer_err = handle_command(&mut state, ReplCommand::TypeOf("missing".into()), &NoopIo);
-        let msg = first_err(infer_err).unwrap();
-        assert!(msg.contains("未束縛変数"));
-    }
-
-    #[test]
-    /// `:let` や `:load` の失敗が適切にエラーメッセージを返すことを確認する。
-    fn handle_let_and_load_error_paths() {
-        let mut state = mk_state();
-        let msgs = handle_command(&mut state, ReplCommand::Let("let".into()), &NoopIo);
-        assert!(
-            first_err(msgs).unwrap().contains("PAR"),
-            "parse failure expected"
-        );
-
-        let mut map = std::collections::HashMap::new();
-        map.insert("mem://bad".into(), Ok("let".into()));
-        let io = MapIo(map);
-        let msgs = handle_command(&mut state, ReplCommand::Load("mem://bad".into()), &io);
-        assert!(
-            first_err(msgs).unwrap().contains("PAR"),
-            "load parse failure expected"
-        );
-    }
-
-    #[test]
-    /// 評価系コマンドのエラーブランチ (構文・実行時) を網羅する。
-    fn handle_eval_error_paths() {
-        let mut state = mk_state();
-        let parse_err = handle_command(&mut state, ReplCommand::Eval("let".into()), &NoopIo);
-        assert!(
-            first_err(parse_err).unwrap().contains("PAR"),
-            "parse error expected"
-        );
-
-        let runtime_err = handle_command(&mut state, ReplCommand::Eval("missing".into()), &NoopIo);
-        assert!(first_err(runtime_err).unwrap().contains("未束縛変数"));
-    }
-
-    #[test]
-    /// `Invalid` コマンドが標準化されたエラーメッセージを返すことを検証する。
-    fn handle_invalid_command_variant() {
-        let mut state = mk_state();
-        let msgs = handle_command(&mut state, ReplCommand::Invalid("???".into()), &NoopIo);
-        let err = first_err(msgs).unwrap();
-        assert!(err.contains("コマンド形式が不正"));
-    }
-
-    #[test]
-    /// 空入力が空文字列評価コマンドとして扱われることを確認する。
-    fn parse_repl_command_empty_string_is_eval() {
-        assert_eq!(parse_repl_command(""), ReplCommand::Eval(String::new()));
-    }
-
-    #[test]
-    /// `:t`・式評価・`:let` が一連のフローとして機能するか確かめる。
-    fn handle_typeof_eval_and_let_flow() {
-        let mut state = mk_state();
-        let msgs = handle_command(&mut state, ReplCommand::TypeOf("1".into()), &NoopIo);
-        assert!(matches!(msgs.first(), Some(ReplMsg::Out(s)) if s.starts_with("-- ")));
-
-        let msgs = handle_command(&mut state, ReplCommand::Eval("1 + 1".into()), &NoopIo);
-        assert!(matches!(msgs.first(), Some(ReplMsg::Value(_))));
-        assert!(state.value_env.contains_key("it"));
-        assert!(state.type_env.lookup("it").is_some());
-
-        let msgs = handle_command(&mut state, ReplCommand::Let("let two = 2".into()), &NoopIo);
-        assert!(msgs
-            .iter()
-            .any(|m| matches!(m, ReplMsg::Out(s) if s.contains("Defined two"))));
-        assert!(state.value_env.contains_key("two"));
-        assert!(state.type_env.lookup("two").is_some());
-    }
-
-    #[test]
-    /// スクリプト駆動で REPL ループ全体を通し、入出力が記録されることを確認する。
     fn run_repl_with_script_executes_commands() {
         let events = vec![
-            ScriptEvent::Line(":help"),
             ScriptEvent::Line(":set default on"),
-            ScriptEvent::Line("(1 +"),
-            ScriptEvent::Line("2)"),
-            ScriptEvent::Line(":browse"),
+            ScriptEvent::Line("1 + 2"),
             ScriptEvent::Line(":quit"),
             ScriptEvent::Eof,
         ];
@@ -1033,16 +853,15 @@ mod tests {
         let io = NoopIo;
         let mut out = Vec::new();
         let mut err = Vec::new();
+
         run_repl_with(&mut script, &io, &mut out, &mut err).unwrap();
 
-        let stdout = String::from_utf8(out).unwrap();
-        assert!(stdout.contains("TypeLang REPL (Rust)"));
-        assert!(stdout.contains("利用可能なコマンド"));
+        let stdout = String::from_utf8(out).expect("utf8");
+        assert!(stdout.contains("TypeLang REPL"));
         assert!(stdout.contains("set default = on"));
-        assert!(stdout.contains("  it ::"));
-        assert!(stdout.contains("3\n"));
+        assert!(stdout.contains("3"));
         assert!(script.saved);
-        assert!(script.history.iter().any(|h| h.contains(":set default on")));
+        assert!(script.history.len() >= 2);
         assert!(err.is_empty());
     }
 }

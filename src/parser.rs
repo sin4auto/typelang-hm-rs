@@ -9,7 +9,8 @@
 //! - 単項マイナスなどの糖衣は `0 - x` など正規化した AST へ変換する。
 
 use crate::ast::{
-    Constraint as AConstraint, Expr, IntBase, Program, SigmaType, Span, TopLevel, TypeExpr,
+    CaseArm, Constraint as AConstraint, DataConstructor, DataDecl, Expr, IntBase, Pattern, Program,
+    SigmaType, Span, TopLevel, TypeExpr,
 };
 use crate::errors::ParseError;
 use crate::lexer::{lex, Token, TokenKind};
@@ -122,7 +123,18 @@ impl Parser {
     /// ```
     pub fn parse_program(&mut self) -> Result<Program, ParseError> {
         let mut decls = Vec::new();
+        let mut data_decls = Vec::new();
         while self.peek().kind != TokenKind::EOF {
+            if self.peek().kind == TokenKind::SEMI {
+                self.pop_any();
+                continue;
+            }
+            if self.peek().kind == TokenKind::DATA {
+                let data = self.parse_data_decl()?;
+                self._expect_semicolon_optional()?;
+                data_decls.push(data);
+                continue;
+            }
             let mut sig: Option<SigmaType> = None;
             // 先読み: varid '::' ...
             let save = self.i;
@@ -152,13 +164,57 @@ impl Parser {
                 signature: sig,
             });
         }
-        Ok(Program { decls })
+        Ok(Program { data_decls, decls })
     }
 
     /// 文末のセミコロンがあれば消費する（省略可）。
     fn _expect_semicolon_optional(&mut self) -> Result<(), ParseError> {
         self.accept(TokenKind::SEMI);
         Ok(())
+    }
+
+    fn parse_data_decl(&mut self) -> Result<DataDecl, ParseError> {
+        let data_tok = self.pop(TokenKind::DATA)?;
+        let name_tok = self.pop(TokenKind::CONID)?;
+        let mut params = Vec::new();
+        while self.peek().kind == TokenKind::VARID {
+            params.push(self.pop_any().value);
+        }
+        self.pop(TokenKind::EQUAL)?;
+        let mut ctors = Vec::new();
+        loop {
+            ctors.push(self.parse_data_constructor()?);
+            if self.accept(TokenKind::BAR).is_some() {
+                continue;
+            }
+            break;
+        }
+        Ok(DataDecl {
+            name: name_tok.value,
+            params,
+            constructors: ctors,
+            span: span_from_token(&data_tok),
+        })
+    }
+
+    fn parse_data_constructor(&mut self) -> Result<DataConstructor, ParseError> {
+        let ctor_tok = self.pop(TokenKind::CONID)?;
+        let span = span_from_token(&ctor_tok);
+        let name = ctor_tok.value;
+        let mut args = Vec::new();
+        while Self::is_type_atom_start(&self.peek().kind) {
+            args.push(self.parse_ctor_arg_type()?);
+        }
+        Ok(DataConstructor { name, args, span })
+    }
+
+    fn parse_ctor_arg_type(&mut self) -> Result<TypeExpr, ParseError> {
+        let mut ty = self.parse_type_atom()?;
+        while Self::is_type_atom_start(&self.peek().kind) {
+            let next = self.parse_type_atom()?;
+            ty = TypeExpr::TEApp(Box::new(ty), Box::new(next));
+        }
+        Ok(ty)
     }
 
     /// 型注釈を含む単一式（`expr := core_expr ['::' type]`）を解析する。
@@ -189,6 +245,7 @@ impl Parser {
             TokenKind::LAMBDA => self.parse_lambda(),
             TokenKind::LET => self.parse_let_in(),
             TokenKind::IF => self.parse_if(),
+            TokenKind::CASE => self.parse_case(),
             _ => self.parse_infix_level(0),
         }
     }
@@ -249,6 +306,125 @@ impl Parser {
             else_branch: Box::new(el),
             span: span_from_token(&if_tok),
         })
+    }
+
+    fn parse_case(&mut self) -> Result<Expr, ParseError> {
+        let case_tok = self.pop(TokenKind::CASE)?;
+        let scrutinee = self.parse_expr()?;
+        self.pop(TokenKind::OF)?;
+        if !Self::is_pattern_start(&self.peek().kind) {
+            let t = self.peek().clone();
+            return Err(ParseError::at(
+                "PAR300",
+                "case 式にパターンが必要です",
+                Some(t.pos),
+                Some(t.line),
+                Some(t.col),
+            ));
+        }
+        let mut arms = Vec::new();
+        loop {
+            let pat = self.parse_pattern()?;
+            self.pop(TokenKind::ARROW)?;
+            let body = self.parse_expr()?;
+            arms.push(CaseArm { pattern: pat, body });
+            if self.accept(TokenKind::SEMI).is_some() && Self::is_pattern_start(&self.peek().kind) {
+                continue;
+            }
+            break;
+        }
+        Ok(Expr::Case {
+            scrutinee: Box::new(scrutinee),
+            arms,
+            span: span_from_token(&case_tok),
+        })
+    }
+
+    fn parse_pattern(&mut self) -> Result<Pattern, ParseError> {
+        match self.peek().kind {
+            TokenKind::CONID => self.parse_pattern_constructor(),
+            _ => self.parse_pattern_atom(),
+        }
+    }
+
+    fn parse_pattern_constructor(&mut self) -> Result<Pattern, ParseError> {
+        let ctor_tok = self.pop(TokenKind::CONID)?;
+        let span = span_from_token(&ctor_tok);
+        let mut args = Vec::new();
+        while Self::is_pattern_start(&self.peek().kind) {
+            // 次が `->` や `;` などの場合は引数とみなさない
+            if matches!(
+                self.peek().kind,
+                TokenKind::ARROW
+                    | TokenKind::SEMI
+                    | TokenKind::BAR
+                    | TokenKind::OF
+                    | TokenKind::EOF
+            ) {
+                break;
+            }
+            args.push(self.parse_pattern()?);
+        }
+        Ok(Pattern::Constructor {
+            name: ctor_tok.value,
+            args,
+            span,
+        })
+    }
+
+    fn parse_pattern_atom(&mut self) -> Result<Pattern, ParseError> {
+        let tok = self.peek().clone();
+        match tok.kind {
+            TokenKind::UNDERSCORE => {
+                self.pop_any();
+                Ok(Pattern::Wildcard {
+                    span: span_from_token(&tok),
+                })
+            }
+            TokenKind::VARID => {
+                self.pop_any();
+                let span = span_from_token(&tok);
+                let name = tok.value;
+                Ok(Pattern::Var { name, span })
+            }
+            TokenKind::INT | TokenKind::HEX | TokenKind::OCT | TokenKind::BIN => {
+                self.pop_any();
+                let (value, base) = Self::parse_int_value(&tok)?;
+                Ok(Pattern::Int {
+                    value,
+                    base,
+                    span: span_from_token(&tok),
+                })
+            }
+            TokenKind::TRUE => {
+                self.pop_any();
+                Ok(Pattern::Bool {
+                    value: true,
+                    span: span_from_token(&tok),
+                })
+            }
+            TokenKind::FALSE => {
+                self.pop_any();
+                Ok(Pattern::Bool {
+                    value: false,
+                    span: span_from_token(&tok),
+                })
+            }
+            TokenKind::LPAREN => {
+                self.pop_any();
+                let pat = self.parse_pattern()?;
+                self.pop(TokenKind::RPAREN)?;
+                Ok(pat)
+            }
+            TokenKind::CONID => self.parse_pattern_constructor(),
+            _ => Err(ParseError::at(
+                "PAR301",
+                format!("パターンとして不正なトークン: {:?} {}", tok.kind, tok.value),
+                Some(tok.pos),
+                Some(tok.line),
+                Some(tok.col),
+            )),
+        }
     }
 
     fn parse_infix_level(&mut self, level: usize) -> Result<Expr, ParseError> {
@@ -334,33 +510,12 @@ impl Parser {
             }
             TokenKind::INT | TokenKind::HEX | TokenKind::OCT | TokenKind::BIN => {
                 self.pop_any();
-                let s = t.value.clone();
-                let parsed: Result<i64, _> = match t.kind {
-                    TokenKind::HEX => i64::from_str_radix(&s[2..], 16),
-                    TokenKind::OCT => i64::from_str_radix(&s[2..], 8),
-                    TokenKind::BIN => i64::from_str_radix(&s[2..], 2),
-                    _ => s.parse::<i64>(),
-                };
-                match parsed {
-                    Ok(v) => {
-                        let base = match t.kind {
-                            TokenKind::HEX => IntBase::Hex,
-                            TokenKind::OCT => IntBase::Oct,
-                            TokenKind::BIN => IntBase::Bin,
-                            _ => IntBase::Dec,
-                        };
-                        Ok(Expr::IntLit {
-                            value: v,
-                            base,
-                            span: span_from_token(&t),
-                        })
-                    }
-                    Err(_) => Err(ParseError::new(
-                        "PAR210",
-                        "整数リテラルが範囲外",
-                        Some(t.pos),
-                    )),
-                }
+                let (value, base) = Self::parse_int_value(&t)?;
+                Ok(Expr::IntLit {
+                    value,
+                    base,
+                    span: span_from_token(&t),
+                })
             }
             TokenKind::FLOAT => {
                 self.pop_any();
@@ -409,6 +564,14 @@ impl Parser {
                 })
             }
             TokenKind::VARID => {
+                self.pop_any();
+                let span = span_from_token(&t);
+                Ok(Expr::Var {
+                    name: t.value,
+                    span,
+                })
+            }
+            TokenKind::CONID => {
                 self.pop_any();
                 let span = span_from_token(&t);
                 Ok(Expr::Var {
@@ -483,6 +646,7 @@ impl Parser {
                 | TokenKind::CHAR
                 | TokenKind::STRING
                 | TokenKind::VARID
+                | TokenKind::CONID
                 | TokenKind::UNDERSCORE
                 | TokenKind::QMARK
                 | TokenKind::LPAREN
@@ -490,6 +654,54 @@ impl Parser {
                 | TokenKind::TRUE
                 | TokenKind::FALSE
         )
+    }
+
+    fn is_pattern_start(kind: &TokenKind) -> bool {
+        matches!(
+            kind,
+            TokenKind::UNDERSCORE
+                | TokenKind::VARID
+                | TokenKind::CONID
+                | TokenKind::INT
+                | TokenKind::HEX
+                | TokenKind::OCT
+                | TokenKind::BIN
+                | TokenKind::TRUE
+                | TokenKind::FALSE
+                | TokenKind::LPAREN
+        )
+    }
+
+    fn is_type_atom_start(kind: &TokenKind) -> bool {
+        matches!(
+            kind,
+            TokenKind::CONID | TokenKind::VARID | TokenKind::LPAREN | TokenKind::LBRACK
+        )
+    }
+
+    fn parse_int_value(token: &Token) -> Result<(i64, IntBase), ParseError> {
+        let parsed = match token.kind {
+            TokenKind::HEX => i64::from_str_radix(&token.value[2..], 16),
+            TokenKind::OCT => i64::from_str_radix(&token.value[2..], 8),
+            TokenKind::BIN => i64::from_str_radix(&token.value[2..], 2),
+            _ => token.value.parse::<i64>(),
+        };
+        match parsed {
+            Ok(value) => {
+                let base = match token.kind {
+                    TokenKind::HEX => IntBase::Hex,
+                    TokenKind::OCT => IntBase::Oct,
+                    TokenKind::BIN => IntBase::Bin,
+                    _ => IntBase::Dec,
+                };
+                Ok((value, base))
+            }
+            Err(_) => Err(ParseError::new(
+                "PAR210",
+                "整数リテラルが範囲外",
+                Some(token.pos),
+            )),
+        }
     }
 
     // ===== 型式 =====

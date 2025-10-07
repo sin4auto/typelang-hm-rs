@@ -17,6 +17,10 @@ pub enum Value {
     String(String),
     List(Vec<Value>),
     Tuple(Vec<Value>),
+    Data {
+        constructor: String,
+        fields: Vec<Value>,
+    },
     Closure {
         params: Vec<String>,
         body: Box<Expr>,
@@ -31,6 +35,11 @@ pub enum PrimOp {
     Prim2 {
         f: fn(Value, Value) -> Result<Value, EvalError>,
         captured: Option<Box<Value>>,
+    },
+    DataCtor {
+        name: String,
+        arity: usize,
+        collected: Vec<Value>,
     },
 }
 
@@ -64,6 +73,25 @@ impl PrimOp {
                 f,
                 captured: Some(prev),
             } => f(*prev, arg),
+            PrimOp::DataCtor {
+                name,
+                arity,
+                mut collected,
+            } => {
+                collected.push(arg);
+                if collected.len() >= arity {
+                    Ok(Value::Data {
+                        constructor: name,
+                        fields: collected,
+                    })
+                } else {
+                    Ok(Value::Prim(PrimOp::DataCtor {
+                        name,
+                        arity,
+                        collected,
+                    }))
+                }
+            }
         }
     }
 }
@@ -81,6 +109,23 @@ pub(crate) fn py_show(v: Value) -> Result<Value, EvalError> {
         }
         Value::Char(c) => c.to_string(),
         Value::String(s) => s,
+        Value::Data {
+            constructor,
+            fields,
+        } => {
+            if fields.is_empty() {
+                constructor
+            } else {
+                let mut parts = Vec::new();
+                for field in fields {
+                    match py_show(field)? {
+                        Value::String(s) => parts.push(s),
+                        _ => return Err(EvalError::new("EVAL050", "show: 未対応の値", None)),
+                    }
+                }
+                format!("{} {}", constructor, parts.join(" "))
+            }
+        }
         _ => return Err(EvalError::new("EVAL050", "show: 未対応の値", None)),
     }))
 }
@@ -117,6 +162,46 @@ pub(crate) fn mul_op(a: Value, b: Value) -> Result<Value, EvalError> {
 
 pub(crate) fn div_op(a: Value, b: Value) -> Result<Value, EvalError> {
     numeric_binop(a, b, to_double, Value::Double, |x, y| x / y)
+}
+
+fn ensure_nonzero(rhs: i64, op_name: &str) -> Result<(), EvalError> {
+    if rhs == 0 {
+        Err(EvalError::new(
+            "EVAL061",
+            format!("{op_name}: 0 で割ることはできません"),
+            None,
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+pub(crate) fn div_int_op(a: Value, b: Value) -> Result<Value, EvalError> {
+    let lhs = to_int(&a)?;
+    let rhs = to_int(&b)?;
+    ensure_nonzero(rhs, "div")?;
+    Ok(Value::Int(lhs.div_euclid(rhs)))
+}
+
+pub(crate) fn mod_int_op(a: Value, b: Value) -> Result<Value, EvalError> {
+    let lhs = to_int(&a)?;
+    let rhs = to_int(&b)?;
+    ensure_nonzero(rhs, "mod")?;
+    Ok(Value::Int(lhs.rem_euclid(rhs)))
+}
+
+pub(crate) fn quot_int_op(a: Value, b: Value) -> Result<Value, EvalError> {
+    let lhs = to_int(&a)?;
+    let rhs = to_int(&b)?;
+    ensure_nonzero(rhs, "quot")?;
+    Ok(Value::Int(lhs / rhs))
+}
+
+pub(crate) fn rem_int_op(a: Value, b: Value) -> Result<Value, EvalError> {
+    let lhs = to_int(&a)?;
+    let rhs = to_int(&b)?;
+    ensure_nonzero(rhs, "rem")?;
+    Ok(Value::Int(lhs % rhs))
 }
 
 pub(crate) fn powi(a: Value, b: Value) -> Result<Value, EvalError> {
@@ -168,6 +253,30 @@ fn structural_compare(a: &Value, b: &Value) -> Result<std::cmp::Ordering, Compar
                 }
             }
             Ok(xs.len().cmp(&ys.len()))
+        }
+        (
+            Value::Data {
+                constructor: c1,
+                fields: f1,
+            },
+            Value::Data {
+                constructor: c2,
+                fields: f2,
+            },
+        ) => {
+            if c1 != c2 {
+                return Ok(c1.cmp(c2));
+            }
+            if f1.len() != f2.len() {
+                return Err(CompareFailure::Mismatch);
+            }
+            for (vx, vy) in f1.iter().zip(f2.iter()) {
+                let ord = structural_compare(vx, vy)?;
+                if ord != Ordering::Equal {
+                    return Ok(ord);
+                }
+            }
+            Ok(Ordering::Equal)
         }
         _ => Err(CompareFailure::Mismatch),
     }
@@ -241,5 +350,20 @@ fn to_double(v: &Value) -> Result<f64, EvalError> {
         Value::Double(d) => Ok(*d),
         Value::Int(i) => Ok(*i as f64),
         _ => Err(EvalError::new("EVAL050", "Double 変換に失敗", None)),
+    }
+}
+
+pub fn make_data_ctor(name: &str, arity: usize) -> Value {
+    if arity == 0 {
+        Value::Data {
+            constructor: name.to_string(),
+            fields: Vec::new(),
+        }
+    } else {
+        Value::Prim(PrimOp::DataCtor {
+            name: name.to_string(),
+            arity,
+            collected: Vec::new(),
+        })
     }
 }

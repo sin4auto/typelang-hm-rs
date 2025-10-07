@@ -37,7 +37,6 @@ pub fn infer_pretty_qual(src: &str) -> Result<String, TypeError> {
     let class_env = infer::initial_class_env();
     let mut state = infer::InferState {
         supply: typesys::TVarSupply::new(),
-        subst: Default::default(),
     };
     infer::infer_expr(&env, &class_env, &mut state, &expr)
         .map(|(_, qual)| typesys::pretty_qual(&qual))

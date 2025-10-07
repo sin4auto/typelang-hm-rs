@@ -90,6 +90,16 @@ fn inference_type_strings() {
             expected: "Double",
             note: "負整数指数の累乗",
         },
+        Case {
+            src: "div 4 2",
+            expected: "Integer",
+            note: "div は整数を返す",
+        },
+        Case {
+            src: "case True of True -> False; False -> True",
+            expected: "Bool",
+            note: "case 式の分岐推論",
+        },
     ];
 
     for case in cases {

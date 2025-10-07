@@ -26,7 +26,7 @@ whitespace    = { ' ' | '\t' | '\r' | '\n' } ;
 line_comment  = '-' '-' { ~'\n' } ;
 block_comment = '{' '-' { any } '-' '}' ;
 
-reserved      = 'let' | 'in' | 'if' | 'then' | 'else' | 'True' | 'False' ;
+reserved      = 'let' | 'in' | 'if' | 'then' | 'else' | 'case' | 'of' | 'data' | 'True' | 'False' ;
 varid         = ( 'a'..'z' | '_' ) { letter | digit | '\'' } - reserved ;
 conid         = ( 'A'..'Z' ) { letter | digit | '\'' } ;
 
@@ -44,9 +44,12 @@ escape        = '\\' ( '\\' | '\'' | '"' | 'n' | 'r' | 't' ) ;
 
 ## 2. トップレベル構造
 ```
-program    = { toplevel } ;
-toplevel   = [ type_sig ] 'let' fun_bind [ ';' ] ;
-fun_bind   = varid { varid } '=' expr ;
+program     = { decl } ;
+decl        = data_decl | value_decl ;
+value_decl  = [ type_sig ] 'let' fun_bind [ ';' ] ;
+fun_bind    = varid { varid } '=' expr ;
+data_decl   = 'data' conid { varid } '=' ctor { '|' ctor } [ ';' ] ;
+ctor        = conid { type_app } ;
 ```
 
 ## 3. 型
@@ -63,12 +66,15 @@ type_atom  = varid | conid | '[' type ']' | '(' type ')' | '(' type ',' type { '
 
 ## 4. 式
 ```
-expr       = ( lam | let_in | ifte | cmp ) [ '::' type ] ;
+expr       = ( case_expr | lam | let_in | ifte | cmp ) [ '::' type ] ;
 lam        = '\\' varid { varid } '->' expr ;
 let_in     = 'let' binds 'in' expr ;
 binds      = bind { ';' bind } ;
 bind       = varid { varid } '=' expr ;
 ifte       = 'if' expr 'then' expr 'else' expr ;
+case_expr  = 'case' expr 'of' case_arms ;
+case_arms  = case_arm { ';' case_arm } [ ';' ] ;
+case_arm   = pattern '->' expr ;
 
 cmp        = add [ ( '==' | '/=' | '<' | '<=' | '>' | '>=' ) add ] ; (* 非結合 *)
 add        = mul { ( '+' | '-' ) mul } ;                             (* 左結合 *)
@@ -80,6 +86,16 @@ atom       = '-' atom
            | int_lit | float_lit | char_lit | string_lit | 'True' | 'False'
            | varid | '_' | '?' varid
            | '(' expr ')' | '[' [ expr { ',' expr } ] ']' | '(' expr ',' expr { ',' expr } ')' ;
+
+pattern    = pattern_ctor | pattern_atom ;
+pattern_ctor = conid { pattern_atom } ;
+pattern_atom = '_'
+            | varid
+            | int_lit
+            | 'True'
+            | 'False'
+            | '(' pattern ')'
+            | pattern_ctor ;
 ```
 
 ## 5. 運用メモ
