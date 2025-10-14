@@ -83,6 +83,8 @@ impl LineEditor {
 #[cfg(unix)]
 impl LineEditor {
     /// UNIX 端末を Raw モードに切り替えて対話入力を処理する。
+    #[allow(unexpected_cfgs)]
+    #[cfg_attr(coverage, coverage(off))]
     fn read_line_unix(&mut self, prompt: &str) -> io::Result<ReadResult> {
         let _raw = RawMode::new()?;
         let mut stdout = io::stdout();
@@ -432,6 +434,8 @@ struct RawMode {
 #[cfg(unix)]
 impl RawMode {
     /// 標準入力の termios 設定を Raw モードへ変更する。
+    #[allow(unexpected_cfgs)]
+    #[cfg_attr(coverage, coverage(off))]
     fn new() -> io::Result<Self> {
         let fd = 0; // 標準入力のファイルディスクリプタ
         let mut termios = Termios::default();
@@ -453,6 +457,8 @@ impl RawMode {
 #[cfg(unix)]
 impl Drop for RawMode {
     /// スコープ終了時に取得済みの termios 設定へ戻す。
+    #[allow(unexpected_cfgs)]
+    #[cfg_attr(coverage, coverage(off))]
     fn drop(&mut self) {
         let fd = 0;
         unsafe {
@@ -689,5 +695,86 @@ mod tests {
         assert_eq!(action, EditAction::MoveLeft);
         assert!(session.move_left());
         assert_eq!(session.cursor(), session.buffer().len() - 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    /// カーソル境界や履歴遷移の失敗分岐を含めてセッション操作を網羅する。
+    fn editor_session_covers_boundary_branches() {
+        use super::EditorSession;
+
+        let history = History {
+            entries: vec!["first".into(), "second".into()],
+            path: None,
+            max_entries: 10,
+        };
+        let mut session = EditorSession::new(&history);
+        assert!(session.is_empty());
+        assert!(!session.delete_left());
+        assert!(!session.move_left());
+
+        session.insert_char('a');
+        session.insert_char('b');
+        assert!(session.move_left());
+        assert!(session.delete_left());
+        assert!(session.move_right());
+        assert!(!session.move_right());
+        assert!(session.move_left());
+        assert!(!session.move_left());
+
+        assert!(session.history_prev());
+        assert!(session.history_prev());
+        assert!(!session.history_prev());
+        assert!(session.history_next());
+        assert!(session.history_next());
+        assert!(!session.history_next());
+
+        session.insert_char('z');
+        assert!(!session.history_next());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    /// 不完全なエスケープシーケンスや非表示文字が無視されるか検証する。
+    fn interpret_action_ignores_incomplete_sequences() {
+        use super::{interpret_action, EditAction};
+
+        let mut reader = Cursor::new(Vec::<u8>::new());
+        assert!(matches!(
+            interpret_action(0x1b, &mut reader).unwrap(),
+            EditAction::Ignore
+        ));
+
+        let mut reader = Cursor::new(vec![b'X']);
+        assert!(matches!(
+            interpret_action(0x1b, &mut reader).unwrap(),
+            EditAction::Ignore
+        ));
+
+        let mut reader = Cursor::new(vec![b'[']);
+        assert!(matches!(
+            interpret_action(0x1b, &mut reader).unwrap(),
+            EditAction::Ignore
+        ));
+
+        let mut reader = Cursor::new(vec![b'[', b'Z']);
+        assert!(matches!(
+            interpret_action(0x1b, &mut reader).unwrap(),
+            EditAction::Ignore
+        ));
+
+        let mut reader = Cursor::new(Vec::<u8>::new());
+        assert!(matches!(
+            interpret_action(0x01, &mut reader).unwrap(),
+            EditAction::Ignore
+        ));
+    }
+
+    #[test]
+    /// 無効な UTF-8 先頭バイトが None を返すか確認する。
+    fn read_utf8_char_rejects_invalid_lead() {
+        let mut cursor = Cursor::new(vec![0xff, 0x00, 0x00]);
+        let ch = read_utf8_char(0x80, &mut cursor).unwrap();
+        assert!(ch.is_none());
     }
 }

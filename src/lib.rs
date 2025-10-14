@@ -12,6 +12,8 @@
 //! - コメント/ドキュメントは日本語、識別子は英語。
 //! - 外部依存なし（標準ライブラリのみ）。
 //! - パブリックAPIは最小限。
+#![allow(unexpected_cfgs)]
+#![cfg_attr(coverage, feature(coverage_attribute))]
 
 pub mod ast;
 pub mod errors;

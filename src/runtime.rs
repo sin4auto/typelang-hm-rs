@@ -514,4 +514,120 @@ mod tests {
             other => panic!("curried ctor should start as Prim, got {:?}", other),
         }
     }
+
+    #[test]
+    fn py_show_handles_unit_like_and_list_variants() {
+        let unit_like = Value::Data {
+            constructor: "None".into(),
+            fields: Vec::new(),
+        };
+        let rendered = py_show(unit_like).expect("show None");
+        assert!(matches!(rendered, Value::String(s) if s == "None"));
+
+        let list = Value::Data {
+            constructor: "List".into(),
+            fields: vec![Value::Int(1), Value::Int(2)],
+        };
+        let rendered = py_show(list).expect("show List 1 2");
+        assert!(matches!(rendered, Value::String(s) if s == "List 1 2"));
+    }
+
+    #[test]
+    fn powi_negative_exponent_falls_back_to_f64() {
+        let result =
+            powi(Value::Int(2), Value::Int(-3)).expect("negative exponent uses float math");
+        match result {
+            Value::Double(d) => assert!((d - 0.125).abs() < f64::EPSILON),
+            other => panic!("expected Double from powi fallback, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn primop_binary_captured_error_path_propagates() {
+        let add = PrimOp::binary(add_op);
+        let partially = add
+            .clone()
+            .apply(Value::Bool(true))
+            .expect("partial application regardless of type");
+        let Value::Prim(op) = partially else {
+            panic!("second stage should remain Prim");
+        };
+        let err = op.apply(Value::Int(1));
+        assert_eq!(err_code(err), Some("EVAL050"));
+    }
+
+    #[test]
+    fn compare_covers_constructor_order_and_arity_mismatch() {
+        let lesser = Value::Data {
+            constructor: "A".into(),
+            fields: vec![Value::Int(1)],
+        };
+        let greater = Value::Data {
+            constructor: "B".into(),
+            fields: vec![Value::Int(0)],
+        };
+        let ordering = lt_op(lesser.clone(), greater.clone()).unwrap();
+        assert!(matches!(ordering, Value::Bool(true)));
+        let reverse = gt_op(greater, lesser).unwrap();
+        assert!(matches!(reverse, Value::Bool(true)));
+
+        let short = Value::Data {
+            constructor: "C".into(),
+            fields: vec![Value::Int(1)],
+        };
+        let long = Value::Data {
+            constructor: "C".into(),
+            fields: vec![Value::Int(1), Value::Int(2)],
+        };
+        let mismatch = le_op(short, long);
+        assert_eq!(err_code(mismatch), Some("EVAL050"));
+    }
+
+    #[test]
+    fn list_and_tuple_comparisons_cover_length_checks() {
+        let list_short = Value::List(vec![Value::Int(1)]);
+        let list_long = Value::List(vec![Value::Int(1), Value::Int(2)]);
+        let result = le_op(list_short, list_long).unwrap();
+        assert!(matches!(result, Value::Bool(true)));
+
+        let tuple_short = Value::Tuple(vec![Value::Int(1)]);
+        let tuple_long = Value::Tuple(vec![Value::Int(1), Value::Int(0)]);
+        let result = gt_op(tuple_long, tuple_short).unwrap();
+        assert!(matches!(result, Value::Bool(true)));
+    }
+
+    #[test]
+    fn py_show_formats_scalar_variants() {
+        let rendered = py_show(Value::Double(1.25)).expect("double formatted");
+        assert!(matches!(rendered, Value::String(s) if s.starts_with("1.25")));
+
+        let true_branch = py_show(Value::Bool(true)).expect("bool true");
+        assert!(matches!(true_branch, Value::String(s) if s == "True"));
+        let false_branch = py_show(Value::Bool(false)).expect("bool false");
+        assert!(matches!(false_branch, Value::String(s) if s == "False"));
+
+        let ch = py_show(Value::Char('λ')).expect("char formatting");
+        assert!(matches!(ch, Value::String(s) if s == "λ"));
+
+        let message = py_show(Value::String("ok".into())).expect("string passthrough");
+        assert!(matches!(message, Value::String(s) if s == "ok"));
+    }
+
+    #[test]
+    fn compare_handles_scalar_and_mixed_numeric_types() {
+        let mixed = lt_op(Value::Int(1), Value::Double(2.0)).unwrap();
+        assert!(matches!(mixed, Value::Bool(true)));
+
+        let reverse = gt_op(Value::Double(2.5), Value::Int(2)).unwrap();
+        assert!(matches!(reverse, Value::Bool(true)));
+
+        let bool_compare = eq_op(Value::Bool(true), Value::Bool(false)).unwrap();
+        assert!(matches!(bool_compare, Value::Bool(false)));
+
+        let char_compare = lt_op(Value::Char('a'), Value::Char('z')).unwrap();
+        assert!(matches!(char_compare, Value::Bool(true)));
+
+        let string_compare = gt_op(Value::String("b".into()), Value::String("a".into())).unwrap();
+        assert!(matches!(string_compare, Value::Bool(true)));
+    }
 }

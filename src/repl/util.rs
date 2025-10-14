@@ -220,4 +220,28 @@ mod tests {
         }
         panic!("not normalized in collection");
     }
+
+    #[test]
+    /// 正の指数では変換が発生しないことを検証する。
+    fn normalize_pow_with_positive_exponent_stays_hat() {
+        let e = A::Expr::BinOp {
+            op: "^".into(),
+            left: Box::new(A::Expr::IntLit {
+                value: 2,
+                base: A::IntBase::Dec,
+                span: A::Span::dummy(),
+            }),
+            right: Box::new(A::Expr::IntLit {
+                value: 3,
+                base: A::IntBase::Dec,
+                span: A::Span::dummy(),
+            }),
+            span: A::Span::dummy(),
+        };
+        let normalized = normalize_expr(&e);
+        match normalized {
+            A::Expr::BinOp { op, .. } => assert_eq!(op, "^"),
+            other => panic!("unexpected normalization: {:?}", other),
+        }
+    }
 }

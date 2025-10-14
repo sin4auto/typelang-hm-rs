@@ -241,3 +241,47 @@ fn match_pattern(pattern: &A::Pattern, value: &Value) -> Option<HashMap<String, 
         },
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::{Expr, IntBase, Span};
+
+    #[test]
+    fn apply_rejects_closure_without_params() {
+        let closure = Value::Closure {
+            params: Vec::new(),
+            body: Box::new(Expr::IntLit {
+                value: 0,
+                base: IntBase::Dec,
+                span: Span::dummy(),
+            }),
+            env: Env::new(),
+        };
+        let err = super::apply(&closure, Value::Int(1)).expect_err("missing params must error");
+        assert_eq!(err.0.code, "EVAL090");
+    }
+
+    #[test]
+    fn apply_partially_applies_multi_param_closure() {
+        let closure = Value::Closure {
+            params: vec!["x".into(), "y".into()],
+            body: Box::new(Expr::Var {
+                name: "y".into(),
+                span: Span::dummy(),
+            }),
+            env: Env::new(),
+        };
+        let result = super::apply(&closure, Value::Int(1)).expect("partial application succeeds");
+        match result {
+            Value::Closure { params, .. } => assert_eq!(params, vec!["y".to_string()]),
+            other => panic!("expected closure back, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn nonzero_filters_zero_and_keeps_positive() {
+        assert_eq!(super::nonzero(0), None);
+        assert_eq!(super::nonzero(42), Some(42));
+    }
+}

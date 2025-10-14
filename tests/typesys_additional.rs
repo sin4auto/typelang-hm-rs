@@ -227,3 +227,92 @@ fn t_string_builds_char_list() {
         other => panic!("String helper should build list application: {:?}", other),
     }
 }
+
+#[test]
+fn unify_rejects_tuple_length_mismatch() {
+    let left = Type::TTuple(TTuple {
+        items: vec![Type::TCon(TCon { name: "Int".into() })],
+    });
+    let right = Type::TTuple(TTuple {
+        items: vec![
+            Type::TCon(TCon { name: "Int".into() }),
+            Type::TCon(TCon {
+                name: "Bool".into(),
+            }),
+        ],
+    });
+    let err = unify(left, right).expect_err("tuple arity mismatch should fail");
+    assert_eq!(err.code, "TYPE001");
+}
+
+#[test]
+fn bind_performs_occurs_check() {
+    let tv = TVar { id: 42 };
+    let ty = Type::TApp(TApp {
+        func: Box::new(Type::TCon(TCon {
+            name: "List".into(),
+        })),
+        arg: Box::new(Type::TVar(tv.clone())),
+    });
+    let err = bind(tv, ty).expect_err("List of itself should trigger occurs check");
+    assert_eq!(err.code, "TYPE002");
+}
+
+#[test]
+fn class_env_entails_uses_superclass_chain() {
+    let mut ce = ClassEnv::default();
+    ce.add_class("Ord", ["Eq"]);
+    ce.add_instance("Eq", "Bool");
+    assert!(ce.entails(&[Constraint {
+        classname: "Ord".into(),
+        r#type: Type::TCon(TCon {
+            name: "Bool".into()
+        }),
+    }]));
+
+    assert!(!ce.entails(&[Constraint {
+        classname: "Show".into(),
+        r#type: Type::TTuple(TTuple {
+            items: vec![Type::TCon(TCon { name: "Int".into() })],
+        }),
+    }]));
+}
+
+#[test]
+fn pretty_qual_formats_various_type_shapes() {
+    let nested_fun = QualType {
+        constraints: vec![],
+        r#type: Type::TFun(TFun {
+            arg: Box::new(Type::TFun(TFun {
+                arg: Box::new(Type::TCon(TCon { name: "Int".into() })),
+                ret: Box::new(Type::TCon(TCon { name: "Int".into() })),
+            })),
+            ret: Box::new(Type::TTuple(TTuple { items: vec![] })),
+        }),
+    };
+    assert_eq!(pretty_qual(&nested_fun), "(Int -> Int) -> ()");
+
+    let tuple_ty = QualType {
+        constraints: vec![],
+        r#type: Type::TTuple(TTuple {
+            items: vec![
+                Type::TCon(TCon { name: "Int".into() }),
+                Type::TCon(TCon {
+                    name: "Bool".into(),
+                }),
+            ],
+        }),
+    };
+    assert_eq!(pretty_qual(&tuple_ty), "(Int, Bool)");
+
+    let app_ty = QualType {
+        constraints: vec![],
+        r#type: Type::TApp(TApp {
+            func: Box::new(Type::TCon(TCon {
+                name: "Maybe".into(),
+            })),
+            arg: Box::new(Type::TVar(TVar { id: 0 })),
+        }),
+    };
+    assert_eq!(pretty_qual(&app_ty), "Maybe a");
+}

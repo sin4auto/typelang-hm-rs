@@ -272,6 +272,21 @@ fn pattern_display_and_span_metadata() {
     assert_eq!(format!("{}", constructor), "Pair 1 y");
     assert_eq!(constructor.span(), Span::new(2, 1, 2));
 
+    let nullary = Pattern::Constructor {
+        name: "None".into(),
+        args: Vec::new(),
+        span: Span::new(7, 1, 7),
+    };
+    assert_eq!(format!("{}", nullary), "None");
+    assert_eq!(nullary.span(), Span::new(7, 1, 7));
+
+    let bool_false = Pattern::Bool {
+        value: false,
+        span: Span::new(8, 1, 8),
+    };
+    assert_eq!(format!("{}", bool_false), "False");
+    assert_eq!(bool_false.span(), Span::new(8, 1, 8));
+
     let expr = Expr::If {
         cond: Box::new(Expr::BoolLit {
             value: true,

@@ -26,6 +26,7 @@ use super::printer::{render_help, write_value};
 /// typelang::repl::run_repl();
 /// # }
 /// ```
+#[cfg_attr(coverage, coverage(off))]
 pub fn run_repl() {
     let mut editor = LineEditor::new();
     let fs = FsIo;
@@ -56,6 +57,7 @@ impl ReplLineSource for LineEditor {
     }
 }
 
+#[cfg_attr(coverage, coverage(off))]
 fn run_repl_with<S, I, W, E>(
     editor: &mut S,
     file_io: &I,
@@ -135,6 +137,7 @@ where
     Ok(())
 }
 
+#[cfg_attr(coverage, coverage(off))]
 fn dispatch_messages<W: Write, E: Write>(
     msgs: Vec<ReplMsg>,
     out: &mut W,

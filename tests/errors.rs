@@ -8,7 +8,7 @@ use std::fmt::Display;
 mod support;
 
 use support::{infer_pretty_qual, parse_expr};
-use typelang::errors::{ErrorInfo, EvalError, LexerError, TypeError};
+use typelang::errors::{ErrorInfo, EvalError, FrameInfo, LexerError, TypeError};
 use typelang::{infer, lexer, parser, typesys};
 
 fn assert_error_display(info: ErrorInfo, expected: &str) {
@@ -50,6 +50,10 @@ fn error_display_variants() {
             ErrorInfo::at("E005", "caret", Some(5), Some(1), Some(1)).with_snippet("oops"),
             "[E005] caret @line=1,col=1 @pos=5\noops\n^",
         ),
+        (
+            ErrorInfo::new("E006", "no caret", None).with_snippet("irrelevant"),
+            "[E006] no caret",
+        ),
     ];
 
     for (info, expected) in cases {
@@ -71,6 +75,22 @@ fn error_wrapper_renders_expected_strings() {
 
     let eval = EvalError::at("EVAL777", "eval", Some(9), None, None);
     assert_eq!(format!("{}", eval), "[EVAL777] eval @pos=9");
+}
+
+#[test]
+/// スタックフレームの整形が各ケースに対応していることを確認する。
+fn error_display_renders_stack_frames() {
+    let info = ErrorInfo::new("E010", "stacked", None)
+        .with_frame(FrameInfo::new("pos-only", Some(99), None, None))
+        .with_frame(FrameInfo::new("line-only", None, Some(10), None))
+        .with_frame(FrameInfo::new("line-col", None, Some(11), Some(2)))
+        .with_frame(FrameInfo::new("full", Some(5), Some(12), Some(3)));
+
+    let rendered = info.to_string();
+    assert_eq!(
+        rendered,
+        "[E010] stacked\nStack trace:\n  at full (line 12, col 3, pos 5)\n  at line-col (line 11, col 2)\n  at line-only (line 10)\n  at pos-only (pos 99)"
+    );
 }
 
 #[test]

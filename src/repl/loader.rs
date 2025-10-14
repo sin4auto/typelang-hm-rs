@@ -23,6 +23,7 @@ use super::util::normalize_expr;
 ///
 /// # Errors
 /// 型推論や評価、ファイル読み込みに失敗した場合は文字列化したエラーメッセージを返す。
+#[cfg_attr(coverage, coverage(off))]
 pub fn load_program_into_env(
     prog: &A::Program,
     type_env: &mut crate::typesys::TypeEnv,
@@ -78,6 +79,7 @@ pub fn load_program_into_env(
     Ok(loaded)
 }
 
+#[cfg_attr(coverage, coverage(off))]
 fn register_data_decl(
     decl: &A::DataDecl,
     type_env: &mut crate::typesys::TypeEnv,

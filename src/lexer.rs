@@ -1,7 +1,7 @@
 // パス: src/lexer.rs
 // 役割: UTF-8 対応の字句解析器とトークン定義を提供する
 // 意図: 構文解析に必要な位置付きトークンを生成する
-// 関連ファイル: src/parser.rs, src/errors.rs, tests/lexer_parser.rs
+// 関連ファイル: src/parser/mod.rs, src/errors.rs, tests/lexer_parser.rs
 //! 字句解析モジュール
 //!
 //! - EBNF の規則に従い、ソースをトークン列へ変換する。
@@ -154,685 +154,490 @@ fn is_ident_rest(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_' || c == '\''
 }
 
-/// 連続する空白文字を読み飛ばす。
-fn skip_whitespace(src: &str, cursor: &mut usize) -> bool {
-    let mut advanced = false;
-    while *cursor < src.len() {
-        let Some(ch) = src[*cursor..].chars().next() else {
-            break;
-        };
-        if is_whitespace(ch) {
-            *cursor += ch.len_utf8();
-            advanced = true;
-        } else {
-            break;
-        }
-    }
-    advanced
+struct Lexer<'a> {
+    src: &'a str,
+    cursor: usize,
+    len: usize,
+    line_map: LineMap,
+    tokens: Vec<Token>,
 }
 
-/// 行コメント "--" を読み飛ばす。
-fn skip_line_comment(src: &str, cursor: &mut usize) -> bool {
-    if !src[*cursor..].starts_with("--") {
-        return false;
-    }
-    *cursor += 2; // "--"
-    while *cursor < src.len() {
-        let ch = src[*cursor..]
-            .chars()
-            .next()
-            .expect("行コメント処理中にEOFへ到達しない");
-        *cursor += ch.len_utf8();
-        if ch == '\n' {
-            break;
+impl<'a> Lexer<'a> {
+    fn new(src: &'a str) -> Self {
+        Self {
+            src,
+            cursor: 0,
+            len: src.len(),
+            line_map: LineMap::new(src),
+            tokens: Vec::new(),
         }
     }
-    true
-}
 
-/// ブロックコメント "{-" ... "-}" を読み飛ばす。
-fn skip_block_comment(
-    src: &str,
-    cursor: &mut usize,
-    line_map: &LineMap,
-) -> Result<bool, LexerError> {
-    if !src[*cursor..].starts_with("{-") {
-        return Ok(false);
+    fn run(mut self) -> Result<Vec<Token>, LexerError> {
+        while self.cursor < self.len {
+            if self.consume_trivia()? {
+                continue;
+            }
+            if self.cursor >= self.len {
+                break;
+            }
+            self.lex_token()?;
+        }
+        self.push_simple(TokenKind::EOF, "", self.len);
+        Ok(self.tokens)
     }
-    let mut idx = *cursor + 2; // consume "{-"
-    let mut depth = 1;
-    while idx < src.len() {
-        if src[idx..].starts_with("-}") {
-            depth -= 1;
-            idx += 2;
-            if depth == 0 {
-                *cursor = idx;
-                return Ok(true);
+
+    fn consume_trivia(&mut self) -> Result<bool, LexerError> {
+        let mut advanced = false;
+        loop {
+            if self.consume_whitespace() {
+                advanced = true;
+                continue;
             }
-            continue;
-        }
-        if src[idx..].starts_with("{-") {
-            depth += 1;
-            idx += 2;
-            continue;
-        }
-        let Some(ch) = src[idx..].chars().next() else {
+            if self.cursor >= self.len {
+                break;
+            }
+            if self.consume_block_comment()? {
+                advanced = true;
+                continue;
+            }
+            if self.cursor >= self.len {
+                break;
+            }
+            if self.consume_line_comment() {
+                advanced = true;
+                continue;
+            }
             break;
-        };
-        idx += ch.len_utf8();
+        }
+        Ok(advanced)
     }
-    let pos = idx.min(src.len());
-    let (line, col) = line_map.locate(src, pos);
-    Err(LexerError::at_with_snippet(
-        "LEX001",
-        "ブロックコメントが閉じていません",
-        Some(pos),
-        Some(line),
-        Some(col),
-        line_map.line_text(src, line).to_string(),
-    ))
-}
 
-/// 単純なトークンをベクタへ追加するヘルパ。
-fn push_simple_token(
-    toks: &mut Vec<Token>,
-    kind: TokenKind,
-    value: &str,
-    pos: usize,
-    line_map: &LineMap,
-    src: &str,
-) {
-    let (line, col) = line_map.locate(src, pos);
-    toks.push(Token {
-        kind,
-        value: value.into(),
-        pos,
-        line,
-        col,
-    });
-}
-
-/// ソースコードを走査し、位置付きトークン列を返す。
-pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
-    let mut toks: Vec<Token> = Vec::new();
-    let mut i = 0usize;
-    let bytes = src.as_bytes();
-    let n = bytes.len();
-    let next_char = |i: usize| -> Option<char> { src[i..].chars().next() };
-    let line_map = LineMap::new(src);
-    while i < n {
-        if skip_whitespace(src, &mut i) {
-            continue;
-        }
-        if i >= n {
-            break;
-        }
-        if skip_block_comment(src, &mut i, &line_map)? {
-            continue;
-        }
-        if i >= n {
-            break;
-        }
-        if skip_line_comment(src, &mut i) {
-            continue;
-        }
-        if i >= n {
-            break;
-        }
-
-        let Some(c) = next_char(i) else { break };
-        let c_next_idx = i + c.len_utf8();
-
-        // 2 文字で構成される演算子や記号を処理する
-        if c_next_idx <= n {
-            if let Some(c2) = next_char(c_next_idx) {
-                match (c, c2) {
-                    ('-', '>') => {
-                        push_simple_token(&mut toks, TokenKind::ARROW, "->", i, &line_map, src);
-                        i = c_next_idx + c2.len_utf8();
-                        continue;
-                    }
-                    (':', ':') => {
-                        push_simple_token(&mut toks, TokenKind::DCOLON, "::", i, &line_map, src);
-                        i = c_next_idx + c2.len_utf8();
-                        continue;
-                    }
-                    ('=', '>') => {
-                        push_simple_token(&mut toks, TokenKind::DARROW, "=>", i, &line_map, src);
-                        i = c_next_idx + c2.len_utf8();
-                        continue;
-                    }
-                    ('<', '=') => {
-                        push_simple_token(&mut toks, TokenKind::LE, "<=", i, &line_map, src);
-                        i = c_next_idx + c2.len_utf8();
-                        continue;
-                    }
-                    ('>', '=') => {
-                        push_simple_token(&mut toks, TokenKind::GE, ">=", i, &line_map, src);
-                        i = c_next_idx + c2.len_utf8();
-                        continue;
-                    }
-                    ('=', '=') => {
-                        push_simple_token(&mut toks, TokenKind::EQ, "==", i, &line_map, src);
-                        i = c_next_idx + c2.len_utf8();
-                        continue;
-                    }
-                    ('/', '=') => {
-                        push_simple_token(&mut toks, TokenKind::NE, "/=", i, &line_map, src);
-                        i = c_next_idx + c2.len_utf8();
-                        continue;
-                    }
-                    ('*', '*') => {
-                        push_simple_token(&mut toks, TokenKind::DBLSTAR, "**", i, &line_map, src);
-                        i = c_next_idx + c2.len_utf8();
-                        continue;
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        // 1 文字記号
-        match c {
-            '\\' => {
-                push_simple_token(&mut toks, TokenKind::LAMBDA, "\\", i, &line_map, src);
-                i += 1;
-                continue;
-            }
-            '<' => {
-                push_simple_token(&mut toks, TokenKind::LT, "<", i, &line_map, src);
-                i += 1;
-                continue;
-            }
-            '>' => {
-                push_simple_token(&mut toks, TokenKind::GT, ">", i, &line_map, src);
-                i += 1;
-                continue;
-            }
-            '+' => {
-                push_simple_token(&mut toks, TokenKind::PLUS, "+", i, &line_map, src);
-                i += 1;
-                continue;
-            }
-            '-' => {
-                push_simple_token(&mut toks, TokenKind::MINUS, "-", i, &line_map, src);
-                i += 1;
-                continue;
-            }
-            '*' => {
-                push_simple_token(&mut toks, TokenKind::STAR, "*", i, &line_map, src);
-                i += 1;
-                continue;
-            }
-            '/' => {
-                push_simple_token(&mut toks, TokenKind::SLASH, "/", i, &line_map, src);
-                i += 1;
-                continue;
-            }
-            '^' => {
-                push_simple_token(&mut toks, TokenKind::CARET, "^", i, &line_map, src);
-                i += 1;
-                continue;
-            }
-            '(' => {
-                push_simple_token(&mut toks, TokenKind::LPAREN, "(", i, &line_map, src);
-                i += 1;
-                continue;
-            }
-            ')' => {
-                push_simple_token(&mut toks, TokenKind::RPAREN, ")", i, &line_map, src);
-                i += 1;
-                continue;
-            }
-            '[' => {
-                push_simple_token(&mut toks, TokenKind::LBRACK, "[", i, &line_map, src);
-                i += 1;
-                continue;
-            }
-            ']' => {
-                push_simple_token(&mut toks, TokenKind::RBRACK, "]", i, &line_map, src);
-                i += 1;
-                continue;
-            }
-            ',' => {
-                push_simple_token(&mut toks, TokenKind::COMMA, ",", i, &line_map, src);
-                i += 1;
-                continue;
-            }
-            ';' => {
-                push_simple_token(&mut toks, TokenKind::SEMI, ";", i, &line_map, src);
-                i += 1;
-                continue;
-            }
-            '=' => {
-                push_simple_token(&mut toks, TokenKind::EQUAL, "=", i, &line_map, src);
-                i += 1;
-                continue;
-            }
-            '|' => {
-                push_simple_token(&mut toks, TokenKind::BAR, "|", i, &line_map, src);
-                i += 1;
-                continue;
-            }
-            '?' => {
-                push_simple_token(&mut toks, TokenKind::QMARK, "?", i, &line_map, src);
-                i += 1;
-                continue;
-            }
-            '_' => {
-                push_simple_token(&mut toks, TokenKind::UNDERSCORE, "_", i, &line_map, src);
-                i += 1;
-                continue;
-            }
-            '\'' => {
-                // 単一文字またはエスケープで構成される文字リテラル
-                let start = i;
-                i += 1; // 先頭のシングルクォートを読み飛ばす
-                let mut escaped = false;
-                let mut ok = false;
-                while i < n {
-                    let ch =
-                        next_char(i).expect("安全性保証: 文字リテラル走査中に EOF へ到達しない");
-                    i += ch.len_utf8();
-                    if !escaped {
-                        if ch == '\\' {
-                            escaped = true;
-                            continue;
-                        }
-                        if ch == '\'' {
-                            ok = true;
-                            break;
-                        }
-                        if ch == '\n' {
-                            break;
-                        }
-                    } else {
-                        // エスケープ済みなので通常処理へ戻す
-                        escaped = false;
-                    }
-                }
-                if !ok {
-                    let (l, c) = line_map.locate(src, start);
-                    return Err(LexerError::at_with_snippet(
-                        "LEX002",
-                        "文字リテラルが閉じていません",
-                        Some(start),
-                        Some(l),
-                        Some(c),
-                        line_map.line_text(src, l).to_string(),
-                    ));
-                }
-                let s = &src[start..i];
-                let (l, c) = line_map.locate(src, start);
-                toks.push(Token {
-                    kind: TokenKind::CHAR,
-                    value: s.into(),
-                    pos: start,
-                    line: l,
-                    col: c,
-                });
-                continue;
-            }
-            '"' => {
-                // 文字列リテラルの読み取り
-                let start = i;
-                i += 1;
-                let mut escaped = false;
-                let mut ok = false;
-                while i < n {
-                    let ch =
-                        next_char(i).expect("安全性保証: 文字列リテラル走査中に EOF へ到達しない");
-                    i += ch.len_utf8();
-                    if !escaped {
-                        if ch == '\\' {
-                            escaped = true;
-                            continue;
-                        }
-                        if ch == '"' {
-                            ok = true;
-                            break;
-                        }
-                        if ch == '\n' {
-                            break;
-                        }
-                    } else {
-                        escaped = false;
-                    }
-                }
-                if !ok {
-                    let (l, c) = line_map.locate(src, start);
-                    return Err(LexerError::at_with_snippet(
-                        "LEX003",
-                        "文字列リテラルが閉じていません",
-                        Some(start),
-                        Some(l),
-                        Some(c),
-                        line_map.line_text(src, l).to_string(),
-                    ));
-                }
-                let s = &src[start..i];
-                let (l, c) = line_map.locate(src, start);
-                toks.push(Token {
-                    kind: TokenKind::STRING,
-                    value: s.into(),
-                    pos: start,
-                    line: l,
-                    col: c,
-                });
-                continue;
-            }
-            _ => {}
-        }
-
-        // 数値リテラル（基数接頭辞・浮動小数・整数）を認識する
-        if is_digit(c) {
-            // プレフィックスで基数を切り替える
-            if c == '0' {
-                if let Some('x') | Some('X') = next_char(c_next_idx) {
-                    let start = i;
-                    i = c_next_idx + 'x'.len_utf8(); // `0x` を読み飛ばす
-                    let mut cnt = 0;
-                    while i < n {
-                        let ch = next_char(i)
-                            .expect("安全性保証: 16 進リテラル走査中に EOF へ到達しない");
-                        if is_hexdigit(ch) {
-                            i += ch.len_utf8();
-                            cnt += 1;
-                        } else {
-                            break;
-                        }
-                    }
-                    if cnt == 0 {
-                        let (l, c) = line_map.locate(src, start);
-                        return Err(LexerError::at_with_snippet(
-                            "LEX010",
-                            "16進数の桁がありません",
-                            Some(start),
-                            Some(l),
-                            Some(c),
-                            line_map.line_text(src, l).to_string(),
-                        ));
-                    }
-                    let (l, c) = line_map.locate(src, start);
-                    toks.push(Token {
-                        kind: TokenKind::HEX,
-                        value: src[start..i].into(),
-                        pos: start,
-                        line: l,
-                        col: c,
-                    });
-                    continue;
-                }
-                if let Some('o') | Some('O') = next_char(c_next_idx) {
-                    let start = i;
-                    i = c_next_idx + 'o'.len_utf8(); // `0o` を読み飛ばす
-                    let mut cnt = 0;
-                    while i < n {
-                        let ch = next_char(i)
-                            .expect("安全性保証: 8 進リテラル走査中に EOF へ到達しない");
-                        if is_octdigit(ch) {
-                            i += ch.len_utf8();
-                            cnt += 1;
-                        } else {
-                            break;
-                        }
-                    }
-                    if cnt == 0 {
-                        let (l, c) = line_map.locate(src, start);
-                        return Err(LexerError::at_with_snippet(
-                            "LEX011",
-                            "8進数の桁がありません",
-                            Some(start),
-                            Some(l),
-                            Some(c),
-                            line_map.line_text(src, l).to_string(),
-                        ));
-                    }
-                    let (l, c) = line_map.locate(src, start);
-                    toks.push(Token {
-                        kind: TokenKind::OCT,
-                        value: src[start..i].into(),
-                        pos: start,
-                        line: l,
-                        col: c,
-                    });
-                    continue;
-                }
-                if let Some('b') | Some('B') = next_char(c_next_idx) {
-                    let start = i;
-                    i = c_next_idx + 'b'.len_utf8(); // `0b` を読み飛ばす
-                    let mut cnt = 0;
-                    while i < n {
-                        let ch = next_char(i)
-                            .expect("安全性保証: 2 進リテラル走査中に EOF へ到達しない");
-                        if is_bindigit(ch) {
-                            i += ch.len_utf8();
-                            cnt += 1;
-                        } else {
-                            break;
-                        }
-                    }
-                    if cnt == 0 {
-                        let (l, c) = line_map.locate(src, start);
-                        return Err(LexerError::at_with_snippet(
-                            "LEX012",
-                            "2進数の桁がありません",
-                            Some(start),
-                            Some(l),
-                            Some(c),
-                            line_map.line_text(src, l).to_string(),
-                        ));
-                    }
-                    let (l, c) = line_map.locate(src, start);
-                    toks.push(Token {
-                        kind: TokenKind::BIN,
-                        value: src[start..i].into(),
-                        pos: start,
-                        line: l,
-                        col: c,
-                    });
-                    continue;
-                }
-            }
-            // 10 進数（整数・小数・指数表記）を処理する
-            let start = i;
-            // 整数部を取り込む
-            while i < n {
-                let ch = next_char(i).expect("安全性保証: 10 進整数部走査中に EOF へ到達しない");
-                if is_digit(ch) {
-                    i += ch.len_utf8();
-                } else {
-                    break;
-                }
-            }
-            // 小数部や指数部が続くかを判断する
-            let mut is_float = false;
-            if i < n {
-                if let Some('.') = next_char(i) {
-                    let dot_next = i + '.'.len_utf8();
-                    if let Some(d2) = next_char(dot_next) {
-                        if d2.is_ascii_digit() {
-                            // 小数部あり（例: `d.d`）
-                            is_float = true;
-                            i = dot_next; // '.' を含む位置から小数部へ進む
-                            while i < n {
-                                let ch = next_char(i)
-                                    .expect("安全性保証: 小数部走査中に EOF へ到達しない");
-                                if is_digit(ch) {
-                                    i += ch.len_utf8();
-                                } else {
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            // 指数部（e/E 記法）が続く場合は解析する
-            if i < n {
-                if let Some('e') | Some('E') = next_char(i) {
-                    let mut j = i + 'e'.len_utf8();
-                    if let Some('+') | Some('-') = next_char(j) {
-                        j += '+'.len_utf8();
-                    }
-                    let mut cnt = 0;
-                    while j < n {
-                        let ch = next_char(j).expect("安全性保証: 指数部走査中に EOF へ到達しない");
-                        if is_digit(ch) {
-                            j += ch.len_utf8();
-                            cnt += 1;
-                        } else {
-                            break;
-                        }
-                    }
-                    if cnt > 0 {
-                        i = j;
-                        is_float = true;
-                    } else { /* 例: 1e のように指数部が欠ける場合は整数扱い */
-                    }
-                }
-            }
-            let s = &src[start..i];
-            let kind = if is_float {
-                TokenKind::FLOAT
+    fn consume_whitespace(&mut self) -> bool {
+        let mut advanced = false;
+        while let Some(ch) = self.peek_char() {
+            if is_whitespace(ch) {
+                self.advance_char();
+                advanced = true;
             } else {
-                TokenKind::INT
+                break;
+            }
+        }
+        advanced
+    }
+
+    fn consume_line_comment(&mut self) -> bool {
+        if !self.starts_with("--") {
+            return false;
+        }
+        self.advance_bytes(2);
+        while let Some(ch) = self.advance_char() {
+            if ch == '\n' {
+                break;
+            }
+        }
+        true
+    }
+
+    fn consume_block_comment(&mut self) -> Result<bool, LexerError> {
+        if !self.starts_with("{-") {
+            return Ok(false);
+        }
+        let mut idx = self.cursor + 2;
+        let mut depth = 1;
+        while idx < self.len {
+            if self.src[idx..].starts_with("-}") {
+                depth -= 1;
+                idx += 2;
+                if depth == 0 {
+                    self.cursor = idx;
+                    return Ok(true);
+                }
+                continue;
+            }
+            if self.src[idx..].starts_with("{-") {
+                depth += 1;
+                idx += 2;
+                continue;
+            }
+            let Some(ch) = self.src[idx..].chars().next() else {
+                break;
             };
-            let (l, c) = line_map.locate(src, start);
-            toks.push(Token {
-                kind,
-                value: s.into(),
-                pos: start,
-                line: l,
-                col: c,
-            });
-            continue;
+            idx += ch.len_utf8();
+        }
+        let pos = idx.min(self.len);
+        Err(self.err("LEX001", "ブロックコメントが閉じていません", pos))
+    }
+
+    fn lex_token(&mut self) -> Result<(), LexerError> {
+        let start = self.cursor;
+        let ch = self
+            .peek_char()
+            .expect("lex_token は EOF では呼び出されない");
+        if self.try_multi_char_symbol(ch) {
+            return Ok(());
+        }
+        if self.try_single_char_symbol(ch) {
+            return Ok(());
+        }
+        if ch == '\'' {
+            return self.lex_char_literal();
+        }
+        if ch == '"' {
+            return self.lex_string_literal();
+        }
+        if is_digit(ch) {
+            return self.lex_number();
+        }
+        if is_letter(ch) {
+            return self.lex_identifier_or_keyword();
+        }
+        Err(self.err("LEX090", format!("字句解析に失敗: {:?}", ch), start))
+    }
+
+    fn try_multi_char_symbol(&mut self, first: char) -> bool {
+        let Some(second) = self.peek_second_char() else {
+            return false;
+        };
+        let token = match (first, second) {
+            ('-', '>') => Some((TokenKind::ARROW, "->")),
+            (':', ':') => Some((TokenKind::DCOLON, "::")),
+            ('=', '>') => Some((TokenKind::DARROW, "=>")),
+            ('<', '=') => Some((TokenKind::LE, "<=")),
+            ('>', '=') => Some((TokenKind::GE, ">=")),
+            ('=', '=') => Some((TokenKind::EQ, "==")),
+            ('/', '=') => Some((TokenKind::NE, "/=")),
+            ('*', '*') => Some((TokenKind::DBLSTAR, "**")),
+            _ => None,
+        };
+        if let Some((kind, value)) = token {
+            let start = self.cursor;
+            self.advance_bytes(first.len_utf8());
+            self.advance_bytes(second.len_utf8());
+            self.push_simple(kind, value, start);
+            return true;
+        }
+        false
+    }
+
+    fn try_single_char_symbol(&mut self, ch: char) -> bool {
+        let token = match ch {
+            '\\' => Some((TokenKind::LAMBDA, "\\")),
+            '<' => Some((TokenKind::LT, "<")),
+            '>' => Some((TokenKind::GT, ">")),
+            '+' => Some((TokenKind::PLUS, "+")),
+            '-' => Some((TokenKind::MINUS, "-")),
+            '*' => Some((TokenKind::STAR, "*")),
+            '/' => Some((TokenKind::SLASH, "/")),
+            '^' => Some((TokenKind::CARET, "^")),
+            '(' => Some((TokenKind::LPAREN, "(")),
+            ')' => Some((TokenKind::RPAREN, ")")),
+            '[' => Some((TokenKind::LBRACK, "[")),
+            ']' => Some((TokenKind::RBRACK, "]")),
+            ',' => Some((TokenKind::COMMA, ",")),
+            ';' => Some((TokenKind::SEMI, ";")),
+            '=' => Some((TokenKind::EQUAL, "=")),
+            '|' => Some((TokenKind::BAR, "|")),
+            '?' => Some((TokenKind::QMARK, "?")),
+            '_' => Some((TokenKind::UNDERSCORE, "_")),
+            _ => None,
+        };
+        if let Some((kind, value)) = token {
+            let start = self.cursor;
+            self.advance_bytes(ch.len_utf8());
+            self.push_simple(kind, value, start);
+            return true;
+        }
+        false
+    }
+
+    fn lex_char_literal(&mut self) -> Result<(), LexerError> {
+        let start = self.cursor;
+        self.advance_bytes(1); // 開始クォート
+        let mut escaped = false;
+        let mut ok = false;
+        while let Some(ch) = self.advance_char() {
+            if !escaped {
+                if ch == '\\' {
+                    escaped = true;
+                    continue;
+                }
+                if ch == '\'' {
+                    ok = true;
+                    break;
+                }
+                if ch == '\n' {
+                    break;
+                }
+            } else {
+                escaped = false;
+            }
+        }
+        if !ok {
+            return Err(self.err("LEX002", "文字リテラルが閉じていません", start));
+        }
+        let end = self.cursor;
+        self.push_slice(TokenKind::CHAR, start, end);
+        Ok(())
+    }
+
+    fn lex_string_literal(&mut self) -> Result<(), LexerError> {
+        let start = self.cursor;
+        self.advance_bytes(1); // 開始ダブルクォート
+        let mut escaped = false;
+        let mut ok = false;
+        while let Some(ch) = self.advance_char() {
+            if !escaped {
+                if ch == '\\' {
+                    escaped = true;
+                    continue;
+                }
+                if ch == '"' {
+                    ok = true;
+                    break;
+                }
+                if ch == '\n' {
+                    break;
+                }
+            } else {
+                escaped = false;
+            }
+        }
+        if !ok {
+            return Err(self.err("LEX003", "文字列リテラルが閉じていません", start));
+        }
+        let end = self.cursor;
+        self.push_slice(TokenKind::STRING, start, end);
+        Ok(())
+    }
+
+    fn lex_number(&mut self) -> Result<(), LexerError> {
+        let start = self.cursor;
+        if self.starts_with("0x") || self.starts_with("0X") {
+            return self.lex_prefixed_number(
+                start,
+                2,
+                is_hexdigit,
+                TokenKind::HEX,
+                "LEX010",
+                "16進数の桁がありません",
+            );
+        }
+        if self.starts_with("0o") || self.starts_with("0O") {
+            return self.lex_prefixed_number(
+                start,
+                2,
+                is_octdigit,
+                TokenKind::OCT,
+                "LEX011",
+                "8進数の桁がありません",
+            );
+        }
+        if self.starts_with("0b") || self.starts_with("0B") {
+            return self.lex_prefixed_number(
+                start,
+                2,
+                is_bindigit,
+                TokenKind::BIN,
+                "LEX012",
+                "2進数の桁がありません",
+            );
         }
 
-        // 識別子（大文字開始は CONID、小文字開始は VARID）を解析する
-        if is_letter(c) {
-            let start = i;
-            i += c.len_utf8();
-            while i < n {
-                let ch = next_char(i).expect("安全性保証: 識別子走査中に EOF へ到達しない");
-                if is_ident_rest(ch) {
-                    i += ch.len_utf8();
+        while let Some(ch) = self.peek_char() {
+            if is_digit(ch) {
+                self.advance_char();
+            } else {
+                break;
+            }
+        }
+
+        let mut is_float = false;
+        if self.peek_char() == Some('.') {
+            if let Some(next_digit) = self.peek_second_char() {
+                if is_digit(next_digit) {
+                    is_float = true;
+                    self.advance_char(); // '.'
+                    while let Some(ch) = self.peek_char() {
+                        if is_digit(ch) {
+                            self.advance_char();
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some('e') | Some('E') = self.peek_char() {
+            let mut idx = self.cursor + 1;
+            if let Some(sign) = self.char_at(idx) {
+                if sign == '+' || sign == '-' {
+                    idx += 1;
+                }
+            }
+            let mut count = 0;
+            let mut scan = idx;
+            while let Some(ch) = self.char_at(scan) {
+                if is_digit(ch) {
+                    scan += ch.len_utf8();
+                    count += 1;
                 } else {
                     break;
                 }
             }
-            let s = &src[start..i];
-            // 予約語かどうかを振り分ける
-            let (line, col) = line_map.locate(src, start);
-            let token = match s {
-                "let" => Token {
-                    kind: TokenKind::LET,
-                    value: s.into(),
-                    pos: start,
-                    line,
-                    col,
-                },
-                "in" => Token {
-                    kind: TokenKind::IN,
-                    value: s.into(),
-                    pos: start,
-                    line,
-                    col,
-                },
-                "if" => Token {
-                    kind: TokenKind::IF,
-                    value: s.into(),
-                    pos: start,
-                    line,
-                    col,
-                },
-                "then" => Token {
-                    kind: TokenKind::THEN,
-                    value: s.into(),
-                    pos: start,
-                    line,
-                    col,
-                },
-                "else" => Token {
-                    kind: TokenKind::ELSE,
-                    value: s.into(),
-                    pos: start,
-                    line,
-                    col,
-                },
-                "case" => Token {
-                    kind: TokenKind::CASE,
-                    value: s.into(),
-                    pos: start,
-                    line,
-                    col,
-                },
-                "of" => Token {
-                    kind: TokenKind::OF,
-                    value: s.into(),
-                    pos: start,
-                    line,
-                    col,
-                },
-                "data" => Token {
-                    kind: TokenKind::DATA,
-                    value: s.into(),
-                    pos: start,
-                    line,
-                    col,
-                },
-                "True" => Token {
-                    kind: TokenKind::TRUE,
-                    value: s.into(),
-                    pos: start,
-                    line,
-                    col,
-                },
-                "False" => Token {
-                    kind: TokenKind::FALSE,
-                    value: s.into(),
-                    pos: start,
-                    line,
-                    col,
-                },
-                _ => {
-                    let first = s
-                        .chars()
-                        .next()
-                        .expect("識別子は少なくとも1文字である必要があります");
-                    if first.is_ascii_uppercase() {
-                        Token {
-                            kind: TokenKind::CONID,
-                            value: s.into(),
-                            pos: start,
-                            line,
-                            col,
-                        }
-                    } else {
-                        Token {
-                            kind: TokenKind::VARID,
-                            value: s.into(),
-                            pos: start,
-                            line,
-                            col,
-                        }
-                    }
-                }
-            };
-            toks.push(token);
-            continue;
+            if count > 0 {
+                is_float = true;
+                self.cursor = scan;
+            }
         }
 
-        let (l, c2) = line_map.locate(src, i);
-        return Err(LexerError::at_with_snippet(
-            "LEX090",
-            format!("字句解析に失敗: {:?}", c),
-            Some(i),
-            Some(l),
-            Some(c2),
-            line_map.line_text(src, l).to_string(),
-        ));
+        let end = self.cursor;
+        let kind = if is_float {
+            TokenKind::FLOAT
+        } else {
+            TokenKind::INT
+        };
+        self.push_slice(kind, start, end);
+        Ok(())
     }
-    push_simple_token(&mut toks, TokenKind::EOF, "", n, &line_map, src);
-    Ok(toks)
+
+    fn lex_prefixed_number<F>(
+        &mut self,
+        start: usize,
+        prefix_len: usize,
+        mut predicate: F,
+        kind: TokenKind,
+        code: &'static str,
+        msg: &str,
+    ) -> Result<(), LexerError>
+    where
+        F: FnMut(char) -> bool,
+    {
+        self.advance_bytes(prefix_len);
+        let mut count = 0;
+        while let Some(ch) = self.peek_char() {
+            if predicate(ch) {
+                self.advance_char();
+                count += 1;
+            } else {
+                break;
+            }
+        }
+        if count == 0 {
+            return Err(self.err(code, msg, start));
+        }
+        let end = self.cursor;
+        self.push_slice(kind, start, end);
+        Ok(())
+    }
+
+    fn lex_identifier_or_keyword(&mut self) -> Result<(), LexerError> {
+        let start = self.cursor;
+        self.advance_char();
+        while let Some(ch) = self.peek_char() {
+            if is_ident_rest(ch) {
+                self.advance_char();
+            } else {
+                break;
+            }
+        }
+        let slice = &self.src[start..self.cursor];
+        let (kind, value) = match slice {
+            "let" => (TokenKind::LET, slice),
+            "in" => (TokenKind::IN, slice),
+            "if" => (TokenKind::IF, slice),
+            "then" => (TokenKind::THEN, slice),
+            "else" => (TokenKind::ELSE, slice),
+            "case" => (TokenKind::CASE, slice),
+            "of" => (TokenKind::OF, slice),
+            "data" => (TokenKind::DATA, slice),
+            "True" => (TokenKind::TRUE, slice),
+            "False" => (TokenKind::FALSE, slice),
+            _ => {
+                let first = slice.chars().next().expect("識別子は少なくとも1文字");
+                if first.is_ascii_uppercase() {
+                    (TokenKind::CONID, slice)
+                } else {
+                    (TokenKind::VARID, slice)
+                }
+            }
+        };
+        self.push_simple(kind, value, start);
+        Ok(())
+    }
+
+    fn push_simple(&mut self, kind: TokenKind, value: &str, start: usize) {
+        let (line, col) = self.line_map.locate(self.src, start);
+        self.tokens.push(Token {
+            kind,
+            value: value.into(),
+            pos: start,
+            line,
+            col,
+        });
+    }
+
+    fn push_slice(&mut self, kind: TokenKind, start: usize, end: usize) {
+        let (line, col) = self.line_map.locate(self.src, start);
+        self.tokens.push(Token {
+            kind,
+            value: self.src[start..end].into(),
+            pos: start,
+            line,
+            col,
+        });
+    }
+
+    fn peek_char(&self) -> Option<char> {
+        if self.cursor >= self.len {
+            None
+        } else {
+            self.src[self.cursor..].chars().next()
+        }
+    }
+
+    fn peek_second_char(&self) -> Option<char> {
+        let mut iter = self.src[self.cursor..].chars();
+        iter.next()?;
+        iter.next()
+    }
+
+    fn char_at(&self, idx: usize) -> Option<char> {
+        if idx >= self.len {
+            None
+        } else {
+            self.src[idx..].chars().next()
+        }
+    }
+
+    fn advance_char(&mut self) -> Option<char> {
+        let ch = self.peek_char()?;
+        self.advance_bytes(ch.len_utf8());
+        Some(ch)
+    }
+
+    fn advance_bytes(&mut self, count: usize) {
+        self.cursor = (self.cursor + count).min(self.len);
+    }
+
+    fn starts_with(&self, pattern: &str) -> bool {
+        self.src[self.cursor..].starts_with(pattern)
+    }
+
+    fn err(&self, code: &'static str, message: impl Into<String>, pos: usize) -> LexerError {
+        let (line, col) = self.line_map.locate(self.src, pos);
+        LexerError::at_with_snippet(
+            code,
+            message,
+            Some(pos),
+            Some(line),
+            Some(col),
+            self.line_map.line_text(self.src, line).to_string(),
+        )
+    }
+}
+
+pub fn lex(src: &str) -> Result<Vec<Token>, LexerError> {
+    Lexer::new(src).run()
 }
