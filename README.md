@@ -1,7 +1,7 @@
 <!-- パス: README.md -->
 <!-- 役割: TypeLang HM プロジェクトの全体像とセットアップ手順を案内するトップドキュメント -->
 <!-- 意図: 利用者とコントリビューターが短時間で環境構築・開発に着手できるよう支援する -->
-<!-- 関連ファイル: AGENTS.md, EBNF.md -->
+<!-- 関連ファイル: .codex/AGENTS.md, EBNF.md -->
 
 # TypeLang HM (Rust) Overview
 
@@ -68,7 +68,7 @@ Loaded 24 def(s)
 | カバレッジ | `make coverage` | `cargo llvm-cov` による HTML / JSON / LCOV 生成 |
 
 ## 開発ポリシー
-- 詳細な運用手順・テンプレは `AGENTS.md` を参照
+- 詳細な運用手順・テンプレは `.codex/AGENTS.md` を参照
 - コメント・ドキュメントは日本語、識別子は英語で統一
 - 仕様変更時は **EBNF → 実装 → テスト → examples** の順で同期
 

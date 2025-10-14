@@ -1,7 +1,7 @@
-<!-- パス: AGENTS.md -->
+<!-- パス: .codex/AGENTS.md -->
 <!-- 役割: Unified agent guide (principles + quickstart + ops + templates + UI + data) -->
 <!-- 意図: Single-source, daily-ready, 80/20-aligned execution guide -->
-<!-- 関連ファイル: (self-contained) -->
+<!-- 関連ファイル: BOOT_PROMPT_EN.txt, README.md -->
 
 # AGENTS.md
 
