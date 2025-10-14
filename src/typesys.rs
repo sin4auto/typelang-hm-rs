@@ -211,9 +211,17 @@ impl TypeEnv {
     pub fn extend(&mut self, name: impl Into<String>, sch: Scheme) {
         self.env.insert(name.into(), sch);
     }
+    /// 新しい束縛を追加し、既存値を返す（シャドウイング対応）。
+    pub fn insert_owned(&mut self, name: String, sch: Scheme) -> Option<Scheme> {
+        self.env.insert(name, sch)
+    }
     /// 名前から型スキームを検索する。
     pub fn lookup(&self, name: &str) -> Option<&Scheme> {
         self.env.get(name)
+    }
+    /// 指定した束縛を除去し、存在していれば返す。
+    pub fn remove(&mut self, name: &str) -> Option<Scheme> {
+        self.env.remove(name)
     }
 }
 

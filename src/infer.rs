@@ -460,6 +460,7 @@ impl<'a> InferCtx<'a> {
         let mut s_acc = s_scrut;
         let mut result_ty: Option<Type> = None;
         let mut constraints_acc = q_scrut.constraints.clone();
+        let mut env_branch = env.clone_env();
 
         for arm in arms {
             let expected_ty = q_scrut.r#type.apply_subst(&s_acc);
@@ -468,8 +469,8 @@ impl<'a> InferCtx<'a> {
             s_acc = compose(&s_pat, &s_acc);
             constraints_acc.append(&mut pat_cs);
 
-            let mut env_branch = env.clone_env();
             let mut seen = HashSet::new();
+            let mut shadowed: Vec<(String, Option<Scheme>)> = Vec::new();
             for (name, ty) in bindings {
                 if !seen.insert(name.clone()) {
                     return Err(TypeError::new(
@@ -478,19 +479,26 @@ impl<'a> InferCtx<'a> {
                         None,
                     ));
                 }
-                env_branch.extend(
-                    name,
-                    Scheme {
-                        vars: vec![],
-                        qual: qualify(ty.apply_subst(&s_acc), vec![]),
-                    },
-                );
+                let scheme = Scheme {
+                    vars: vec![],
+                    qual: qualify(ty.apply_subst(&s_acc), vec![]),
+                };
+                let previous = env_branch.insert_owned(name.clone(), scheme);
+                shadowed.push((name, previous));
             }
 
             let (s_body, q_body) = self.infer_with_subst(&env_branch, s_acc.clone(), &arm.body)?;
             s_acc = s_body;
             constraints_acc.extend(q_body.constraints.clone());
             let branch_ty = q_body.r#type.apply_subst(&s_acc);
+
+            for (name, prev) in shadowed.into_iter().rev() {
+                if let Some(old) = prev {
+                    env_branch.insert_owned(name, old);
+                } else {
+                    env_branch.remove(&name);
+                }
+            }
 
             if let Some(prev_ty) = result_ty.take() {
                 let s_unify = unify(prev_ty.clone(), branch_ty.clone())
