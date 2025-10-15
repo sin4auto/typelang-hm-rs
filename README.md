@@ -64,3 +64,67 @@ Open any file, then paste snippets into the REPL or load them with `:load`.
 - MIT License (see `LICENSE`).
 
 Happy hacking — keep it simple, observable, and well-documented.
+
+---
+
+# TypeLang HM (Rust)（日本語）
+
+TypeLang HMは、Rustで実装されたコンパクトなHindley–Milner型推論ランタイムです。このガイドでは、インタープリタの起動方法からサンプルプログラムの体験、言語の可能性を素早く把握する方法までをまとめています。
+
+## クイックスタート
+1. Rustツールチェーンがインストールされていることを確認します（例：`rustup default stable`）。
+2. 本リポジトリをダウンロードまたはクローンし、プロジェクトルートでターミナルを開きます。
+3. 対話型インタープリタを起動します。
+
+```bash
+cargo run
+```
+
+REPL内では`Ctrl+D`で終了、`Ctrl+C`で入力中の行を破棄、矢印キーの上で直前の入力を再実行できます。
+
+## REPLでの最初の手順
+- 式の型を確認：`:t 1 + 2`
+- ヘルパーを定義して再利用：
+
+```text
+:let inc x = x + 1
+inc 41
+```
+
+- 既存のスクリプトを読み込んで実行：
+
+```text
+:load examples/ebnf_blackbox.tl
+```
+
+## できること
+- **コア構文**：`let`束縛、ラムダ抽象、`if/then/else`、網羅的な`case ... of`パターンマッチ。
+- **型システム**：Hindley–Milner型推論に加え、`Eq` / `Ord` / `Show` / `Num` / `Fractional`といった一般的な型クラスとデフォルト化ルール。
+- **データモデリング**：`data`による代数的データ型、タプル、リスト、ガード付きパターン、asパターン（`x@pattern`）。
+- **数値とリテラル**：10進・2進・8進・16進リテラル、整数（`^`）と浮動小数（`**`）の累乗演算、共通エスケープシーケンスを共有するUnicode文字列と文字。
+
+## サンプルプログラム
+- `examples/intro.tl` — 束縛、条件分岐、パターンマッチを一通り体験できます。
+- `examples/ebnf_blackbox.tl` — 参照文法と対応した演習問題です。
+- `examples/adt_color.tl` — 代数的データ型の宣言とパターンマッチの例を示します。
+
+任意のファイルを開き、スニペットをREPLに貼り付けるか、`:load`で読み込んでください。
+
+## さらに学ぶ
+- `EBNF.md`で形式文法を確認できます。
+- `examples/`には段階的に難易度が上がるスクリプトが並んでおり、コピー＆ペーストでそのまま実行できます。
+- `tests/`には追加シナリオがあります。エッジケースを知りたいときの上級リファレンスとして活用してください。
+
+## トラブルシューティング
+- **`cargo`が見つからない**：<https://rustup.rs>からRustをインストールし、ターミナルを再起動します。
+- **初回ビルドが失敗する**：`rustup update`で最新の安定版ツールチェーンを取得し、改めて`cargo run`を実行します。
+- **スクリプト実行でクラッシュする**：`RUST_BACKTRACE=1 cargo run`で再実行し、スタックトレースを添えてIssueを起票してください。
+
+## 最新情報の入手
+- リリース情報を追うには、リポジトリをStarまたはWatchしてください。
+- 質問やアイデアはIssueトラッカーへ。新機能の提案も歓迎です。
+
+## ライセンス
+- MIT License（`LICENSE`参照）。
+
+楽しんでください — シンプルに、観察可能に、十分にドキュメント化された形で進めましょう。

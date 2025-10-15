@@ -1,3 +1,8 @@
+-- パス: examples/basics.tl
+-- 役割: Hindley–Milnerの基本構文サンプル
+-- 意図: 型注釈とlet束縛の最小例を示す
+-- 関連ファイル: examples/step1_numbers.tl, README.md
+
 -- 型注釈 + let 束縛
 id :: a -> a ;
 let id x = x;
