@@ -2,7 +2,7 @@
 // 役割: 評価時に用いる値表現とプリミティブ生成ヘルパーを提供する
 // 意図: 評価器・プリミティブ定義から共有される基盤ロジックを分離する
 // 関連ファイル: src/evaluator.rs, src/primitives.rs
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -10,24 +10,44 @@ use std::rc::Rc;
 use crate::ast::Expr;
 use crate::errors::EvalError;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Debug)]
 /// 評価環境を共有可能な形で保持する軽量ラッパー。
 pub struct Env {
-    inner: Rc<RefCell<HashMap<String, Value>>>,
+    inner: Rc<EnvInner>,
+}
+
+#[derive(Debug)]
+struct EnvInner {
+    values: RefCell<HashMap<String, Value>>,
+    roots: Cell<usize>,
+    captures: Cell<usize>,
+}
+
+impl EnvInner {
+    fn new(map: HashMap<String, Value>) -> Self {
+        Self {
+            values: RefCell::new(map),
+            roots: Cell::new(1),
+            captures: Cell::new(0),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct CapturedEnv {
+    inner: Rc<EnvInner>,
 }
 
 impl Env {
     /// 空の環境を生成する。
     pub fn new() -> Self {
-        Self {
-            inner: Rc::new(RefCell::new(HashMap::new())),
-        }
+        Self::from_map(HashMap::new())
     }
 
     /// 既存のマップから環境を生成する。
     pub fn from_map(map: HashMap<String, Value>) -> Self {
         Self {
-            inner: Rc::new(RefCell::new(map)),
+            inner: Rc::new(EnvInner::new(map)),
         }
     }
 
@@ -38,22 +58,119 @@ impl Env {
 
     /// 環境をフラットな `HashMap` としてコピーする。
     pub fn snapshot(&self) -> HashMap<String, Value> {
-        self.inner.borrow().clone()
+        self.inner.values.borrow().clone()
     }
 
     /// 束縛を追加または更新する。
     pub fn insert(&self, key: impl Into<String>, val: Value) -> Option<Value> {
-        self.inner.borrow_mut().insert(key.into(), val)
+        self.inner.values.borrow_mut().insert(key.into(), val)
     }
 
     /// 束縛を取得する。
     pub fn get(&self, key: &str) -> Option<Value> {
-        self.inner.borrow().get(key).cloned()
+        self.inner.values.borrow().get(key).cloned()
     }
 
     /// 束縛を除去する。
     pub fn remove(&self, key: &str) -> Option<Value> {
-        self.inner.borrow_mut().remove(key)
+        self.inner.values.borrow_mut().remove(key)
+    }
+
+    /// クロージャ用に循環参照を追跡する捕捉環境を生成する。
+    pub fn capture(&self) -> CapturedEnv {
+        let current = self.inner.captures.get();
+        self.inner.captures.set(current + 1);
+        CapturedEnv {
+            inner: Rc::clone(&self.inner),
+        }
+    }
+
+    /// 所有権を捕捉環境へ移行する。
+    pub fn into_capture(self) -> CapturedEnv {
+        use std::mem::ManuallyDrop;
+
+        let this = ManuallyDrop::new(self);
+        // SAFETY: `this` is never dropped and we have exclusive access, so moving out
+        // of the field without running `Env::drop` is sound.
+        let inner = unsafe { std::ptr::read(&this.inner) };
+        let roots = inner.roots.get();
+        debug_assert!(roots > 0, "Env roots must remain positive");
+        inner.roots.set(roots - 1);
+        let captures = inner.captures.get();
+        inner.captures.set(captures + 1);
+        CapturedEnv { inner }
+    }
+}
+
+impl Default for Env {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Clone for Env {
+    fn clone(&self) -> Self {
+        let current = self.inner.roots.get();
+        self.inner.roots.set(current + 1);
+        Self {
+            inner: Rc::clone(&self.inner),
+        }
+    }
+}
+
+impl Drop for Env {
+    fn drop(&mut self) {
+        let prev = self.inner.roots.get();
+        debug_assert!(prev > 0, "Env root count underflow");
+        self.inner.roots.set(prev - 1);
+        if prev == 1 && self.inner.captures.get() > 0 {
+            let drained = {
+                let mut bindings = self.inner.values.borrow_mut();
+                if bindings.is_empty() {
+                    return;
+                }
+                std::mem::take(&mut *bindings)
+            };
+            drop(drained);
+        }
+    }
+}
+
+impl Clone for CapturedEnv {
+    fn clone(&self) -> Self {
+        let current = self.inner.captures.get();
+        self.inner.captures.set(current + 1);
+        Self {
+            inner: Rc::clone(&self.inner),
+        }
+    }
+}
+
+impl CapturedEnv {
+    pub fn upgrade(&self) -> Env {
+        let current = self.inner.roots.get();
+        self.inner.roots.set(current + 1);
+        Env {
+            inner: Rc::clone(&self.inner),
+        }
+    }
+}
+
+impl Drop for CapturedEnv {
+    fn drop(&mut self) {
+        let prev = self.inner.captures.get();
+        debug_assert!(prev > 0, "CapturedEnv count underflow");
+        self.inner.captures.set(prev - 1);
+        if prev == 1 && self.inner.roots.get() == 0 {
+            let drained = {
+                let mut bindings = self.inner.values.borrow_mut();
+                if bindings.is_empty() {
+                    return;
+                }
+                std::mem::take(&mut *bindings)
+            };
+            drop(drained);
+        }
     }
 }
 
@@ -73,7 +190,7 @@ pub enum Value {
     Closure {
         params: Vec<String>,
         body: Box<Expr>,
-        env: Env,
+        env: CapturedEnv,
     },
     Prim(PrimOp),
 }

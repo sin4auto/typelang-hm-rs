@@ -31,6 +31,7 @@ fn apply(f: &Value, x: Value) -> Result<Value, EvalError> {
             if params.is_empty() {
                 return Err(EvalError::new("EVAL090", "関数に引数がありません", None));
             }
+            let env = env.upgrade();
             let env2 = env.child();
             env2.insert(params[0].clone(), x);
             if params.len() == 1 {
@@ -39,7 +40,7 @@ fn apply(f: &Value, x: Value) -> Result<Value, EvalError> {
                 Ok(Value::Closure {
                     params: params[1..].to_vec(),
                     body: body.clone(),
-                    env: env2,
+                    env: env2.into_capture(),
                 })
             }
         }
@@ -87,7 +88,7 @@ fn eval_expr_inner(e: &A::Expr, env: &Env) -> Result<Value, EvalError> {
         Lambda { params, body, .. } => Ok(Value::Closure {
             params: params.clone(),
             body: body.clone(),
-            env: env.clone(),
+            env: env.capture(),
         }),
         LetIn { bindings, body, .. } => {
             let local_env = env.child();
@@ -101,7 +102,7 @@ fn eval_expr_inner(e: &A::Expr, env: &Env) -> Result<Value, EvalError> {
                     Value::Closure {
                         params: params.clone(),
                         body: Box::new(rhs.clone()),
-                        env: local_env.clone(),
+                        env: local_env.capture(),
                     }
                 };
                 local_env.insert(name.clone(), val);
@@ -321,6 +322,7 @@ mod tests {
 
     #[test]
     fn apply_rejects_closure_without_params() {
+        let env = Env::new();
         let closure = Value::Closure {
             params: Vec::new(),
             body: Box::new(Expr::IntLit {
@@ -328,7 +330,7 @@ mod tests {
                 base: IntBase::Dec,
                 span: Span::dummy(),
             }),
-            env: Env::new(),
+            env: env.capture(),
         };
         let err = super::apply(&closure, Value::Int(1)).expect_err("missing params must error");
         assert_eq!(err.0.code, "EVAL090");
@@ -336,13 +338,14 @@ mod tests {
 
     #[test]
     fn apply_partially_applies_multi_param_closure() {
+        let env = Env::new();
         let closure = Value::Closure {
             params: vec!["x".into(), "y".into()],
             body: Box::new(Expr::Var {
                 name: "y".into(),
                 span: Span::dummy(),
             }),
-            env: Env::new(),
+            env: env.capture(),
         };
         let result = super::apply(&closure, Value::Int(1)).expect("partial application succeeds");
         match result {
