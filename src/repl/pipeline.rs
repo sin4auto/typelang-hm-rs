@@ -85,7 +85,7 @@ fn fallback_type_from_value(value: &Value) -> Type {
 /// ユーティリティ: 式を評価し、結果値を返す。
 pub(crate) fn eval_expr_for_pipeline(
     expr: &A::Expr,
-    env: &mut evaluator::Env,
+    env: &evaluator::Env,
 ) -> Result<Value, EvalError> {
     evaluator::eval_expr(expr, env)
 }
@@ -96,7 +96,7 @@ pub(crate) fn run_repl_pipeline(
     class_env: &ClassEnv,
     expr: &A::Expr,
     defaulting_on: bool,
-    value_env: &mut evaluator::Env,
+    value_env: &evaluator::Env,
     mode: EvaluationMode,
 ) -> Result<PipelineResult, String> {
     let normalized = normalize_expr(expr);

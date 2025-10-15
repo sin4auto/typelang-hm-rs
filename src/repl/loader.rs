@@ -27,13 +27,21 @@ use super::util::normalize_expr;
 pub fn load_program_into_env(
     prog: &A::Program,
     type_env: &mut crate::typesys::TypeEnv,
-    class_env: &crate::typesys::ClassEnv,
+    class_env: &mut crate::typesys::ClassEnv,
     value_env: &mut crate::evaluator::Env,
 ) -> Result<Vec<String>, String> {
     let mut type_env_tmp = type_env.clone_env();
-    let mut value_env_tmp = value_env.clone();
+    let mut class_env_tmp = class_env.clone();
+    let mut value_env_tmp = crate::evaluator::Env::from_map(value_env.snapshot());
     let mut loaded: Vec<String> = Vec::new();
 
+    for class_decl in &prog.class_decls {
+        register_class_decl(class_decl, &mut class_env_tmp).map_err(|e| format!("[TYPE] {e}"))?;
+    }
+    for instance_decl in &prog.instance_decls {
+        register_instance_decl(instance_decl, &mut class_env_tmp)
+            .map_err(|e| format!("[TYPE] {e}"))?;
+    }
     for data_decl in &prog.data_decls {
         register_data_decl(data_decl, &mut type_env_tmp, &mut value_env_tmp)
             .map_err(|e| format!("[TYPE] {e}"))?;
@@ -50,7 +58,7 @@ pub fn load_program_into_env(
         };
         let body = normalize_expr(&orig);
         let should_default = decl.signature.is_none() && decl.params.is_empty();
-        match infer_qual_type(&type_env_tmp, class_env, &body, should_default) {
+        match infer_qual_type(&type_env_tmp, &class_env_tmp, &body, should_default) {
             Ok(q_rhs) => {
                 if let Some(sig) = &decl.signature {
                     let ty_anno = type_from_texpr(&sig.r#type);
@@ -59,14 +67,14 @@ pub fn load_program_into_env(
                 }
                 let sch = generalize(&type_env_tmp, q_rhs);
                 let val =
-                    eval_expr_for_pipeline(&body, &mut value_env_tmp).map_err(|e| e.to_string())?;
+                    eval_expr_for_pipeline(&body, &value_env_tmp).map_err(|e| e.to_string())?;
                 type_env_tmp.extend(decl.name.clone(), sch);
                 value_env_tmp.insert(decl.name.clone(), val);
                 loaded.push(decl.name.clone());
             }
             Err(_) => {
                 let val =
-                    eval_expr_for_pipeline(&body, &mut value_env_tmp).map_err(|e| e.to_string())?;
+                    eval_expr_for_pipeline(&body, &value_env_tmp).map_err(|e| e.to_string())?;
                 let sch = fallback_scheme_from_value(&type_env_tmp, &val);
                 type_env_tmp.extend(decl.name.clone(), sch);
                 value_env_tmp.insert(decl.name.clone(), val);
@@ -75,6 +83,7 @@ pub fn load_program_into_env(
         }
     }
     *type_env = type_env_tmp;
+    *class_env = class_env_tmp;
     *value_env = value_env_tmp;
     Ok(loaded)
 }
@@ -152,5 +161,29 @@ fn register_data_decl(
         }
     }
 
+    Ok(())
+}
+
+#[cfg_attr(coverage, coverage(off))]
+fn register_class_decl(
+    decl: &A::ClassDecl,
+    class_env: &mut crate::typesys::ClassEnv,
+) -> Result<(), String> {
+    if class_env.classes.contains_key(&decl.name) {
+        return Err(format!("クラス {} は既に定義済みです", decl.name));
+    }
+    class_env.add_class(decl.name.clone(), decl.superclasses.clone());
+    Ok(())
+}
+
+#[cfg_attr(coverage, coverage(off))]
+fn register_instance_decl(
+    decl: &A::InstanceDecl,
+    class_env: &mut crate::typesys::ClassEnv,
+) -> Result<(), String> {
+    if !class_env.classes.contains_key(&decl.classname) {
+        return Err(format!("クラス {} が未定義です", decl.classname));
+    }
+    class_env.add_instance(decl.classname.clone(), decl.tycon.clone());
     Ok(())
 }

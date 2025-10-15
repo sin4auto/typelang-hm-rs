@@ -147,8 +147,33 @@ pub enum Pattern {
         base: IntBase,
         span: Span,
     },
+    Float {
+        value: f64,
+        span: Span,
+    },
+    Char {
+        value: char,
+        span: Span,
+    },
+    String {
+        value: String,
+        span: Span,
+    },
     Bool {
         value: bool,
+        span: Span,
+    },
+    List {
+        items: Vec<Pattern>,
+        span: Span,
+    },
+    Tuple {
+        items: Vec<Pattern>,
+        span: Span,
+    },
+    As {
+        binder: String,
+        pattern: Box<Pattern>,
         span: Span,
     },
     Constructor {
@@ -162,6 +187,7 @@ pub enum Pattern {
 /// `case` 式の 1 アームを表現する構造体。
 pub struct CaseArm {
     pub pattern: Pattern,
+    pub guard: Option<Expr>,
     pub body: Expr,
 }
 
@@ -208,8 +234,27 @@ pub struct DataDecl {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+/// ユーザー定義型クラスの宣言を表現する。
+pub struct ClassDecl {
+    pub name: String,
+    pub typevar: Option<String>,
+    pub superclasses: Vec<String>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+/// 型クラスインスタンスの宣言を表現する。
+pub struct InstanceDecl {
+    pub classname: String,
+    pub tycon: String,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 /// トップレベル定義の集まりとしてのプログラム。
 pub struct Program {
+    pub class_decls: Vec<ClassDecl>,
+    pub instance_decls: Vec<InstanceDecl>,
     pub data_decls: Vec<DataDecl>,
     pub decls: Vec<TopLevel>,
 }
@@ -266,7 +311,12 @@ impl fmt::Display for Expr {
                 write!(f, "case {} of ", scrutinee)?;
                 let mut parts = Vec::new();
                 for arm in arms {
-                    parts.push(format!("{} -> {}", arm.pattern, arm.body));
+                    let guard = arm
+                        .guard
+                        .as_ref()
+                        .map(|g| format!(" | {}", g))
+                        .unwrap_or_default();
+                    parts.push(format!("{}{} -> {}", arm.pattern, guard, arm.body));
                 }
                 write!(f, "{}", parts.join("; "))
             }
@@ -303,7 +353,23 @@ impl fmt::Display for Pattern {
             Pattern::Wildcard { .. } => write!(f, "_"),
             Pattern::Var { name, .. } => write!(f, "{}", name),
             Pattern::Int { value, .. } => write!(f, "{}", value),
+            Pattern::Float { value, .. } => write!(f, "{}", value),
+            Pattern::Char { value, .. } => write!(f, "'{}'", value),
+            Pattern::String { value, .. } => write!(f, "\"{}\"", value),
             Pattern::Bool { value, .. } => write!(f, "{}", if *value { "True" } else { "False" }),
+            Pattern::List { items, .. } => {
+                let rendered: Vec<String> = items.iter().map(|p| format!("{}", p)).collect();
+                write!(f, "[{}]", rendered.join(", "))
+            }
+            Pattern::Tuple { items, .. } => {
+                let rendered: Vec<String> = items.iter().map(|p| format!("{}", p)).collect();
+                write!(f, "({})", rendered.join(", "))
+            }
+            Pattern::As {
+                binder, pattern, ..
+            } => {
+                write!(f, "{}@{}", binder, pattern)
+            }
             Pattern::Constructor { name, args, .. } => {
                 if args.is_empty() {
                     write!(f, "{}", name)
@@ -326,7 +392,13 @@ impl Pattern {
             Pattern::Wildcard { span }
             | Pattern::Var { span, .. }
             | Pattern::Int { span, .. }
+            | Pattern::Float { span, .. }
+            | Pattern::Char { span, .. }
+            | Pattern::String { span, .. }
             | Pattern::Bool { span, .. }
+            | Pattern::List { span, .. }
+            | Pattern::Tuple { span, .. }
+            | Pattern::As { span, .. }
             | Pattern::Constructor { span, .. } => *span,
         }
     }

@@ -386,6 +386,20 @@ impl<'a> InferCtx<'a> {
     ) -> Result<(Subst, QualType), TypeError> {
         let mut s_acc = subst;
         let mut env2 = env.clone_env();
+        let mut placeholders: HashMap<String, Type> = HashMap::new();
+
+        for (name, _, _) in bindings {
+            let tv = Type::TVar(self.supply.fresh());
+            placeholders.insert(name.clone(), tv.clone());
+            env2.extend(
+                name.clone(),
+                Scheme {
+                    vars: vec![],
+                    qual: qualify(tv, vec![]),
+                },
+            );
+        }
+
         for (name, params, rhs) in bindings {
             let rhs_expr = if params.is_empty() {
                 rhs.clone()
@@ -396,11 +410,20 @@ impl<'a> InferCtx<'a> {
                     span: A::Span::dummy(),
                 }
             };
-            let (s_new, q_rhs) = self.infer_with_subst(&env2, s_acc, &rhs_expr)?;
-            let sch = generalize(&env2, q_rhs.apply_subst(&s_new));
-            env2.extend(name.clone(), sch);
-            s_acc = s_new;
+            let (s_rhs, q_rhs) = self.infer_with_subst(&env2, s_acc.clone(), &rhs_expr)?;
+            let inferred_ty = q_rhs.r#type.apply_subst(&s_rhs);
+            let fresh_ty = placeholders
+                .get(name)
+                .expect("placeholder must exist")
+                .apply_subst(&s_rhs);
+            let s_match = unify(fresh_ty, inferred_ty)
+                .map_err(|e| TypeError::new(e.code, e.message, None))?;
+            let s_updated = compose(&s_match, &s_rhs);
+            s_acc = s_updated.clone();
+            let generalized = generalize(&env2, q_rhs.apply_subst(&s_updated));
+            env2.extend(name.clone(), generalized);
         }
+
         let (s_body, q_body) = self.infer_with_subst(&env2, s_acc, body)?;
         let applied = q_body.apply_subst(&s_body);
         Ok((s_body, applied))
@@ -487,6 +510,25 @@ impl<'a> InferCtx<'a> {
                 shadowed.push((name, previous));
             }
 
+            if let Some(guard_expr) = &arm.guard {
+                let (s_guard, q_guard) =
+                    self.infer_with_subst(&env_branch, s_acc.clone(), guard_expr)?;
+                let guard_ty = q_guard.r#type.apply_subst(&s_guard);
+                let is_bool = matches!(
+                    guard_ty,
+                    Type::TCon(TCon { ref name }) if name == "Bool"
+                );
+                if !is_bool {
+                    return Err(TypeError::new(
+                        "TYPE065",
+                        "case ガードは Bool 型である必要があります",
+                        None,
+                    ));
+                }
+                s_acc = compose(&s_guard, &s_acc);
+                constraints_acc.extend(q_guard.constraints.clone());
+            }
+
             let (s_body, q_body) = self.infer_with_subst(&env_branch, s_acc.clone(), &arm.body)?;
             s_acc = s_body;
             constraints_acc.extend(q_body.constraints.clone());
@@ -540,6 +582,28 @@ impl<'a> InferCtx<'a> {
                     .map_err(|e| TypeError::new(e.code, e.message, None))?;
                 Ok((compose(&s_unify, &subst), Vec::new(), Vec::new()))
             }
+            A::Pattern::Float { .. } => {
+                let float_ty = Type::TCon(TCon {
+                    name: "Double".into(),
+                });
+                let s_unify = unify(expected.apply_subst(&subst), float_ty)
+                    .map_err(|e| TypeError::new(e.code, e.message, None))?;
+                Ok((compose(&s_unify, &subst), Vec::new(), Vec::new()))
+            }
+            A::Pattern::Char { .. } => {
+                let char_ty = Type::TCon(TCon {
+                    name: "Char".into(),
+                });
+                let s_unify = unify(expected.apply_subst(&subst), char_ty)
+                    .map_err(|e| TypeError::new(e.code, e.message, None))?;
+                Ok((compose(&s_unify, &subst), Vec::new(), Vec::new()))
+            }
+            A::Pattern::String { .. } => {
+                let string_ty = t_string();
+                let s_unify = unify(expected.apply_subst(&subst), string_ty)
+                    .map_err(|e| TypeError::new(e.code, e.message, None))?;
+                Ok((compose(&s_unify, &subst), Vec::new(), Vec::new()))
+            }
             A::Pattern::Bool { .. } => {
                 let bool_ty = Type::TCon(TCon {
                     name: "Bool".into(),
@@ -547,6 +611,56 @@ impl<'a> InferCtx<'a> {
                 let s_unify = unify(expected.apply_subst(&subst), bool_ty)
                     .map_err(|e| TypeError::new(e.code, e.message, None))?;
                 Ok((compose(&s_unify, &subst), Vec::new(), Vec::new()))
+            }
+            A::Pattern::List { items, .. } => {
+                let elem = Type::TVar(self.supply.fresh());
+                let list_ty = t_list(elem.clone());
+                let s_list = unify(expected.apply_subst(&subst), list_ty)
+                    .map_err(|e| TypeError::new(e.code, e.message, None))?;
+                let mut s_acc = compose(&s_list, &subst);
+                let mut bindings = Vec::new();
+                let mut constraints = Vec::new();
+                for item in items {
+                    let expected_elem = elem.apply_subst(&s_acc);
+                    let (s_next, binds, cons) =
+                        self.infer_pattern(env, s_acc.clone(), item, expected_elem)?;
+                    s_acc = s_next;
+                    bindings.extend(binds);
+                    constraints.extend(cons);
+                }
+                Ok((s_acc, bindings, constraints))
+            }
+            A::Pattern::Tuple { items, .. } => {
+                let elem_types: Vec<Type> = items
+                    .iter()
+                    .map(|_| Type::TVar(self.supply.fresh()))
+                    .collect();
+                let tuple_ty = Type::TTuple(TTuple {
+                    items: elem_types.clone(),
+                });
+                let s_tuple = unify(expected.apply_subst(&subst), tuple_ty)
+                    .map_err(|e| TypeError::new(e.code, e.message, None))?;
+                let mut s_acc = compose(&s_tuple, &subst);
+                let mut bindings = Vec::new();
+                let mut constraints = Vec::new();
+                for (subpat, elem_ty) in items.iter().zip(elem_types.into_iter()) {
+                    let expected_elem = elem_ty.apply_subst(&s_acc);
+                    let (s_next, binds, cons) =
+                        self.infer_pattern(env, s_acc.clone(), subpat, expected_elem)?;
+                    s_acc = s_next;
+                    bindings.extend(binds);
+                    constraints.extend(cons);
+                }
+                Ok((s_acc, bindings, constraints))
+            }
+            A::Pattern::As {
+                binder, pattern, ..
+            } => {
+                let (s_next, mut binds, cons) =
+                    self.infer_pattern(env, subst.clone(), pattern, expected.clone())?;
+                let ty = expected.apply_subst(&s_next);
+                binds.push((binder.clone(), ty));
+                Ok((s_next, binds, cons))
             }
             A::Pattern::Constructor { name, args, .. } => {
                 let scheme = env.lookup(name).ok_or_else(|| {

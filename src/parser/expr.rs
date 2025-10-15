@@ -105,9 +105,18 @@ impl Parser {
         let mut arms = Vec::new();
         loop {
             let pat = self.parse_pattern()?;
+            let guard = if self.accept(TokenKind::BAR).is_some() {
+                Some(self.parse_expr()?)
+            } else {
+                None
+            };
             self.pop(TokenKind::ARROW)?;
             let body = self.parse_expr()?;
-            arms.push(CaseArm { pattern: pat, body });
+            arms.push(CaseArm {
+                pattern: pat,
+                guard,
+                body,
+            });
             if self.accept(TokenKind::SEMI).is_some() && Self::is_pattern_start(&self.peek().kind) {
                 continue;
             }
@@ -121,6 +130,19 @@ impl Parser {
     }
 
     fn parse_pattern(&mut self) -> Result<Pattern, ParseError> {
+        if self.peek().kind == TokenKind::VARID && matches!(self.peek_kind(1), Some(TokenKind::AT))
+        {
+            let binder_tok = self.pop(TokenKind::VARID)?;
+            let span = span_from_token(&binder_tok);
+            let binder = binder_tok.value;
+            self.pop(TokenKind::AT)?;
+            let inner = self.parse_pattern()?;
+            return Ok(Pattern::As {
+                binder,
+                pattern: Box::new(inner),
+                span,
+            });
+        }
         match self.peek().kind {
             TokenKind::CONID => self.parse_pattern_constructor(),
             _ => self.parse_pattern_atom(),
@@ -172,6 +194,32 @@ impl Parser {
                 let span = span_from_token(&tok);
                 Ok(Pattern::Int { value, base, span })
             }
+            TokenKind::FLOAT => {
+                self.pop_any();
+                let span = span_from_token(&tok);
+                let value = tok.value.parse::<f64>().map_err(|_| {
+                    ParseError::at(
+                        "PAR221",
+                        "浮動小数リテラルが不正",
+                        Some(tok.pos),
+                        Some(tok.line),
+                        Some(tok.col),
+                    )
+                })?;
+                Ok(Pattern::Float { value, span })
+            }
+            TokenKind::CHAR => {
+                self.pop_any();
+                let span = span_from_token(&tok);
+                let ch = decode_char(&tok.value)?;
+                Ok(Pattern::Char { value: ch, span })
+            }
+            TokenKind::STRING => {
+                self.pop_any();
+                let span = span_from_token(&tok);
+                let s = decode_string(&tok.value)?;
+                Ok(Pattern::String { value: s, span })
+            }
             TokenKind::TRUE => {
                 self.pop_any();
                 Ok(Pattern::Bool {
@@ -188,9 +236,42 @@ impl Parser {
             }
             TokenKind::LPAREN => {
                 self.pop_any();
-                let pat = self.parse_pattern()?;
-                self.pop(TokenKind::RPAREN)?;
-                Ok(pat)
+                if self.accept(TokenKind::RPAREN).is_some() {
+                    return Ok(Pattern::Tuple {
+                        items: Vec::new(),
+                        span: span_from_token(&tok),
+                    });
+                }
+                let first = self.parse_pattern()?;
+                if self.accept(TokenKind::COMMA).is_some() {
+                    let mut items = vec![first, self.parse_pattern()?];
+                    while self.accept(TokenKind::COMMA).is_some() {
+                        items.push(self.parse_pattern()?);
+                    }
+                    self.pop(TokenKind::RPAREN)?;
+                    Ok(Pattern::Tuple {
+                        items,
+                        span: span_from_token(&tok),
+                    })
+                } else {
+                    self.pop(TokenKind::RPAREN)?;
+                    Ok(first)
+                }
+            }
+            TokenKind::LBRACK => {
+                self.pop_any();
+                let mut items = Vec::new();
+                if self.peek().kind != TokenKind::RBRACK {
+                    items.push(self.parse_pattern()?);
+                    while self.accept(TokenKind::COMMA).is_some() {
+                        items.push(self.parse_pattern()?);
+                    }
+                }
+                self.pop(TokenKind::RBRACK)?;
+                Ok(Pattern::List {
+                    items,
+                    span: span_from_token(&tok),
+                })
             }
             TokenKind::CONID => self.parse_pattern_constructor(),
             _ => Err(ParseError::at(
@@ -435,8 +516,12 @@ impl Parser {
                 | TokenKind::HEX
                 | TokenKind::OCT
                 | TokenKind::BIN
+                | TokenKind::FLOAT
                 | TokenKind::TRUE
                 | TokenKind::FALSE
+                | TokenKind::STRING
+                | TokenKind::CHAR
+                | TokenKind::LBRACK
                 | TokenKind::LPAREN
         )
     }

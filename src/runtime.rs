@@ -2,11 +2,60 @@
 // 役割: 評価時に用いる値表現とプリミティブ生成ヘルパーを提供する
 // 意図: 評価器・プリミティブ定義から共有される基盤ロジックを分離する
 // 関連ファイル: src/evaluator.rs, src/primitives.rs
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use crate::ast::Expr;
 use crate::errors::EvalError;
+
+#[derive(Clone, Debug, Default)]
+/// 評価環境を共有可能な形で保持する軽量ラッパー。
+pub struct Env {
+    inner: Rc<RefCell<HashMap<String, Value>>>,
+}
+
+impl Env {
+    /// 空の環境を生成する。
+    pub fn new() -> Self {
+        Self {
+            inner: Rc::new(RefCell::new(HashMap::new())),
+        }
+    }
+
+    /// 既存のマップから環境を生成する。
+    pub fn from_map(map: HashMap<String, Value>) -> Self {
+        Self {
+            inner: Rc::new(RefCell::new(map)),
+        }
+    }
+
+    /// 現在の内容を複製した子環境を返す。
+    pub fn child(&self) -> Self {
+        Self::from_map(self.snapshot())
+    }
+
+    /// 環境をフラットな `HashMap` としてコピーする。
+    pub fn snapshot(&self) -> HashMap<String, Value> {
+        self.inner.borrow().clone()
+    }
+
+    /// 束縛を追加または更新する。
+    pub fn insert(&self, key: impl Into<String>, val: Value) -> Option<Value> {
+        self.inner.borrow_mut().insert(key.into(), val)
+    }
+
+    /// 束縛を取得する。
+    pub fn get(&self, key: &str) -> Option<Value> {
+        self.inner.borrow().get(key).cloned()
+    }
+
+    /// 束縛を除去する。
+    pub fn remove(&self, key: &str) -> Option<Value> {
+        self.inner.borrow_mut().remove(key)
+    }
+}
 
 #[derive(Clone, Debug)]
 pub enum Value {
@@ -24,7 +73,7 @@ pub enum Value {
     Closure {
         params: Vec<String>,
         body: Box<Expr>,
-        env: HashMap<String, Value>,
+        env: Env,
     },
     Prim(PrimOp),
 }
@@ -42,8 +91,6 @@ pub enum PrimOp {
         collected: Vec<Value>,
     },
 }
-
-pub type Env = HashMap<String, Value>;
 
 impl PrimOp {
     pub const fn unary(f: fn(Value) -> Result<Value, EvalError>) -> Self {

@@ -44,8 +44,8 @@ pub fn infer_pretty_qual(src: &str) -> Result<String, TypeError> {
 
 pub fn eval_result(src: &str) -> Result<evaluator::Value, EvalError> {
     let expr = parse_expr(src);
-    let mut env = evaluator::initial_env();
-    evaluator::eval_expr(&expr, &mut env)
+    let env = evaluator::initial_env();
+    evaluator::eval_expr(&expr, &env)
 }
 
 pub fn eval_value(src: &str) -> evaluator::Value {

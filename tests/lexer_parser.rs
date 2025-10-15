@@ -66,6 +66,16 @@ fn lexer_happy_paths() {
             kinds: &[TokenKind::CHAR, TokenKind::QMARK, TokenKind::VARID],
             note: "文字リテラルと ? 識別子",
         },
+        Case {
+            src: "class Eq a where\ninstance Eq Int\ncase xs of x@[] -> x",
+            kinds: &[
+                TokenKind::CLASS,
+                TokenKind::INSTANCE,
+                TokenKind::WHERE,
+                TokenKind::AT,
+            ],
+            note: "class/instance/where/as パターンのトークン",
+        },
     ];
 
     for case in cases {
@@ -139,6 +149,24 @@ fn parser_expr_round_trips() {
             exact: Some("?x"),
             note: "? 識別子の保持",
         },
+        ExprCase {
+            src: "case n of x | x > 0 -> x; _ -> 0",
+            fragments: &["|"],
+            exact: None,
+            note: "case ガード構文",
+        },
+        ExprCase {
+            src: "case xs of ys@[] -> ys; _ -> []",
+            fragments: &["@[]"],
+            exact: None,
+            note: "as パターン",
+        },
+        ExprCase {
+            src: "case [1,2] of [a, b] -> a + b; _ -> 0",
+            fragments: &["[a, b]"],
+            exact: None,
+            note: "リストリテラルパターン",
+        },
     ];
 
     for case in cases {
@@ -178,6 +206,16 @@ fn parser_program_cases() {
 
     let long_string = parse_program(&format!("let s = \"{}\";", "a".repeat(5000)));
     assert_eq!(long_string.decls.len(), 1, "長い文字列の解析");
+
+    let class_prog = parse_program("class (Eq a) => Fancy a\ninstance Fancy Int\n");
+    assert_eq!(class_prog.class_decls.len(), 1, "class 宣言のパース");
+    let class_decl = &class_prog.class_decls[0];
+    assert_eq!(class_decl.name, "Fancy");
+    assert_eq!(class_decl.superclasses, vec!["Eq".to_string()]);
+    assert_eq!(class_prog.instance_decls.len(), 1, "instance 宣言のパース");
+    let instance_decl = &class_prog.instance_decls[0];
+    assert_eq!(instance_decl.classname, "Fancy");
+    assert_eq!(instance_decl.tycon, "Int");
 }
 
 #[test]

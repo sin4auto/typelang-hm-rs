@@ -216,6 +216,7 @@ fn expr_display_variants_render_expected_strings() {
                             }],
                             span: Span::new(10, 1, 11),
                         },
+                        guard: None,
                         body: Expr::Var {
                             name: "x".into(),
                             span: Span::new(11, 1, 12),
@@ -225,6 +226,7 @@ fn expr_display_variants_render_expected_strings() {
                         pattern: typelang::ast::Pattern::Wildcard {
                             span: Span::new(12, 1, 13),
                         },
+                        guard: None,
                         body: Expr::IntLit {
                             value: 0,
                             base: IntBase::Dec,
@@ -286,6 +288,59 @@ fn pattern_display_and_span_metadata() {
     };
     assert_eq!(format!("{}", bool_false), "False");
     assert_eq!(bool_false.span(), Span::new(8, 1, 8));
+
+    let float_pat = Pattern::Float {
+        value: 1.5,
+        span: Span::new(9, 1, 9),
+    };
+    assert_eq!(format!("{}", float_pat), "1.5");
+    assert_eq!(float_pat.span(), Span::new(9, 1, 9));
+
+    let string_pat = Pattern::String {
+        value: "ok".into(),
+        span: Span::new(10, 1, 10),
+    };
+    assert_eq!(format!("{}", string_pat), "\"ok\"");
+    assert_eq!(string_pat.span(), Span::new(10, 1, 10));
+
+    let list_pat = Pattern::List {
+        items: vec![Pattern::Wildcard {
+            span: Span::new(11, 1, 11),
+        }],
+        span: Span::new(11, 1, 11),
+    };
+    assert_eq!(format!("{}", list_pat), "[_]");
+    assert_eq!(list_pat.span(), Span::new(11, 1, 11));
+
+    let tuple_pat = Pattern::Tuple {
+        items: vec![
+            Pattern::Int {
+                value: 1,
+                base: IntBase::Dec,
+                span: Span::new(12, 1, 12),
+            },
+            Pattern::Bool {
+                value: true,
+                span: Span::new(13, 1, 13),
+            },
+        ],
+        span: Span::new(12, 1, 12),
+    };
+    assert_eq!(format!("{}", tuple_pat), "(1, True)");
+    assert_eq!(tuple_pat.span(), Span::new(12, 1, 12));
+
+    let as_pat = Pattern::As {
+        binder: "xs".into(),
+        pattern: Box::new(Pattern::List {
+            items: vec![Pattern::Wildcard {
+                span: Span::new(14, 1, 14),
+            }],
+            span: Span::new(14, 1, 14),
+        }),
+        span: Span::new(14, 1, 14),
+    };
+    assert_eq!(format!("{}", as_pat), "xs@[_]");
+    assert_eq!(as_pat.span(), Span::new(14, 1, 14));
 
     let expr = Expr::If {
         cond: Box::new(Expr::BoolLit {

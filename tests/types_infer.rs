@@ -100,6 +100,11 @@ fn inference_type_strings() {
             expected: "Bool",
             note: "case 式の分岐推論",
         },
+        Case {
+            src: "case [1] of [x] -> x; _ -> 0",
+            expected: "Num a => a",
+            note: "リストパターンと数値制約",
+        },
     ];
 
     for case in cases {
@@ -124,6 +129,7 @@ fn inference_error_cases() {
         "foo",
         "if True then (1 :: Int) else ('a' :: Char)",
         "if 'a' then 2 else 3",
+        "case 1 of x | x -> x; _ -> 0",
     ] {
         assert!(
             infer_pretty_qual(src).is_err(),
@@ -143,4 +149,47 @@ fn infer_let_polymorphism_eval_ok() {
         }
         other => panic!("unexpected value: {:?}", other),
     }
+}
+
+#[test]
+/// 相互再帰する let 束縛が型推論と評価で利用できることを確認する。
+fn infer_and_eval_mutual_recursion_functions() {
+    let src_fn = r#"
+        let even n = if n == 0 then True else odd (n - 1);
+            odd n = if n == 0 then False else even (n - 1)
+        in even
+    "#;
+    let ty = infer_type_str(src_fn.trim());
+    assert!(
+        matches!(
+            ty.as_str(),
+            "Integer -> Bool" | "Int -> Bool" | "Num a => a -> Bool"
+        ),
+        "unexpected type: {ty}"
+    );
+
+    let value = eval_value(
+        r#"
+        let even n = if n == 0 then True else odd (n - 1);
+            odd n = if n == 0 then False else even (n - 1)
+        in even 6
+        "#
+        .trim(),
+    );
+    assert!(
+        matches!(value, evaluator::Value::Bool(true)),
+        "even 6 should be True"
+    );
+    let value_odd = eval_value(
+        r#"
+        let even n = if n == 0 then True else odd (n - 1);
+            odd n = if n == 0 then False else even (n - 1)
+        in odd 7
+        "#
+        .trim(),
+    );
+    assert!(
+        matches!(value_odd, evaluator::Value::Bool(true)),
+        "odd 7 should be True"
+    );
 }

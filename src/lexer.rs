@@ -49,6 +49,7 @@ pub enum TokenKind {
     SEMI,
     EQUAL,
     QMARK,
+    AT,
     UNDERSCORE,
     BAR,
     // リテラル分類
@@ -71,6 +72,9 @@ pub enum TokenKind {
     CASE,
     OF,
     DATA,
+    CLASS,
+    INSTANCE,
+    WHERE,
     TRUE,
     FALSE,
 }
@@ -339,6 +343,7 @@ impl<'a> Lexer<'a> {
             '=' => Some((TokenKind::EQUAL, "=")),
             '|' => Some((TokenKind::BAR, "|")),
             '?' => Some((TokenKind::QMARK, "?")),
+            '@' => Some((TokenKind::AT, "@")),
             '_' => Some((TokenKind::UNDERSCORE, "_")),
             _ => None,
         };
@@ -552,6 +557,9 @@ impl<'a> Lexer<'a> {
             "case" => (TokenKind::CASE, slice),
             "of" => (TokenKind::OF, slice),
             "data" => (TokenKind::DATA, slice),
+            "class" => (TokenKind::CLASS, slice),
+            "instance" => (TokenKind::INSTANCE, slice),
+            "where" => (TokenKind::WHERE, slice),
             "True" => (TokenKind::TRUE, slice),
             "False" => (TokenKind::FALSE, slice),
             _ => {

@@ -16,9 +16,9 @@ use crate::primitives::PRIMITIVES;
 pub use crate::runtime::{Env, Value};
 
 pub fn initial_env() -> Env {
-    let mut env: Env = HashMap::new();
+    let env = Env::new();
     for def in PRIMITIVES {
-        env.insert(def.name.into(), def.op.to_value());
+        env.insert(def.name, def.op.to_value());
     }
     env
 }
@@ -31,10 +31,10 @@ fn apply(f: &Value, x: Value) -> Result<Value, EvalError> {
             if params.is_empty() {
                 return Err(EvalError::new("EVAL090", "関数に引数がありません", None));
             }
-            let mut env2 = env.clone();
+            let env2 = env.child();
             env2.insert(params[0].clone(), x);
             if params.len() == 1 {
-                eval_expr(body, &mut env2)
+                eval_expr(body, &env2)
             } else {
                 Ok(Value::Closure {
                     params: params[1..].to_vec(),
@@ -52,19 +52,18 @@ fn apply(f: &Value, x: Value) -> Result<Value, EvalError> {
 }
 
 /// 抽象構文木の式を評価して `Value` へ還元するメインルーチン。
-pub fn eval_expr(e: &A::Expr, env: &mut Env) -> Result<Value, EvalError> {
+pub fn eval_expr(e: &A::Expr, env: &Env) -> Result<Value, EvalError> {
     eval_expr_inner(e, env).map_err(|mut err| {
         attach_frame(&mut err, e);
         err
     })
 }
 
-fn eval_expr_inner(e: &A::Expr, env: &mut Env) -> Result<Value, EvalError> {
+fn eval_expr_inner(e: &A::Expr, env: &Env) -> Result<Value, EvalError> {
     use A::Expr::*;
     match e {
         Var { name, .. } => env
             .get(name)
-            .cloned()
             .ok_or_else(|| EvalError::new("EVAL010", format!("未束縛変数: {name}"), None)),
         IntLit { value, .. } => Ok(Value::Int(*value)),
         FloatLit { value, .. } => Ok(Value::Double(*value)),
@@ -91,20 +90,23 @@ fn eval_expr_inner(e: &A::Expr, env: &mut Env) -> Result<Value, EvalError> {
             env: env.clone(),
         }),
         LetIn { bindings, body, .. } => {
-            let mut env2 = env.clone();
+            let local_env = env.child();
+            for (name, _params, _) in bindings.iter().filter(|(_, ps, _)| !ps.is_empty()) {
+                local_env.insert(name.clone(), Value::Bool(false));
+            }
             for (name, params, rhs) in bindings {
                 let val = if params.is_empty() {
-                    eval_expr(rhs, &mut env2)?
+                    eval_expr(rhs, &local_env)?
                 } else {
                     Value::Closure {
                         params: params.clone(),
                         body: Box::new(rhs.clone()),
-                        env: env2.clone(),
+                        env: local_env.clone(),
                     }
                 };
-                env2.insert(name.clone(), val);
+                local_env.insert(name.clone(), val);
             }
-            eval_expr(body, &mut env2)
+            eval_expr(body, &local_env)
         }
         If {
             cond,
@@ -133,11 +135,25 @@ fn eval_expr_inner(e: &A::Expr, env: &mut Env) -> Result<Value, EvalError> {
             let value = eval_expr(scrutinee, env)?;
             for arm in arms {
                 if let Some(bindings) = match_pattern(&arm.pattern, &value) {
-                    let mut env_branch = env.clone();
+                    let env_branch = env.child();
                     for (name, val) in bindings {
                         env_branch.insert(name, val);
                     }
-                    return eval_expr(&arm.body, &mut env_branch);
+                    if let Some(guard) = &arm.guard {
+                        let guard_val = eval_expr(guard, &env_branch)?;
+                        match guard_val {
+                            Value::Bool(true) => {}
+                            Value::Bool(false) => continue,
+                            _ => {
+                                return Err(EvalError::new(
+                                    "EVAL080",
+                                    "case ガードは Bool を返す必要があります",
+                                    None,
+                                ))
+                            }
+                        }
+                    }
+                    return eval_expr(&arm.body, &env_branch);
                 }
             }
             Err(EvalError::new(
@@ -216,12 +232,68 @@ fn match_pattern(pattern: &A::Pattern, value: &Value) -> Option<HashMap<String, 
             Value::Int(v) if v == expected => Some(HashMap::new()),
             _ => None,
         },
+        A::Pattern::Float {
+            value: expected, ..
+        } => match value {
+            Value::Double(v) if (v - expected).abs() <= f64::EPSILON => Some(HashMap::new()),
+            _ => None,
+        },
+        A::Pattern::Char {
+            value: expected, ..
+        } => match value {
+            Value::Char(v) if v == expected => Some(HashMap::new()),
+            _ => None,
+        },
+        A::Pattern::String {
+            value: expected, ..
+        } => match value {
+            Value::String(v) if v == expected => Some(HashMap::new()),
+            _ => None,
+        },
         A::Pattern::Bool {
             value: expected, ..
         } => match value {
             Value::Bool(v) if v == expected => Some(HashMap::new()),
             _ => None,
         },
+        A::Pattern::List { items, .. } => match value {
+            Value::List(values) => {
+                if values.len() != items.len() {
+                    return None;
+                }
+                let mut bindings = HashMap::new();
+                for (subpat, field) in items.iter().zip(values.iter()) {
+                    let sub = match_pattern(subpat, field)?;
+                    bindings = merge_bindings(bindings, sub)?;
+                }
+                Some(bindings)
+            }
+            _ => None,
+        },
+        A::Pattern::Tuple { items, .. } => match value {
+            Value::Tuple(values) => {
+                if values.len() != items.len() {
+                    return None;
+                }
+                let mut bindings = HashMap::new();
+                for (subpat, field) in items.iter().zip(values.iter()) {
+                    let sub = match_pattern(subpat, field)?;
+                    bindings = merge_bindings(bindings, sub)?;
+                }
+                Some(bindings)
+            }
+            _ => None,
+        },
+        A::Pattern::As {
+            binder, pattern, ..
+        } => {
+            let mut bindings = match_pattern(pattern, value)?;
+            if bindings.contains_key(binder) {
+                return None;
+            }
+            bindings.insert(binder.clone(), value.clone());
+            Some(bindings)
+        }
         A::Pattern::Constructor { name, args, .. } => match value {
             Value::Data {
                 constructor,

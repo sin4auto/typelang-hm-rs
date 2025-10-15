@@ -26,7 +26,7 @@ whitespace    = { ' ' | '\t' | '\r' | '\n' } ;
 line_comment  = '-' '-' { ~'\n' } ;
 block_comment = '{' '-' { any } '-' '}' ;
 
-reserved      = 'let' | 'in' | 'if' | 'then' | 'else' | 'case' | 'of' | 'data' | 'True' | 'False' ;
+reserved      = 'let' | 'in' | 'if' | 'then' | 'else' | 'case' | 'of' | 'data' | 'class' | 'instance' | 'where' | 'True' | 'False' ;
 varid         = ( 'a'..'z' | '_' ) { letter | digit | '\'' } - reserved ;
 conid         = ( 'A'..'Z' ) { letter | digit | '\'' } ;
 
@@ -45,11 +45,14 @@ escape        = '\\' ( '\\' | '\'' | '"' | 'n' | 'r' | 't' ) ;
 ## 2. トップレベル構造
 ```
 program     = { decl } ;
-decl        = data_decl | value_decl ;
+decl        = data_decl | class_decl | instance_decl | value_decl ;
 value_decl  = [ type_sig ] 'let' fun_bind [ ';' ] ;
 fun_bind    = varid { varid } '=' expr ;
 data_decl   = 'data' conid { varid } '=' ctor { '|' ctor } [ ';' ] ;
 ctor        = conid { type_app } ;
+class_decl  = 'class' [ context '=>' ] conid [ varid ] [ ';' ] ;
+instance_decl = 'instance' conid instance_head [ ';' ] ;
+instance_head = conid | '[' ']' ;
 ```
 
 ## 3. 型
@@ -74,7 +77,7 @@ bind       = varid { varid } '=' expr ;
 ifte       = 'if' expr 'then' expr 'else' expr ;
 case_expr  = 'case' expr 'of' case_arms ;
 case_arms  = case_arm { ';' case_arm } [ ';' ] ;
-case_arm   = pattern '->' expr ;
+case_arm   = pattern [ '|' expr ] '->' expr ;
 
 cmp        = add [ ( '==' | '/=' | '<' | '<=' | '>' | '>=' ) add ] ; (* 非結合 *)
 add        = mul { ( '+' | '-' ) mul } ;                             (* 左結合 *)
@@ -87,15 +90,22 @@ atom       = '-' atom
            | varid | '_' | '?' varid
            | '(' expr ')' | '[' [ expr { ',' expr } ] ']' | '(' expr ',' expr { ',' expr } ')' ;
 
-pattern    = pattern_ctor | pattern_atom ;
-pattern_ctor = conid { pattern_atom } ;
-pattern_atom = '_'
-            | varid
-            | int_lit
-            | 'True'
-            | 'False'
-            | '(' pattern ')'
-            | pattern_ctor ;
+pattern        = as_pattern | pattern_term ;
+as_pattern     = varid '@' pattern ;
+pattern_term   = pattern_ctor | pattern_atom ;
+pattern_ctor   = conid { pattern_atom } ;
+pattern_atom   = '_'
+               | varid
+               | int_lit
+               | float_lit
+               | char_lit
+               | string_lit
+               | 'True'
+               | 'False'
+               | '[' [ pattern { ',' pattern } ] ']'
+               | '(' ')'
+               | '(' pattern ',' pattern { ',' pattern } ')'
+               | '(' pattern ')' ;
 ```
 
 ## 5. 運用メモ

@@ -262,7 +262,7 @@ impl ReplSession {
                 &self.class_env,
                 &expr,
                 self.defaulting_on,
-                &mut self.value_env,
+                &self.value_env,
                 EvaluationMode::OnInferenceFailure,
             ) {
                 Ok(result) => vec![ReplMsg::Out(format!("-- {}", pretty_qual(&result.qual)))],
@@ -377,7 +377,7 @@ impl ReplSession {
                 &self.class_env,
                 &expr,
                 self.defaulting_on,
-                &mut self.value_env,
+                &self.value_env,
                 EvaluationMode::Always,
             ) {
                 Ok(result) => {
@@ -385,7 +385,7 @@ impl ReplSession {
                         .value
                         .expect("pipeline with Always mode must return a value");
                     self.type_env.extend("it", result.scheme);
-                    self.value_env.insert("it".into(), value.clone());
+                    self.value_env.insert("it", value.clone());
                     vec![ReplMsg::Value(value)]
                 }
                 Err(msg) => vec![ReplMsg::Err(msg)],
@@ -416,7 +416,7 @@ impl ReplSession {
         load_program_into_env(
             prog,
             &mut self.type_env,
-            &self.class_env,
+            &mut self.class_env,
             &mut self.value_env,
         )
     }

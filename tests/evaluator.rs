@@ -179,6 +179,31 @@ fn evaluator_smoke_suite() {
             expect: Expect::Int(42),
             note: "case 変数束縛",
         },
+        EvalCase {
+            expr: "case [1,2,3] of [x, _, z] -> x + z; _ -> 0",
+            expect: Expect::Int(4),
+            note: "リストパターンで要素抽出",
+        },
+        EvalCase {
+            expr: "case (3,4) of pair@(n, _) -> case pair of (m, _) -> m",
+            expect: Expect::Int(3),
+            note: "as パターンで値全体を再利用",
+        },
+        EvalCase {
+            expr: "case 5 of n | n > 3 -> 1; _ -> 0",
+            expect: Expect::Int(1),
+            note: "ガードが True で分岐",
+        },
+        EvalCase {
+            expr: "case \"ok\" of \"ok\" -> 1; _ -> 0",
+            expect: Expect::Int(1),
+            note: "文字列リテラルパターン",
+        },
+        EvalCase {
+            expr: "case 1.5 of 1.5 -> 1; _ -> 0",
+            expect: Expect::Int(1),
+            note: "浮動小数リテラルパターン",
+        },
     ];
 
     let failure_cases = [
@@ -196,6 +221,11 @@ fn evaluator_smoke_suite() {
             expr: "show (\\x -> x)",
             expect: Expect::Error("EVAL050"),
             note: "関数への show 適用",
+        },
+        EvalCase {
+            expr: "case 1 of x | 1 -> 0; _ -> 1",
+            expect: Expect::Error("EVAL080"),
+            note: "ガードは Bool を返す必要がある",
         },
         EvalCase {
             expr: "1 2",
@@ -236,8 +266,8 @@ fn evaluator_smoke_suite() {
         }),
         span: Span::dummy(),
     };
-    let mut env = evaluator::initial_env();
-    let partial = evaluator::eval_expr(&partial_expr, &mut env).expect("partial eval");
+    let env = evaluator::initial_env();
+    let partial = evaluator::eval_expr(&partial_expr, &env).expect("partial eval");
     match partial {
         Value::Prim(op) => match op.clone().apply(Value::Int(41)).expect("apply second arg") {
             Value::Int(result) => assert_eq!(result, 42, "PrimOp 部分適用"),
@@ -258,8 +288,8 @@ fn evaluator_smoke_suite() {
         }),
         span: Span::dummy(),
     };
-    let mut env = evaluator::initial_env();
-    let eq_partial = evaluator::eval_expr(&eq_partial_expr, &mut env).expect("eq partial eval");
+    let env = evaluator::initial_env();
+    let eq_partial = evaluator::eval_expr(&eq_partial_expr, &env).expect("eq partial eval");
     match eq_partial {
         Value::Prim(op) => match op
             .clone()
