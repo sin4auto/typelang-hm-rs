@@ -71,44 +71,14 @@ fn eval_expr_inner(e: &A::Expr, env: &Env) -> Result<Value, EvalError> {
         CharLit { value, .. } => Ok(Value::Char(*value)),
         StringLit { value, .. } => Ok(Value::String(value.clone())),
         BoolLit { value, .. } => Ok(Value::Bool(*value)),
-        ListLit { items, .. } => {
-            let mut vs = Vec::new();
-            for it in items {
-                vs.push(eval_expr(it, env)?);
-            }
-            Ok(Value::List(vs))
-        }
-        TupleLit { items, .. } => {
-            let mut vs = Vec::new();
-            for it in items {
-                vs.push(eval_expr(it, env)?);
-            }
-            Ok(Value::Tuple(vs))
-        }
+        ListLit { items, .. } => Ok(Value::List(eval_literal_items(items, env)?)),
+        TupleLit { items, .. } => Ok(Value::Tuple(eval_literal_items(items, env)?)),
         Lambda { params, body, .. } => Ok(Value::Closure {
             params: params.clone(),
             body: body.clone(),
             env: env.capture(),
         }),
-        LetIn { bindings, body, .. } => {
-            let local_env = env.child();
-            for (name, _params, _) in bindings.iter().filter(|(_, ps, _)| !ps.is_empty()) {
-                local_env.insert(name.clone(), Value::Bool(false));
-            }
-            for (name, params, rhs) in bindings {
-                let val = if params.is_empty() {
-                    eval_expr(rhs, &local_env)?
-                } else {
-                    Value::Closure {
-                        params: params.clone(),
-                        body: Box::new(rhs.clone()),
-                        env: local_env.capture(),
-                    }
-                };
-                local_env.insert(name.clone(), val);
-            }
-            eval_expr(body, &local_env)
-        }
+        LetIn { bindings, body, .. } => eval_let_in(bindings, body, env),
         If {
             cond,
             then_branch,
@@ -132,37 +102,7 @@ fn eval_expr_inner(e: &A::Expr, env: &Env) -> Result<Value, EvalError> {
         }
         Case {
             scrutinee, arms, ..
-        } => {
-            let value = eval_expr(scrutinee, env)?;
-            for arm in arms {
-                if let Some(bindings) = match_pattern(&arm.pattern, &value) {
-                    let env_branch = env.child();
-                    for (name, val) in bindings {
-                        env_branch.insert(name, val);
-                    }
-                    if let Some(guard) = &arm.guard {
-                        let guard_val = eval_expr(guard, &env_branch)?;
-                        match guard_val {
-                            Value::Bool(true) => {}
-                            Value::Bool(false) => continue,
-                            _ => {
-                                return Err(EvalError::new(
-                                    "EVAL080",
-                                    "case ガードは Bool を返す必要があります",
-                                    None,
-                                ))
-                            }
-                        }
-                    }
-                    return eval_expr(&arm.body, &env_branch);
-                }
-            }
-            Err(EvalError::new(
-                "EVAL070",
-                "case 式で適用可能な分岐がありません",
-                None,
-            ))
-        }
+        } => eval_case(scrutinee, arms, env),
         App { func, arg, .. } => {
             let f = eval_expr(func, env)?;
             let x = eval_expr(arg, env)?;
@@ -185,6 +125,70 @@ fn eval_expr_inner(e: &A::Expr, env: &Env) -> Result<Value, EvalError> {
         }
         Annot { expr, .. } => eval_expr(expr, env),
     }
+}
+
+fn eval_literal_items(items: &[A::Expr], env: &Env) -> Result<Vec<Value>, EvalError> {
+    let mut values = Vec::with_capacity(items.len());
+    for item in items {
+        values.push(eval_expr(item, env)?);
+    }
+    Ok(values)
+}
+
+fn eval_let_in(
+    bindings: &[(String, Vec<String>, A::Expr)],
+    body: &A::Expr,
+    env: &Env,
+) -> Result<Value, EvalError> {
+    let local_env = env.child();
+    for (name, _, _) in bindings.iter().filter(|(_, params, _)| !params.is_empty()) {
+        local_env.insert(name.clone(), Value::Bool(false));
+    }
+    for (name, params, rhs) in bindings {
+        let val = if params.is_empty() {
+            eval_expr(rhs, &local_env)?
+        } else {
+            Value::Closure {
+                params: params.clone(),
+                body: Box::new(rhs.clone()),
+                env: local_env.capture(),
+            }
+        };
+        local_env.insert(name.clone(), val);
+    }
+    eval_expr(body, &local_env)
+}
+
+fn eval_case(scrutinee: &A::Expr, arms: &[A::CaseArm], env: &Env) -> Result<Value, EvalError> {
+    let value = eval_expr(scrutinee, env)?;
+    for arm in arms {
+        if let Some(bindings) = match_pattern(&arm.pattern, &value) {
+            let env_branch = env.child();
+            for (name, val) in bindings {
+                env_branch.insert(name, val);
+            }
+            if let Some(guard) = &arm.guard {
+                let guard_val = eval_expr(guard, &env_branch)?;
+                match guard_val {
+                    Value::Bool(true) => {}
+                    Value::Bool(false) => continue,
+                    _ => {
+                        return Err(EvalError::new(
+                            "EVAL080",
+                            "case ガードは Bool を返す必要があります",
+                            None,
+                        ))
+                    }
+                }
+            }
+            return eval_expr(&arm.body, &env_branch);
+        }
+    }
+    Err(EvalError::new(
+        "EVAL070",
+        "case 式で適用可能な分岐がありません",
+        None,
+    ))
 }
 
 fn attach_frame(err: &mut EvalError, expr: &A::Expr) {
@@ -291,17 +295,7 @@ fn match_pattern(pattern: &A::Pattern, value: &Value) -> Option<HashMap<String, 
             Value::Data {
                 constructor,
                 fields,
-            } => {
-                if constructor != name || fields.len() != args.len() {
-                    return None;
-                }
-                let mut bindings = HashMap::new();
-                for (subpat, field) in args.iter().zip(fields.iter()) {
-                    let sub = match_pattern(subpat, field)?;
-                    bindings = merge_bindings(bindings, sub)?;
-                }
-                Some(bindings)
-            }
+            } if constructor == name => match_sequence(args, fields),
             _ => None,
         },
     }
