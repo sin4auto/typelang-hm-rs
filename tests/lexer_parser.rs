@@ -6,6 +6,7 @@
 mod support;
 
 use support::{lex_ok, parse_expr, parse_program};
+use typelang::ast::TypeExpr;
 use typelang::lexer::{self, TokenKind};
 use typelang::parser;
 
@@ -216,6 +217,112 @@ fn parser_program_cases() {
     let instance_decl = &class_prog.instance_decls[0];
     assert_eq!(instance_decl.classname, "Fancy");
     assert_eq!(instance_decl.tycon, "Int");
+}
+
+#[test]
+/// 余剰セミコロンや複合的な data 宣言を正しく処理できることを検証する。
+fn parser_program_handles_semicolons_and_data_decl() {
+    let src = r#";;;  
+data Pair a b = Pair Int a b | MkPair (a, b)
+data App f a = App (f a)
+let id x = x
+"#;
+    let program = parse_program(src);
+    assert_eq!(program.data_decls.len(), 2, "data 宣言を 2 件取得");
+
+    let pair_decl = &program.data_decls[0];
+    assert_eq!(pair_decl.name, "Pair");
+    assert_eq!(pair_decl.params, vec!["a", "b"]);
+    assert_eq!(pair_decl.constructors.len(), 2, "コンストラクタ数");
+
+    let pair_ctor = &pair_decl.constructors[0];
+    assert_eq!(pair_ctor.name, "Pair");
+    assert_eq!(
+        pair_ctor.args.len(),
+        1,
+        "Pair の引数型表現は 1 つに畳み込まれる"
+    );
+    if let TypeExpr::TEApp(lhs, rhs) = &pair_ctor.args[0] {
+        assert!(matches!(**rhs, TypeExpr::TEVar(ref name) if name == "b"));
+        if let TypeExpr::TEApp(inner_lhs, inner_rhs) = &**lhs {
+            assert!(matches!(**inner_rhs, TypeExpr::TEVar(ref name) if name == "a"));
+            assert!(matches!(**inner_lhs, TypeExpr::TECon(ref name) if name == "Int"));
+        } else {
+            panic!("期待したネストした型適用ではありません: {lhs:?}");
+        }
+    } else {
+        panic!("期待した型適用ではありません: {:?}", pair_ctor.args[0]);
+    }
+
+    let tuple_ctor = &pair_decl.constructors[1];
+    assert_eq!(tuple_ctor.name, "MkPair");
+    assert!(matches!(tuple_ctor.args[0], TypeExpr::TETuple(ref items) if items.len() == 2));
+
+    let app_decl = &program.data_decls[1];
+    assert_eq!(app_decl.name, "App");
+    let app_ctor = &app_decl.constructors[0];
+    match &app_ctor.args[0] {
+        TypeExpr::TEApp(lhs, rhs) => {
+            assert!(matches!(**lhs, TypeExpr::TEVar(_)));
+            assert!(matches!(**rhs, TypeExpr::TEVar(_)));
+        }
+        other => panic!("期待した型適用ではありません: {other:?}"),
+    }
+
+    assert_eq!(program.decls.len(), 1, "トップレベル宣言数");
+    assert_eq!(program.decls[0].name, "id");
+}
+
+#[test]
+/// class / instance 宣言のバリエーションと制約を網羅的に検証する。
+fn parser_program_handles_class_and_instance_variants() {
+    let src = r#"
+class (Eq a, Show a) => Pretty a
+class Marker
+instance Pretty []
+instance Pretty Int
+"#;
+    let program = parse_program(src);
+
+    assert_eq!(program.class_decls.len(), 2, "class 宣言数");
+    let pretty = &program.class_decls[0];
+    assert_eq!(pretty.name, "Pretty");
+    assert_eq!(
+        pretty.superclasses,
+        vec!["Eq".to_string(), "Show".to_string()]
+    );
+    assert_eq!(pretty.typevar.as_deref(), Some("a"));
+
+    let marker = &program.class_decls[1];
+    assert_eq!(marker.name, "Marker");
+    assert!(marker.typevar.is_none(), "typevar が省略されたケース");
+
+    assert_eq!(program.instance_decls.len(), 2, "instance 宣言数");
+    assert!(
+        program.instance_decls.iter().any(|inst| inst.tycon == "[]"),
+        "[] の特殊ケースをパース"
+    );
+    assert!(program
+        .instance_decls
+        .iter()
+        .any(|inst| inst.tycon == "Int" && inst.classname == "Pretty"));
+}
+
+#[test]
+/// class / instance 宣言で想定外構文が出た際に適切なエラーを返すことを確認する。
+fn parser_program_reports_class_instance_errors() {
+    let err = parser::parse_program("class Eq a where\n").expect_err("class where をエラーにする");
+    let rendered = err.to_string();
+    assert!(rendered.contains("[PAR510]"));
+
+    let err = parser::parse_program("instance Eq maybe\n").expect_err("小文字型を弾く");
+    let rendered = err.to_string();
+    assert!(rendered.contains("[PAR511]"));
+
+    let err = parser::parse_program("instance Eq Int where\n")
+        .expect_err("instance where をエラーにする");
+    let rendered = err.to_string();
+    assert!(rendered.contains("[PAR512]"));
 }
 
 #[test]
