@@ -219,6 +219,18 @@ fn merge_bindings(
     Some(base)
 }
 
+fn match_sequence(patterns: &[A::Pattern], values: &[Value]) -> Option<HashMap<String, Value>> {
+    if patterns.len() != values.len() {
+        return None;
+    }
+    let mut bindings = HashMap::new();
+    for (pattern, value) in patterns.iter().zip(values.iter()) {
+        let sub = match_pattern(pattern, value)?;
+        bindings = merge_bindings(bindings, sub)?;
+    }
+    Some(bindings)
+}
+
 fn match_pattern(pattern: &A::Pattern, value: &Value) -> Option<HashMap<String, Value>> {
     match pattern {
         A::Pattern::Wildcard { .. } => Some(HashMap::new()),
@@ -258,31 +270,11 @@ fn match_pattern(pattern: &A::Pattern, value: &Value) -> Option<HashMap<String, 
             _ => None,
         },
         A::Pattern::List { items, .. } => match value {
-            Value::List(values) => {
-                if values.len() != items.len() {
-                    return None;
-                }
-                let mut bindings = HashMap::new();
-                for (subpat, field) in items.iter().zip(values.iter()) {
-                    let sub = match_pattern(subpat, field)?;
-                    bindings = merge_bindings(bindings, sub)?;
-                }
-                Some(bindings)
-            }
+            Value::List(values) => match_sequence(items, values),
             _ => None,
         },
         A::Pattern::Tuple { items, .. } => match value {
-            Value::Tuple(values) => {
-                if values.len() != items.len() {
-                    return None;
-                }
-                let mut bindings = HashMap::new();
-                for (subpat, field) in items.iter().zip(values.iter()) {
-                    let sub = match_pattern(subpat, field)?;
-                    bindings = merge_bindings(bindings, sub)?;
-                }
-                Some(bindings)
-            }
+            Value::Tuple(values) => match_sequence(items, values),
             _ => None,
         },
         A::Pattern::As {
