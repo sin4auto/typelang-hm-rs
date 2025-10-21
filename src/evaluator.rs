@@ -141,19 +141,20 @@ fn eval_let_in(
     env: &Env,
 ) -> Result<Value, EvalError> {
     let local_env = env.child();
-    for (name, _, _) in bindings.iter().filter(|(_, params, _)| !params.is_empty()) {
-        local_env.insert(name.clone(), Value::Bool(false));
+    for (name, params, rhs) in bindings.iter().filter(|(_, params, _)| !params.is_empty()) {
+        let closure = Value::Closure {
+            params: params.clone(),
+            body: Box::new(rhs.clone()),
+            env: local_env.capture(),
+        };
+        local_env.insert(name.clone(), closure);
     }
     for (name, params, rhs) in bindings {
-        let val = if params.is_empty() {
-            eval_expr(rhs, &local_env)?
-        } else {
-            Value::Closure {
-                params: params.clone(),
-                body: Box::new(rhs.clone()),
-                env: local_env.capture(),
-            }
-        };
+        if !params.is_empty() {
+            // 関数束縛は初回ループで確定済みなのでスキップする。
+            continue;
+        }
+        let val = eval_expr(rhs, &local_env)?;
         local_env.insert(name.clone(), val);
     }
     eval_expr(body, &local_env)

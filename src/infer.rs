@@ -23,6 +23,7 @@ pub struct InferState {
 
 type PatternBindings = Vec<(String, Type)>;
 type PatternConstraints = Vec<Constraint>;
+type PatternOutcome = (Subst, PatternBindings, PatternConstraints);
 
 // `typesys::UnifyError` は既にコードを持つため TypeError へそのまま転送する
 
@@ -568,156 +569,8 @@ impl<'a> InferCtx<'a> {
         pattern: &A::Pattern,
         expected: Type,
     ) -> Result<(Subst, PatternBindings, PatternConstraints), TypeError> {
-        match pattern {
-            A::Pattern::Wildcard { .. } => Ok((subst, Vec::new(), Vec::new())),
-            A::Pattern::Var { name, .. } => {
-                let ty = expected.apply_subst(&subst);
-                Ok((subst, vec![(name.clone(), ty)], Vec::new()))
-            }
-            A::Pattern::Int { .. } => {
-                let lit_ty = Type::TCon(TCon {
-                    name: "Integer".into(),
-                });
-                let s_unify = unify(expected.apply_subst(&subst), lit_ty)
-                    .map_err(|e| TypeError::new(e.code, e.message, None))?;
-                Ok((compose(&s_unify, &subst), Vec::new(), Vec::new()))
-            }
-            A::Pattern::Float { .. } => {
-                let float_ty = Type::TCon(TCon {
-                    name: "Double".into(),
-                });
-                let s_unify = unify(expected.apply_subst(&subst), float_ty)
-                    .map_err(|e| TypeError::new(e.code, e.message, None))?;
-                Ok((compose(&s_unify, &subst), Vec::new(), Vec::new()))
-            }
-            A::Pattern::Char { .. } => {
-                let char_ty = Type::TCon(TCon {
-                    name: "Char".into(),
-                });
-                let s_unify = unify(expected.apply_subst(&subst), char_ty)
-                    .map_err(|e| TypeError::new(e.code, e.message, None))?;
-                Ok((compose(&s_unify, &subst), Vec::new(), Vec::new()))
-            }
-            A::Pattern::String { .. } => {
-                let string_ty = t_string();
-                let s_unify = unify(expected.apply_subst(&subst), string_ty)
-                    .map_err(|e| TypeError::new(e.code, e.message, None))?;
-                Ok((compose(&s_unify, &subst), Vec::new(), Vec::new()))
-            }
-            A::Pattern::Bool { .. } => {
-                let bool_ty = Type::TCon(TCon {
-                    name: "Bool".into(),
-                });
-                let s_unify = unify(expected.apply_subst(&subst), bool_ty)
-                    .map_err(|e| TypeError::new(e.code, e.message, None))?;
-                Ok((compose(&s_unify, &subst), Vec::new(), Vec::new()))
-            }
-            A::Pattern::List { items, .. } => {
-                let elem = Type::TVar(self.supply.fresh());
-                let list_ty = t_list(elem.clone());
-                let s_list = unify(expected.apply_subst(&subst), list_ty)
-                    .map_err(|e| TypeError::new(e.code, e.message, None))?;
-                let mut s_acc = compose(&s_list, &subst);
-                let mut bindings = Vec::new();
-                let mut constraints = Vec::new();
-                for item in items {
-                    let expected_elem = elem.apply_subst(&s_acc);
-                    let (s_next, binds, cons) =
-                        self.infer_pattern(env, s_acc.clone(), item, expected_elem)?;
-                    s_acc = s_next;
-                    bindings.extend(binds);
-                    constraints.extend(cons);
-                }
-                Ok((s_acc, bindings, constraints))
-            }
-            A::Pattern::Tuple { items, .. } => {
-                let elem_types: Vec<Type> = items
-                    .iter()
-                    .map(|_| Type::TVar(self.supply.fresh()))
-                    .collect();
-                let tuple_ty = Type::TTuple(TTuple {
-                    items: elem_types.clone(),
-                });
-                let s_tuple = unify(expected.apply_subst(&subst), tuple_ty)
-                    .map_err(|e| TypeError::new(e.code, e.message, None))?;
-                let mut s_acc = compose(&s_tuple, &subst);
-                let mut bindings = Vec::new();
-                let mut constraints = Vec::new();
-                for (subpat, elem_ty) in items.iter().zip(elem_types.into_iter()) {
-                    let expected_elem = elem_ty.apply_subst(&s_acc);
-                    let (s_next, binds, cons) =
-                        self.infer_pattern(env, s_acc.clone(), subpat, expected_elem)?;
-                    s_acc = s_next;
-                    bindings.extend(binds);
-                    constraints.extend(cons);
-                }
-                Ok((s_acc, bindings, constraints))
-            }
-            A::Pattern::As {
-                binder, pattern, ..
-            } => {
-                let (s_next, mut binds, cons) =
-                    self.infer_pattern(env, subst.clone(), pattern, expected.clone())?;
-                let ty = expected.apply_subst(&s_next);
-                binds.push((binder.clone(), ty));
-                Ok((s_next, binds, cons))
-            }
-            A::Pattern::Constructor { name, args, .. } => {
-                let scheme = env.lookup(name).ok_or_else(|| {
-                    TypeError::new(
-                        "TYPE062",
-                        format!("未定義のデータコンストラクタ: {name}"),
-                        None,
-                    )
-                })?;
-                let qual = instantiate(scheme, self.supply);
-                let (mut arg_types, result_ty) =
-                    Self::split_constructor_type(qual.r#type.clone(), args.len())?;
-                let expected_sub = expected.apply_subst(&subst);
-                let s_res = unify(result_ty, expected_sub)
-                    .map_err(|e| TypeError::new(e.code, e.message, None))?;
-                let mut s_acc = compose(&s_res, &subst);
-                let mut bindings = Vec::new();
-                let mut constraints = qual.constraints.clone();
-                for (subpat, arg_ty) in args.iter().zip(arg_types.drain(..)) {
-                    let expected_arg = arg_ty.apply_subst(&s_acc);
-                    let (s_next, mut binds, mut cons) =
-                        self.infer_pattern(env, s_acc.clone(), subpat, expected_arg)?;
-                    s_acc = s_next;
-                    bindings.append(&mut binds);
-                    constraints.append(&mut cons);
-                }
-                Ok((s_acc, bindings, constraints))
-            }
-        }
-    }
-
-    fn split_constructor_type(ty: Type, arity: usize) -> Result<(Vec<Type>, Type), TypeError> {
-        let mut args = Vec::with_capacity(arity);
-        let mut current = ty;
-        for _ in 0..arity {
-            match current {
-                Type::TFun(TFun { arg, ret }) => {
-                    args.push(*arg);
-                    current = *ret;
-                }
-                _ => {
-                    return Err(TypeError::new(
-                        "TYPE063",
-                        "パターンの引数数がコンストラクタと一致しません",
-                        None,
-                    ))
-                }
-            }
-        }
-        if matches!(current, Type::TFun(_)) {
-            return Err(TypeError::new(
-                "TYPE064",
-                "コンストラクタの引数が不足しています",
-                None,
-            ));
-        }
-        Ok((args, current))
+        let mut helper = PatternInfer::new(self, env);
+        helper.infer(subst, pattern, expected)
     }
 
     fn infer_app(
@@ -820,6 +673,188 @@ impl<'a> InferCtx<'a> {
                     && matches!(**left, A::Expr::IntLit { value: 0, .. })
                     && matches!(**right, A::Expr::IntLit { .. })
         )
+    }
+}
+
+struct PatternInfer<'ctx, 'a> {
+    ctx: &'ctx mut InferCtx<'a>,
+    env: &'ctx TypeEnv,
+}
+
+impl<'ctx, 'a> PatternInfer<'ctx, 'a> {
+    fn new(ctx: &'ctx mut InferCtx<'a>, env: &'ctx TypeEnv) -> Self {
+        Self { ctx, env }
+    }
+
+    fn infer(
+        &mut self,
+        subst: Subst,
+        pattern: &A::Pattern,
+        expected: Type,
+    ) -> Result<PatternOutcome, TypeError> {
+        match pattern {
+            A::Pattern::Wildcard { .. } => Ok((subst, Vec::new(), Vec::new())),
+            A::Pattern::Var { name, .. } => {
+                let ty = expected.apply_subst(&subst);
+                Ok((subst, vec![(name.clone(), ty)], Vec::new()))
+            }
+            A::Pattern::Int { .. } => self.literal(subst, expected, Self::named_con("Integer")),
+            A::Pattern::Float { .. } => self.literal(subst, expected, Self::named_con("Double")),
+            A::Pattern::Char { .. } => self.literal(subst, expected, Self::named_con("Char")),
+            A::Pattern::String { .. } => self.literal(subst, expected, t_string()),
+            A::Pattern::Bool { .. } => self.literal(subst, expected, Self::named_con("Bool")),
+            A::Pattern::List { items, .. } => self.list(subst, expected, items),
+            A::Pattern::Tuple { items, .. } => self.tuple(subst, expected, items),
+            A::Pattern::As {
+                binder, pattern, ..
+            } => self.apply_as(subst, expected, binder, pattern),
+            A::Pattern::Constructor { name, args, .. } => {
+                self.constructor(subst, expected, name, args)
+            }
+        }
+    }
+
+    fn literal(
+        &mut self,
+        subst: Subst,
+        expected: Type,
+        target: Type,
+    ) -> Result<PatternOutcome, TypeError> {
+        let subst = self.unify_expected(subst, expected, target)?;
+        Ok((subst, Vec::new(), Vec::new()))
+    }
+
+    fn list(
+        &mut self,
+        subst: Subst,
+        expected: Type,
+        items: &[A::Pattern],
+    ) -> Result<PatternOutcome, TypeError> {
+        let elem = Type::TVar(self.ctx.supply.fresh());
+        let list_ty = t_list(elem.clone());
+        let mut current = self.unify_expected(subst, expected, list_ty)?;
+        let mut bindings = Vec::new();
+        let mut constraints = Vec::new();
+        for item in items {
+            let expected_elem = elem.apply_subst(&current);
+            let (next_subst, mut binds, mut cons) = self.infer(current, item, expected_elem)?;
+            current = next_subst;
+            bindings.append(&mut binds);
+            constraints.append(&mut cons);
+        }
+        Ok((current, bindings, constraints))
+    }
+
+    fn tuple(
+        &mut self,
+        subst: Subst,
+        expected: Type,
+        items: &[A::Pattern],
+    ) -> Result<PatternOutcome, TypeError> {
+        let elem_types: Vec<Type> = items
+            .iter()
+            .map(|_| Type::TVar(self.ctx.supply.fresh()))
+            .collect();
+        let tuple_ty = Type::TTuple(TTuple {
+            items: elem_types.clone(),
+        });
+        let mut current = self.unify_expected(subst, expected, tuple_ty)?;
+        let mut bindings = Vec::new();
+        let mut constraints = Vec::new();
+        for (subpat, elem_ty) in items.iter().zip(elem_types.into_iter()) {
+            let expected_elem = elem_ty.apply_subst(&current);
+            let (next_subst, mut binds, mut cons) = self.infer(current, subpat, expected_elem)?;
+            current = next_subst;
+            bindings.append(&mut binds);
+            constraints.append(&mut cons);
+        }
+        Ok((current, bindings, constraints))
+    }
+
+    fn apply_as(
+        &mut self,
+        subst: Subst,
+        expected: Type,
+        binder: &str,
+        pattern: &A::Pattern,
+    ) -> Result<PatternOutcome, TypeError> {
+        let (subst, mut binds, cons) = self.infer(subst, pattern, expected.clone())?;
+        let ty = expected.apply_subst(&subst);
+        binds.push((binder.to_owned(), ty));
+        Ok((subst, binds, cons))
+    }
+
+    fn constructor(
+        &mut self,
+        subst: Subst,
+        expected: Type,
+        name: &str,
+        args: &[A::Pattern],
+    ) -> Result<PatternOutcome, TypeError> {
+        let scheme = self.env.lookup(name).ok_or_else(|| {
+            TypeError::new(
+                "TYPE062",
+                format!("未定義のデータコンストラクタ: {name}"),
+                None,
+            )
+        })?;
+        let qual = instantiate(scheme, self.ctx.supply);
+        let (mut arg_types, result_ty) =
+            Self::split_constructor_type(qual.r#type.clone(), args.len())?;
+        let mut current = self.unify_expected(subst, expected, result_ty)?;
+        let mut bindings = Vec::new();
+        let mut constraints = qual.constraints.clone();
+        for (subpat, arg_ty) in args.iter().zip(arg_types.drain(..)) {
+            let expected_arg = arg_ty.apply_subst(&current);
+            let (next_subst, mut binds, mut cons) = self.infer(current, subpat, expected_arg)?;
+            current = next_subst;
+            bindings.append(&mut binds);
+            constraints.append(&mut cons);
+        }
+        Ok((current, bindings, constraints))
+    }
+
+    fn unify_expected(
+        &mut self,
+        subst: Subst,
+        expected: Type,
+        target: Type,
+    ) -> Result<Subst, TypeError> {
+        let s_unify = unify(expected.apply_subst(&subst), target)
+            .map_err(|e| TypeError::new(e.code, e.message, None))?;
+        Ok(compose(&s_unify, &subst))
+    }
+
+    fn named_con(name: &str) -> Type {
+        Type::TCon(TCon { name: name.into() })
+    }
+
+    fn split_constructor_type(ty: Type, arity: usize) -> Result<(Vec<Type>, Type), TypeError> {
+        let mut args = Vec::with_capacity(arity);
+        let mut current = ty;
+        for _ in 0..arity {
+            match current {
+                Type::TFun(TFun { arg, ret }) => {
+                    args.push(*arg);
+                    current = *ret;
+                }
+                _ => {
+                    return Err(TypeError::new(
+                        "TYPE063",
+                        "パターンの引数数がコンストラクタと一致しません",
+                        None,
+                    ))
+                }
+            }
+        }
+        if matches!(current, Type::TFun(_)) {
+            return Err(TypeError::new(
+                "TYPE064",
+                "コンストラクタの引数が不足しています",
+                None,
+            ));
+        }
+        Ok((args, current))
     }
 }
 
