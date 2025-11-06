@@ -13,3 +13,7 @@ let square x = x * x;
 
 -- 複数束縛（セミコロン区切り）
 let const x y = x; let one = 1;
+
+-- ネイティブビルド用のエントリポイント
+main :: Int;
+let main = square 3;

@@ -18,5 +18,5 @@ mod printer;
 mod util;
 
 // 既存パス互換のために公開 API を再公開
-pub use cmd::run_repl;
+pub use cmd::{run_repl, run_repl_with_native};
 pub use loader::load_program_into_env;

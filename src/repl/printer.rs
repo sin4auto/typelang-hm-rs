@@ -19,6 +19,7 @@ const HELP_TEXT: &str = concat!(
     "  :browse [PFX]      定義一覧（接頭辞フィルタ）\n",
     "  :unset NAME        定義を削除\n",
     "  :set default on|off 型表示の defaulting を切替\n",
+    "  :dictionaries      辞書情報の確認（CLI 推奨）\n",
     "  :quit              終了\n",
     "\n",
     "例:\n",

@@ -1,3 +1,7 @@
+[workspace]
+members = [".", "runtime_native"]
+resolver = "2"
+
 [package]
 name = "typelang-hm-rs"
 version = "0.1.0"
@@ -14,6 +18,19 @@ path = "src/lib.rs"
 [[bin]]
 name = "typelang-repl"
 path = "src/bin/typelang.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+cranelift-codegen = "0.110"
+cranelift-frontend = "0.110"
+cranelift-module = "0.110"
+cranelift-native = "0.110"
+cranelift-object = "0.110"
+target-lexicon = "0.12"
+tempfile = "3.10"
+thiserror = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
 [profile.release]
 lto = true

@@ -37,6 +37,31 @@ pub fn run_repl() {
     }
 }
 
+#[cfg_attr(coverage, coverage(off))]
+pub fn run_repl_with_native(
+    backend: crate::NativeBackend,
+    optim: crate::NativeOptimLevel,
+    keep_outputs: bool,
+) {
+    if keep_outputs {
+        eprintln!("[WARN] REPL keep-outputs オプションはまだ効果がありません");
+    }
+    match backend {
+        crate::NativeBackend::Cranelift => {}
+        crate::NativeBackend::Llvm => {
+            eprintln!("[WARN] LLVM backend は未実装のため Cranelift を使用します");
+        }
+    }
+    match optim {
+        crate::NativeOptimLevel::Debug
+        | crate::NativeOptimLevel::Fast
+        | crate::NativeOptimLevel::Best => {
+            // 現状の REPL では最適化レベルを利用していないが、後方互換のため受け取る。
+        }
+    }
+    run_repl();
+}
+
 pub(crate) trait ReplLineSource {
     fn read_line(&mut self, prompt: &str) -> io::Result<ReadResult>;
     fn add_history(&mut self, entry: &str);
@@ -246,6 +271,10 @@ impl ReplSession {
             Browse(prefix) => self.exec_browse(prefix),
             SetDefault(on) => self.exec_set_default(on),
             Unset(name) => self.exec_unset(&name),
+            Dictionaries => vec![ReplMsg::Out(
+                "ネイティブ辞書情報は CLI の `typelang build --print-dictionaries` で確認できます"
+                    .into(),
+            )],
             Eval(src) => self.exec_eval(&src),
             Help | Quit => Vec::new(),
             Invalid(s) => vec![ReplMsg::Err(format!(
@@ -493,6 +522,8 @@ pub(crate) enum ReplCommand {
     SetDefault(bool),
     /// `:unset name` で定義を破棄する。
     Unset(String),
+    /// 辞書情報のヒントを表示する。
+    Dictionaries,
     /// 既知のコマンドに該当しない入力を通常式として扱う。
     Eval(String),
     /// シンタックスが認識できなかったコマンド入力。
@@ -509,6 +540,7 @@ pub(crate) fn parse_repl_command(input: &str) -> ReplCommand {
     match s {
         ":help" | ":h" => return ReplCommand::Help,
         ":quit" | ":q" => return ReplCommand::Quit,
+        ":dictionaries" | ":dicts" => return ReplCommand::Dictionaries,
         _ => {}
     }
     if let Some(rest) = s.strip_prefix(":t ") {
@@ -720,6 +752,8 @@ mod tests {
             (":help", ReplCommand::Help),
             (":h", ReplCommand::Help),
             (":quit", ReplCommand::Quit),
+            (":dictionaries", ReplCommand::Dictionaries),
+            (":dicts", ReplCommand::Dictionaries),
             (":type 1 + 2", ReplCommand::TypeOf("1 + 2".into())),
             (":t x", ReplCommand::TypeOf("x".into())),
             (":let f x = x", ReplCommand::Let("let f x = x".into())),
@@ -760,6 +794,9 @@ mod tests {
         let set_default = handle_command(&mut state, ReplCommand::SetDefault(true), &NoopIo);
         assert_msgs(set_default, &[Expected::Out("set default = on")]);
         assert!(state.defaulting_on);
+
+        let dicts = handle_command(&mut state, ReplCommand::Dictionaries, &NoopIo);
+        assert_msgs(dicts, &[Expected::Out("--print-dictionaries")]);
 
         let unset_ok = handle_command(&mut state, ReplCommand::Unset("foo".into()), &NoopIo);
         assert_msgs(unset_ok, &[Expected::Out("Unset foo")]);
