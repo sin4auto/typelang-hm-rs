@@ -402,16 +402,11 @@ impl<'a> InferCtx<'a> {
         }
 
         for (name, params, rhs) in bindings {
-            let rhs_expr = if params.is_empty() {
-                rhs.clone()
+            let (s_rhs, q_rhs) = if params.is_empty() {
+                self.infer_with_subst(&env2, s_acc.clone(), rhs)?
             } else {
-                A::Expr::Lambda {
-                    params: params.clone(),
-                    body: Box::new(rhs.clone()),
-                    span: A::Span::dummy(),
-                }
+                self.infer_lambda(&env2, s_acc.clone(), params, rhs)?
             };
-            let (s_rhs, q_rhs) = self.infer_with_subst(&env2, s_acc.clone(), &rhs_expr)?;
             let inferred_ty = q_rhs.r#type.apply_subst(&s_rhs);
             let fresh_ty = placeholders
                 .get(name)

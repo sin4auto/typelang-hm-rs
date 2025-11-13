@@ -4,11 +4,14 @@
 // 関連ファイル: src/core_ir/lower.rs, src/codegen/cranelift.rs
 #![allow(clippy::module_name_repetitions)]
 
+pub mod dict_specs;
+
 pub mod lower;
 
 use std::collections::BTreeMap;
 use std::fmt;
 
+use self::dict_specs::lookup_method_spec;
 use crate::ast as A;
 
 /// Core IR 全体を表すモジュール。
@@ -70,11 +73,28 @@ pub struct ConstructorLayout {
 pub struct DictionaryInit {
     pub classname: String,
     pub type_repr: String,
+    pub value_ty: ValueTy,
     pub methods: Vec<DictionaryMethod>,
     pub scheme_repr: String,
-    pub builder_symbol: Option<String>,
+    pub builder: DictionaryBuilder,
     pub origin: String,
     pub source_span: SourceRef,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum DictionaryBuilder {
+    Resolved(String),
+    Unresolved,
+}
+
+impl DictionaryBuilder {
+    #[must_use]
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            Self::Resolved(sym) => Some(sym.as_str()),
+            Self::Unresolved => None,
+        }
+    }
 }
 
 /// 辞書に格納されるメソッド情報。
@@ -82,8 +102,8 @@ pub struct DictionaryInit {
 pub struct DictionaryMethod {
     pub name: String,
     pub signature: Option<String>,
-    pub symbol: Option<String>,
-    pub method_id: Option<u64>,
+    pub symbol: String,
+    pub method_id: u64,
 }
 
 /// Core IR 上の関数定義。
@@ -103,6 +123,7 @@ pub struct Parameter {
     pub ty: ValueTy,
     pub kind: ParameterKind,
     pub dict_type_repr: Option<String>,
+    pub dict_value_ty: Option<ValueTy>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -118,6 +139,7 @@ impl Parameter {
             ty,
             kind: ParameterKind::Value,
             dict_type_repr: None,
+            dict_value_ty: None,
         }
     }
 
@@ -126,12 +148,14 @@ impl Parameter {
         ty: ValueTy,
         kind: ParameterKind,
         dict_type_repr: Option<String>,
+        dict_value_ty: Option<ValueTy>,
     ) -> Self {
         Self {
             name: name.into(),
             ty,
             kind,
             dict_type_repr,
+            dict_value_ty,
         }
     }
 }
@@ -283,115 +307,30 @@ impl PrimOp {
     #[must_use]
     pub fn dictionary_method(&self) -> Option<PrimOpDictionaryInfo> {
         use PrimOp::*;
-        let info = match self {
-            AddInt => PrimOpDictionaryInfo {
-                classname: "Num",
-                method: "add",
-                signature: "a -> a -> a",
-                method_id: 0,
-            },
-            SubInt => PrimOpDictionaryInfo {
-                classname: "Num",
-                method: "sub",
-                signature: "a -> a -> a",
-                method_id: 1,
-            },
-            MulInt => PrimOpDictionaryInfo {
-                classname: "Num",
-                method: "mul",
-                signature: "a -> a -> a",
-                method_id: 2,
-            },
-            AddDouble | SubDouble | MulDouble => PrimOpDictionaryInfo {
-                classname: "Num",
-                method: match self {
-                    AddDouble => "add",
-                    SubDouble => "sub",
-                    MulDouble => "mul",
-                    _ => unreachable!(),
-                },
-                signature: "a -> a -> a",
-                method_id: match self {
-                    AddDouble => 0,
-                    SubDouble => 1,
-                    MulDouble => 2,
-                    _ => unreachable!(),
-                },
-            },
-            DivDouble => PrimOpDictionaryInfo {
-                classname: "Fractional",
-                method: "div",
-                signature: "a -> a -> a",
-                method_id: 0,
-            },
-            DivInt => PrimOpDictionaryInfo {
-                classname: "Integral",
-                method: "div",
-                signature: "a -> a -> a",
-                method_id: 0,
-            },
-            ModInt => PrimOpDictionaryInfo {
-                classname: "Integral",
-                method: "mod",
-                signature: "a -> a -> a",
-                method_id: 1,
-            },
-            EqInt | EqDouble => PrimOpDictionaryInfo {
-                classname: "Eq",
-                method: "eq",
-                signature: "a -> a -> Bool",
-                method_id: 0,
-            },
-            NeqInt | NeqDouble => PrimOpDictionaryInfo {
-                classname: "Eq",
-                method: "neq",
-                signature: "a -> a -> Bool",
-                method_id: 1,
-            },
-            LtInt | LtDouble => PrimOpDictionaryInfo {
-                classname: "Ord",
-                method: "lt",
-                signature: "a -> a -> Bool",
-                method_id: 0,
-            },
-            LeInt | LeDouble => PrimOpDictionaryInfo {
-                classname: "Ord",
-                method: "le",
-                signature: "a -> a -> Bool",
-                method_id: 1,
-            },
-            GtInt | GtDouble => PrimOpDictionaryInfo {
-                classname: "Ord",
-                method: "gt",
-                signature: "a -> a -> Bool",
-                method_id: 2,
-            },
-            GeInt | GeDouble => PrimOpDictionaryInfo {
-                classname: "Ord",
-                method: "ge",
-                signature: "a -> a -> Bool",
-                method_id: 3,
-            },
-            AndBool => PrimOpDictionaryInfo {
-                classname: "BoolLogic",
-                method: "and",
-                signature: "Bool -> Bool -> Bool",
-                method_id: 0,
-            },
-            OrBool => PrimOpDictionaryInfo {
-                classname: "BoolLogic",
-                method: "or",
-                signature: "Bool -> Bool -> Bool",
-                method_id: 1,
-            },
-            NotBool => PrimOpDictionaryInfo {
-                classname: "BoolLogic",
-                method: "not",
-                signature: "Bool -> Bool",
-                method_id: 2,
-            },
+        let (classname, method) = match self {
+            AddInt | AddDouble => ("Num", "add"),
+            SubInt | SubDouble => ("Num", "sub"),
+            MulInt | MulDouble => ("Num", "mul"),
+            DivDouble => ("Fractional", "div"),
+            DivInt => ("Integral", "div"),
+            ModInt => ("Integral", "mod"),
+            EqInt | EqDouble => ("Eq", "eq"),
+            NeqInt | NeqDouble => ("Eq", "neq"),
+            LtInt | LtDouble => ("Ord", "lt"),
+            LeInt | LeDouble => ("Ord", "le"),
+            GtInt | GtDouble => ("Ord", "gt"),
+            GeInt | GeDouble => ("Ord", "ge"),
+            AndBool => ("BoolLogic", "and"),
+            OrBool => ("BoolLogic", "or"),
+            NotBool => ("BoolLogic", "not"),
         };
-        Some(info)
+        let spec = lookup_method_spec(classname, method)?;
+        Some(PrimOpDictionaryInfo {
+            classname,
+            method,
+            signature: spec.pattern.generic_signature(),
+            method_id: spec.method_id,
+        })
     }
 }
 
@@ -402,6 +341,7 @@ pub enum VarKind {
     Param,
     Function,
     Primitive,
+    Intrinsic,
 }
 
 /// Core IR が扱う型。

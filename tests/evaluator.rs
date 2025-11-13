@@ -5,7 +5,10 @@
 #[path = "test_support.rs"]
 mod support;
 
-use support::{approx_eq, eval_result, eval_value};
+use support::{
+    assert_value_bool, assert_value_double, assert_value_int, assert_value_string, eval_result,
+    eval_value,
+};
 use typelang::ast::{Expr, IntBase, Span};
 use typelang::errors::EvalError;
 use typelang::evaluator::{self, Value};
@@ -28,39 +31,18 @@ enum Expect {
 
 fn verify_case(case: &EvalCase) {
     match case.expect {
-        Expect::Bool(expected) => match eval_value(case.expr) {
-            Value::Bool(actual) => assert_eq!(actual, expected, "{}", case.note),
-            other => panic!(
-                "{}: expected Bool({expected}), got {:?} for {:?}",
-                case.note, other, case.expr
-            ),
-        },
-        Expect::Int(expected) => match eval_value(case.expr) {
-            Value::Int(actual) => assert_eq!(actual, expected, "{}", case.note),
-            other => panic!(
-                "{}: expected Int({expected}), got {:?} for {:?}",
-                case.note, other, case.expr
-            ),
-        },
-        Expect::Double(expected) => match eval_value(case.expr) {
-            Value::Double(actual) => assert!(
-                approx_eq(actual, expected),
-                "{}: expected ≈ {expected}, got {actual} for {:?}",
-                case.note,
-                case.expr
-            ),
-            other => panic!(
-                "{}: expected Double({expected}), got {:?} for {:?}",
-                case.note, other, case.expr
-            ),
-        },
-        Expect::String(expected) => match eval_value(case.expr) {
-            Value::String(actual) => assert_eq!(actual, expected, "{}", case.note),
-            other => panic!(
-                "{}: expected String({expected}), got {:?} for {:?}",
-                case.note, other, case.expr
-            ),
-        },
+        Expect::Bool(expected) => {
+            assert_value_bool(eval_value(case.expr), expected, case.note);
+        }
+        Expect::Int(expected) => {
+            assert_value_int(eval_value(case.expr), expected, case.note);
+        }
+        Expect::Double(expected) => {
+            assert_value_double(eval_value(case.expr), expected, case.note);
+        }
+        Expect::String(expected) => {
+            assert_value_string(eval_value(case.expr), expected, case.note);
+        }
         Expect::Error(expected_code) => match eval_result(case.expr) {
             Err(EvalError(info)) => assert_eq!(
                 info.code, expected_code,
@@ -168,6 +150,11 @@ fn evaluator_smoke_suite() {
             expr: "show 42",
             expect: Expect::String("42"),
             note: "show が文字列を返す",
+        },
+        EvalCase {
+            expr: "println 42",
+            expect: Expect::String("42"),
+            note: "println も String を返す",
         },
         EvalCase {
             expr: "case True of True -> 1; False -> 0",

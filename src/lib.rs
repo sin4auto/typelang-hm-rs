@@ -21,6 +21,7 @@ pub mod core_ir;
 pub mod errors;
 pub mod evaluator;
 pub mod infer;
+pub(crate) mod intrinsics;
 pub mod lexer;
 pub mod parser;
 pub(crate) mod primitives;
@@ -84,7 +85,8 @@ pub fn emit_native_with_options(
     match backend {
         NativeBackend::Cranelift => {
             let _ = optim_level; // 現状は Cranelift 側に最適化レベルを伝搬しない
-            let ir = compile_core_ir(program).map_err(codegen::NativeError::from)?;
+            let mut ir = compile_core_ir(program).map_err(codegen::NativeError::from)?;
+            codegen::dictionary_codegen::assign_missing_builders(&mut ir.dictionaries)?;
             let dictionaries = ir.dictionaries.clone();
             codegen::cranelift::emit_native(&ir, output)?;
             Ok(NativeBuildArtifacts { dictionaries })

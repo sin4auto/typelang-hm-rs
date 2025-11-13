@@ -10,15 +10,15 @@ TypeLang HM は、Hindley–Milner 型推論を核とした学習向け関数型
 - 詳細なドキュメント群（`documents/` 配下）でコンパイラ内部の設計を段階的に把握可能。
 
 ## 2. リポジトリ構成
-| パス | 説明 |
-| ---- | ---- |
-| `src/` | インタプリタ／型推論／コード生成のメイン実装 |
-| `src/codegen/` | Cranelift ネイティブバックエンド |
-| `runtime_native/` | ネイティブ実行時ランタイム（辞書 ABI など） |
-| `examples/` | REPL やビルドで利用できるサンプル `.tl` ファイル |
-| `tests/` | Core IR, ネイティブビルド, 型推論などの統合テスト |
-| `documents/native.md` | ネイティブバックエンド全体の最新ガイド |
-| `documents/plan/native-compile-spec.md` | 辞書モノモーフ化フェーズの仕様書 |
+| パス                                    | 説明                                              |
+| --------------------------------------- | ------------------------------------------------- |
+| `src/`                                  | インタプリタ／型推論／コード生成のメイン実装      |
+| `src/codegen/`                          | Cranelift ネイティブバックエンド                  |
+| `runtime_native/`                       | ネイティブ実行時ランタイム（辞書 ABI など）       |
+| `examples/`                             | REPL やビルドで利用できるサンプル `.tl` ファイル  |
+| `tests/`                                | Core IR, ネイティブビルド, 型推論などの統合テスト |
+| `documents/native.md`                   | ネイティブバックエンド全体の最新ガイド            |
+| `documents/plan/native-compile-spec.md` | 辞書モノモーフ化フェーズの仕様書                  |
 
 ## 3. 必要環境
 - Rust stable ツールチェーン (`rustup default stable`)
@@ -49,17 +49,18 @@ cargo run --bin typelang-repl -- \
 - **基本構文**：`let` 束縛、ラムダ、`if/then/else`、`case ... of`。
 - **データ定義**：`data` で代数的データ型、タプル、リスト、`x@pattern` などのパターンガード。
 - **型クラス**：辞書ベースで実装。`Num` / `Eq` などは辞書初期化コードが自動生成される。
+- **標準プリミティブ**：算術・比較演算子に加えて、`show`／`println` が `Show` 制約の値を `String` 化し、`println` は標準出力にも書き出す。
 - **リテラル**：整数／浮動小数（`^` と `**` が使い分け）、Unicode 文字列と文字リテラル。
 - 詳細な文法は `documents/EBNF.md` を参照。
 
 ## 6. 開発ワークフロー
-| コマンド | 用途 |
-| -------- | ---- |
-| `make check` | `cargo fmt` → `cargo clippy` → `cargo test` をまとめて実行 |
-| `make full_local` | 追加ツール導入 → clean → doc → fmt → clippy → test → release → audit → outdated → udeps → miri → coverage の総合検証（ネットワーク権限が必要） |
-| `cargo run --bin typelang-repl -- --help` | CLI オプションの確認 |
-| `cargo test -- --ignored` | ネイティブバックエンドの重いテストを含めて実行 |
-| `cargo +nightly miri test --test native_build` | Miri による未定義動作検査（ネイティブ E2E は隔離のため自動で無効化） |
+| コマンド                                       | 用途                                                                                                                                           |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `make check`                                   | `cargo fmt` → `cargo clippy` → `cargo test` をまとめて実行                                                                                     |
+| `make full_local`                              | 追加ツール導入 → clean → doc → fmt → clippy → test → release → audit → outdated → udeps → miri → coverage の総合検証（ネットワーク権限が必要） |
+| `cargo run --bin typelang-repl -- --help`      | CLI オプションの確認                                                                                                                           |
+| `cargo test -- --ignored`                      | ネイティブバックエンドの重いテストを含めて実行                                                                                                 |
+| `cargo +nightly miri test --test native_build` | Miri による未定義動作検査（ネイティブ E2E は隔離のため自動で無効化）                                                                           |
 
 > **注意**: `make full_local` は `cargo audit` や `cargo llvm-cov` などの外部リソースへアクセスするため、CI/sandbox 環境では失敗する場合があります。必要に応じて個別コマンドを手動で実行してください。
 
@@ -82,13 +83,7 @@ cargo run --bin typelang-repl -- \
 - `documents/EBNF.md` — 言語仕様（EBNF）。
 - `documents/plan/` 以下 — その他の設計／ロードマップ資料。
 
-## 10. 貢献ガイドライン（概要）
-- 変更前に `make check` を実行し、最低限の品質を担保。
-- 仕様変更や ABI 変更時は関連ドキュメントも同ブランチで更新。
-- コミットメッセージはコンベンショナルコミット形式を推奨（例: `feat: add fractional dictionary fallback`）。
-- Issue や PR では再現手順・検証結果を明記するとレビューが円滑です。
-
-## 11. ライセンス
+## 10 ライセンス
 本プロジェクトは MIT ライセンスで配布されています。詳細は `LICENSE` を参照してください。
 
 ---

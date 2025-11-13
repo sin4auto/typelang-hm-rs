@@ -5,7 +5,10 @@
 #[path = "test_support.rs"]
 mod support;
 
-use support::{eval_value, infer_pretty_qual, infer_type_str, infer_type_str_with_defaulting};
+use support::{
+    assert_value_bool, eval_value, infer_pretty_qual, infer_type_str,
+    infer_type_str_with_defaulting,
+};
 use typelang::typesys::*;
 use typelang::{evaluator, typesys};
 
@@ -105,6 +108,11 @@ fn inference_type_strings() {
             expected: "Num a => a",
             note: "リストパターンと数値制約",
         },
+        Case {
+            src: "\\x -> println x",
+            expected: "Show a => a -> [Char]",
+            note: "println は Show 制約を共有",
+        },
     ];
 
     for case in cases {
@@ -176,10 +184,7 @@ fn infer_and_eval_mutual_recursion_functions() {
         "#
         .trim(),
     );
-    assert!(
-        matches!(value, evaluator::Value::Bool(true)),
-        "even 6 should be True"
-    );
+    assert_value_bool(value, true, "even 6 should be True");
     let value_odd = eval_value(
         r#"
         let even n = if n == 0 then True else odd (n - 1);
@@ -188,8 +193,5 @@ fn infer_and_eval_mutual_recursion_functions() {
         "#
         .trim(),
     );
-    assert!(
-        matches!(value_odd, evaluator::Value::Bool(true)),
-        "odd 7 should be True"
-    );
+    assert_value_bool(value_odd, true, "odd 7 should be True");
 }

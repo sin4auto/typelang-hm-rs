@@ -2,7 +2,7 @@
 // 役割: 評価時に用いる値表現とプリミティブ生成ヘルパーを提供する
 // 意図: 評価器・プリミティブ定義から共有される基盤ロジックを分離する
 // 関連ファイル: src/evaluator.rs, src/primitives.rs
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -10,32 +10,109 @@ use std::rc::Rc;
 use crate::ast::Expr;
 use crate::errors::EvalError;
 
-#[derive(Debug)]
-/// 評価環境を共有可能な形で保持する軽量ラッパー。
+thread_local! {
+    static PRINTLN_CAPTURE: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
+}
+
+#[derive(Debug, Clone)]
 pub struct Env {
-    inner: Rc<EnvInner>,
+    inner: Rc<EnvFrame>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CapturedEnv {
+    inner: Rc<EnvFrame>,
 }
 
 #[derive(Debug)]
-struct EnvInner {
-    values: RefCell<HashMap<String, Value>>,
-    roots: Cell<usize>,
-    captures: Cell<usize>,
+struct EnvFrame {
+    bindings: RefCell<HashMap<String, BindingValue>>,
+    parent: Option<Rc<EnvFrame>>,
 }
 
-impl EnvInner {
-    fn new(map: HashMap<String, Value>) -> Self {
-        Self {
-            values: RefCell::new(map),
-            roots: Cell::new(1),
-            captures: Cell::new(0),
+impl Drop for EnvFrame {
+    fn drop(&mut self) {
+        self.bindings.borrow_mut().clear();
+    }
+}
+
+impl Drop for Env {
+    fn drop(&mut self) {
+        if Rc::strong_count(&self.inner) == 1 {
+            // This is the last strong reference; clear bindings eagerly.
+            self.inner.bindings.borrow_mut().clear();
         }
     }
 }
 
-#[derive(Debug)]
-pub struct CapturedEnv {
-    inner: Rc<EnvInner>,
+impl Drop for CapturedEnv {
+    fn drop(&mut self) {
+        if Rc::strong_count(&self.inner) == 1 {
+            self.inner.bindings.borrow_mut().clear();
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+enum BindingValue {
+    Present(Value),
+    Tombstone,
+}
+
+impl EnvFrame {
+    fn root(map: HashMap<String, Value>) -> Self {
+        let mut bindings = HashMap::with_capacity(map.len());
+        for (k, v) in map {
+            bindings.insert(k, BindingValue::Present(v));
+        }
+        Self {
+            bindings: RefCell::new(bindings),
+            parent: None,
+        }
+    }
+
+    fn child(parent: Rc<EnvFrame>) -> Self {
+        Self {
+            bindings: RefCell::new(HashMap::new()),
+            parent: Some(parent),
+        }
+    }
+}
+
+fn collect_snapshot(frame: &Rc<EnvFrame>, acc: &mut HashMap<String, Value>) {
+    if let Some(parent) = &frame.parent {
+        collect_snapshot(parent, acc);
+    }
+    for (key, value) in frame.bindings.borrow().iter() {
+        match value {
+            BindingValue::Present(v) => {
+                acc.insert(key.clone(), v.clone());
+            }
+            BindingValue::Tombstone => {
+                acc.remove(key);
+            }
+        }
+    }
+}
+
+fn lookup_binding(frame: &Rc<EnvFrame>, key: &str) -> Option<Value> {
+    match lookup_binding_value(frame, key)? {
+        BindingValue::Present(v) => Some(v),
+        BindingValue::Tombstone => None,
+    }
+}
+
+fn lookup_binding_value(frame: &Rc<EnvFrame>, key: &str) -> Option<BindingValue> {
+    if let Some(value) = {
+        let bindings = frame.bindings.borrow();
+        bindings.get(key).cloned()
+    } {
+        return Some(value);
+    }
+    frame
+        .parent
+        .as_ref()
+        .and_then(|parent| lookup_binding_value(parent, key))
 }
 
 impl Env {
@@ -47,39 +124,59 @@ impl Env {
     /// 既存のマップから環境を生成する。
     pub fn from_map(map: HashMap<String, Value>) -> Self {
         Self {
-            inner: Rc::new(EnvInner::new(map)),
+            inner: Rc::new(EnvFrame::root(map)),
         }
     }
 
     /// 現在の内容を複製した子環境を返す。
     pub fn child(&self) -> Self {
-        Self::from_map(self.snapshot())
+        Self {
+            inner: Rc::new(EnvFrame::child(Rc::clone(&self.inner))),
+        }
     }
 
     /// 環境をフラットな `HashMap` としてコピーする。
     pub fn snapshot(&self) -> HashMap<String, Value> {
-        self.inner.values.borrow().clone()
+        let mut acc = HashMap::new();
+        collect_snapshot(&self.inner, &mut acc);
+        acc
+    }
+
+    /// 環境を破棄する前に全束縛を明示的に解放し、`Rc` 循環を防ぐ。
+    /// REPL 等で環境を継続利用する場合は呼び出さないこと。
+    pub fn teardown(&mut self) {
+        self.inner.bindings.borrow_mut().clear();
     }
 
     /// 束縛を追加または更新する。
     pub fn insert(&self, key: impl Into<String>, val: Value) -> Option<Value> {
-        self.inner.values.borrow_mut().insert(key.into(), val)
+        let key = key.into();
+        let prev = self.get(&key);
+        self.inner
+            .bindings
+            .borrow_mut()
+            .insert(key, BindingValue::Present(val));
+        prev
     }
 
     /// 束縛を取得する。
     pub fn get(&self, key: &str) -> Option<Value> {
-        self.inner.values.borrow().get(key).cloned()
+        lookup_binding(&self.inner, key)
     }
 
     /// 束縛を除去する。
     pub fn remove(&self, key: &str) -> Option<Value> {
-        self.inner.values.borrow_mut().remove(key)
+        let prev = self.get(key)?;
+        let mut bindings = self.inner.bindings.borrow_mut();
+        bindings.remove(key);
+        if self.inner.parent.is_some() {
+            bindings.insert(key.to_string(), BindingValue::Tombstone);
+        }
+        Some(prev)
     }
 
     /// クロージャ用に循環参照を追跡する捕捉環境を生成する。
     pub fn capture(&self) -> CapturedEnv {
-        let current = self.inner.captures.get();
-        self.inner.captures.set(current + 1);
         CapturedEnv {
             inner: Rc::clone(&self.inner),
         }
@@ -87,18 +184,9 @@ impl Env {
 
     /// 所有権を捕捉環境へ移行する。
     pub fn into_capture(self) -> CapturedEnv {
-        use std::mem::ManuallyDrop;
-
-        let this = ManuallyDrop::new(self);
-        // SAFETY: `this` is never dropped and we have exclusive access, so moving out
-        // of the field without running `Env::drop` is sound.
-        let inner = unsafe { std::ptr::read(&this.inner) };
-        let roots = inner.roots.get();
-        debug_assert!(roots > 0, "Env roots must remain positive");
-        inner.roots.set(roots - 1);
-        let captures = inner.captures.get();
-        inner.captures.set(captures + 1);
-        CapturedEnv { inner }
+        CapturedEnv {
+            inner: Rc::clone(&self.inner),
+        }
     }
 }
 
@@ -108,68 +196,10 @@ impl Default for Env {
     }
 }
 
-impl Clone for Env {
-    fn clone(&self) -> Self {
-        let current = self.inner.roots.get();
-        self.inner.roots.set(current + 1);
-        Self {
-            inner: Rc::clone(&self.inner),
-        }
-    }
-}
-
-impl Drop for Env {
-    fn drop(&mut self) {
-        let prev = self.inner.roots.get();
-        debug_assert!(prev > 0, "Env root count underflow");
-        self.inner.roots.set(prev - 1);
-        if prev == 1 && self.inner.captures.get() > 0 {
-            let drained = {
-                let mut bindings = self.inner.values.borrow_mut();
-                if bindings.is_empty() {
-                    return;
-                }
-                std::mem::take(&mut *bindings)
-            };
-            drop(drained);
-        }
-    }
-}
-
-impl Clone for CapturedEnv {
-    fn clone(&self) -> Self {
-        let current = self.inner.captures.get();
-        self.inner.captures.set(current + 1);
-        Self {
-            inner: Rc::clone(&self.inner),
-        }
-    }
-}
-
 impl CapturedEnv {
     pub fn upgrade(&self) -> Env {
-        let current = self.inner.roots.get();
-        self.inner.roots.set(current + 1);
         Env {
             inner: Rc::clone(&self.inner),
-        }
-    }
-}
-
-impl Drop for CapturedEnv {
-    fn drop(&mut self) {
-        let prev = self.inner.captures.get();
-        debug_assert!(prev > 0, "CapturedEnv count underflow");
-        self.inner.captures.set(prev - 1);
-        if prev == 1 && self.inner.roots.get() == 0 {
-            let drained = {
-                let mut bindings = self.inner.values.borrow_mut();
-                if bindings.is_empty() {
-                    return;
-                }
-                std::mem::take(&mut *bindings)
-            };
-            drop(drained);
         }
     }
 }
@@ -292,6 +322,58 @@ pub(crate) fn py_show(v: Value) -> Result<Value, EvalError> {
         }
         _ => return Err(EvalError::new("EVAL050", "show: 未対応の値", None)),
     }))
+}
+
+fn emit_line(text: &str) {
+    let intercepted = PRINTLN_CAPTURE.with(|slot| {
+        let mut guard = slot.borrow_mut();
+        if let Some(buffer) = guard.as_mut() {
+            buffer.push(text.to_string());
+            true
+        } else {
+            false
+        }
+    });
+    if !intercepted {
+        println!("{}", text);
+    }
+}
+
+pub(crate) fn println_op(value: Value) -> Result<Value, EvalError> {
+    let rendered = py_show(value)?;
+    match rendered {
+        Value::String(text) => {
+            emit_line(&text);
+            Ok(Value::String(text))
+        }
+        other => Err(EvalError::new(
+            "EVAL051",
+            format!("println: 無効な表示結果 {:?}", other),
+            None,
+        )),
+    }
+}
+
+#[cfg(test)]
+fn capture_println<F, R>(action: F) -> (R, Vec<String>)
+where
+    F: FnOnce() -> R,
+{
+    PRINTLN_CAPTURE.with(|slot| {
+        let mut guard = slot.borrow_mut();
+        assert!(
+            guard.is_none(),
+            "capture_println: nested capture not supported"
+        );
+        *guard = Some(Vec::new());
+    });
+    let result = action();
+    let lines = PRINTLN_CAPTURE.with(|slot| {
+        slot.borrow_mut()
+            .take()
+            .expect("capture_println: buffer must exist")
+    });
+    (result, lines)
 }
 
 fn numeric_binop<T, Conv, Wrap, Op>(
@@ -541,6 +623,39 @@ mod tests {
     }
 
     #[test]
+    fn env_child_reads_parent_without_copying() {
+        let root = Env::new();
+        root.insert("x", Value::Int(1));
+        let child = root.child();
+        assert!(matches!(child.get("x"), Some(Value::Int(1))));
+        child.insert("x", Value::Int(2));
+        assert!(matches!(child.get("x"), Some(Value::Int(2))));
+        assert!(matches!(root.get("x"), Some(Value::Int(1))));
+    }
+
+    #[test]
+    fn env_remove_shadows_parent_binding() {
+        let root = Env::new();
+        root.insert("x", Value::Int(1));
+        let child = root.child();
+        assert!(matches!(child.remove("x"), Some(Value::Int(1))));
+        assert!(child.get("x").is_none());
+        assert!(matches!(root.get("x"), Some(Value::Int(1))));
+    }
+
+    #[test]
+    fn snapshot_respects_child_overrides_and_removals() {
+        let root = Env::new();
+        root.insert("a", Value::Int(1));
+        let child = root.child();
+        child.insert("b", Value::Int(2));
+        child.remove("a");
+        let snap = child.snapshot();
+        assert!(!snap.contains_key("a"));
+        assert!(matches!(snap.get("b"), Some(Value::Int(2))));
+    }
+
+    #[test]
     fn primop_variants_apply_and_wrap_values() {
         let show = PrimOp::unary(py_show);
         let displayed = show.clone().apply(Value::Int(7)).expect("py_show succeeds");
@@ -694,6 +809,16 @@ mod tests {
         };
         let rendered = py_show(list).expect("show List 1 2");
         assert!(matches!(rendered, Value::String(s) if s == "List 1 2"));
+    }
+
+    #[test]
+    fn println_op_formats_and_records_lines() {
+        let (result, lines) = capture_println(|| println_op(Value::Int(7)).expect("println ok"));
+        match result {
+            Value::String(text) => assert_eq!(text, "7"),
+            other => panic!("expected println to return String, got {:?}", other),
+        }
+        assert_eq!(lines, vec!["7".to_string()]);
     }
 
     #[test]

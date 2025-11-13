@@ -631,6 +631,7 @@ dependencies = [
  "cranelift-module",
  "cranelift-native",
  "cranelift-object",
+ "once_cell",
  "serde",
  "serde_json",
  "target-lexicon",

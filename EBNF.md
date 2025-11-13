@@ -30,7 +30,10 @@ reserved      = 'let' | 'in' | 'if' | 'then' | 'else' | 'case' | 'of' | 'data' |
 varid         = ( 'a'..'z' | '_' ) { letter | digit | '\'' } - reserved ;
 conid         = ( 'A'..'Z' ) { letter | digit | '\'' } ;
 
-int_lit       = '0x' hexdigit+ | '0o' octdigit+ | '0b' bindigit+ | digit+ ;
+int_lit       = ('0x' | '0X') hexdigit+
+              | ('0o' | '0O') octdigit+
+              | ('0b' | '0B') bindigit+
+              | digit+ ;
 float_lit     = digit+ '.' digit+ [ exp ] | digit+ exp ;
 exp           = ( 'e' | 'E' ) [ '+' | '-' ] digit+ ;
 char_lit      = '\'' ( escape | ~('\\'|'\n'|'\'') ) '\'' ;
@@ -93,7 +96,7 @@ atom       = '-' atom
 pattern        = as_pattern | pattern_term ;
 as_pattern     = varid '@' pattern ;
 pattern_term   = pattern_ctor | pattern_atom ;
-pattern_ctor   = conid { pattern_atom } ;
+pattern_ctor   = conid { pattern_term } ;
 pattern_atom   = '_'
                | varid
                | int_lit

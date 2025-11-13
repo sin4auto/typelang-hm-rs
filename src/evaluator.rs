@@ -8,8 +8,6 @@
 //! - プリミティブ演算は部分適用可能な値として登録し、REPL 操作を簡潔にする。
 //! - べき乗や比較など一部演算子は直感的な型へフォールバックする設計を採用する。
 
-use std::collections::HashMap;
-
 use crate::ast as A;
 use crate::errors::{EvalError, FrameInfo};
 use crate::primitives::PRIMITIVES;
@@ -163,7 +161,7 @@ fn eval_let_in(
 fn eval_case(scrutinee: &A::Expr, arms: &[A::CaseArm], env: &Env) -> Result<Value, EvalError> {
     let value = eval_expr(scrutinee, env)?;
     for arm in arms {
-        if let Some(bindings) = match_pattern(&arm.pattern, &value) {
+        if let Ok(bindings) = match_pattern(&arm.pattern, &value) {
             let env_branch = env.child();
             for (name, val) in bindings {
                 env_branch.insert(name, val);
@@ -211,93 +209,109 @@ fn nonzero(value: usize) -> Option<usize> {
     }
 }
 
-fn merge_bindings(
-    mut base: HashMap<String, Value>,
-    extra: HashMap<String, Value>,
-) -> Option<HashMap<String, Value>> {
-    for (k, v) in extra {
-        if base.contains_key(&k) {
-            return None;
-        }
-        base.insert(k, v);
-    }
-    Some(base)
-}
+type PatternBindings = Vec<(String, Value)>;
 
-fn match_sequence(patterns: &[A::Pattern], values: &[Value]) -> Option<HashMap<String, Value>> {
+#[derive(Debug)]
+struct PatternMatchError;
+
+fn match_sequence(
+    patterns: &[A::Pattern],
+    values: &[Value],
+    bindings: &mut PatternBindings,
+) -> Result<(), PatternMatchError> {
     if patterns.len() != values.len() {
-        return None;
+        return Err(PatternMatchError);
     }
-    let mut bindings = HashMap::new();
     for (pattern, value) in patterns.iter().zip(values.iter()) {
-        let sub = match_pattern(pattern, value)?;
-        bindings = merge_bindings(bindings, sub)?;
+        match_pattern_inner(pattern, value, bindings)?;
     }
-    Some(bindings)
+    Ok(())
 }
 
-fn match_pattern(pattern: &A::Pattern, value: &Value) -> Option<HashMap<String, Value>> {
+fn match_pattern(
+    pattern: &A::Pattern,
+    value: &Value,
+) -> Result<PatternBindings, PatternMatchError> {
+    let mut bindings = PatternBindings::new();
+    match_pattern_inner(pattern, value, &mut bindings)?;
+    Ok(bindings)
+}
+
+fn ensure_unique_binding(
+    bindings: &[(String, Value)],
+    name: &str,
+) -> Result<(), PatternMatchError> {
+    if bindings.iter().any(|(existing, _)| existing == name) {
+        Err(PatternMatchError)
+    } else {
+        Ok(())
+    }
+}
+
+fn match_pattern_inner(
+    pattern: &A::Pattern,
+    value: &Value,
+    bindings: &mut PatternBindings,
+) -> Result<(), PatternMatchError> {
     match pattern {
-        A::Pattern::Wildcard { .. } => Some(HashMap::new()),
+        A::Pattern::Wildcard { .. } => Ok(()),
         A::Pattern::Var { name, .. } => {
-            let mut map = HashMap::new();
-            map.insert(name.clone(), value.clone());
-            Some(map)
+            ensure_unique_binding(bindings, name)?;
+            bindings.push((name.clone(), value.clone()));
+            Ok(())
         }
         A::Pattern::Int {
             value: expected, ..
         } => match value {
-            Value::Int(v) if v == expected => Some(HashMap::new()),
-            _ => None,
+            Value::Int(v) if v == expected => Ok(()),
+            _ => Err(PatternMatchError),
         },
         A::Pattern::Float {
             value: expected, ..
         } => match value {
-            Value::Double(v) if (v - expected).abs() <= f64::EPSILON => Some(HashMap::new()),
-            _ => None,
+            Value::Double(v) if (v - expected).abs() <= f64::EPSILON => Ok(()),
+            _ => Err(PatternMatchError),
         },
         A::Pattern::Char {
             value: expected, ..
         } => match value {
-            Value::Char(v) if v == expected => Some(HashMap::new()),
-            _ => None,
+            Value::Char(v) if v == expected => Ok(()),
+            _ => Err(PatternMatchError),
         },
         A::Pattern::String {
             value: expected, ..
         } => match value {
-            Value::String(v) if v == expected => Some(HashMap::new()),
-            _ => None,
+            Value::String(v) if v == expected => Ok(()),
+            _ => Err(PatternMatchError),
         },
         A::Pattern::Bool {
             value: expected, ..
         } => match value {
-            Value::Bool(v) if v == expected => Some(HashMap::new()),
-            _ => None,
+            Value::Bool(v) if v == expected => Ok(()),
+            _ => Err(PatternMatchError),
         },
         A::Pattern::List { items, .. } => match value {
-            Value::List(values) => match_sequence(items, values),
-            _ => None,
+            Value::List(values) => match_sequence(items, values, bindings),
+            _ => Err(PatternMatchError),
         },
         A::Pattern::Tuple { items, .. } => match value {
-            Value::Tuple(values) => match_sequence(items, values),
-            _ => None,
+            Value::Tuple(values) => match_sequence(items, values, bindings),
+            _ => Err(PatternMatchError),
         },
         A::Pattern::As {
             binder, pattern, ..
         } => {
-            let mut bindings = match_pattern(pattern, value)?;
-            if bindings.contains_key(binder) {
-                return None;
-            }
-            bindings.insert(binder.clone(), value.clone());
-            Some(bindings)
+            match_pattern_inner(pattern, value, bindings)?;
+            ensure_unique_binding(bindings, binder)?;
+            bindings.push((binder.clone(), value.clone()));
+            Ok(())
         }
         A::Pattern::Constructor { name, args, .. } => match value {
             Value::Data {
                 constructor,
                 fields,
-            } if constructor == name => match_sequence(args, fields),
-            _ => None,
+            } if constructor == name => match_sequence(args, fields, bindings),
+            _ => Err(PatternMatchError),
         },
     }
 }

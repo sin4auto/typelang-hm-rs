@@ -28,6 +28,7 @@ use crate::core_ir::{
     self, Binding, ConstructorLayout, Expr, Function, Literal, MatchArm, MatchBinding, PrimOp,
     ValueTy, VarKind,
 };
+use crate::intrinsics::{self, IntrinsicKind};
 
 const SYMBOL_PREFIX: &str = "tl_";
 
@@ -146,6 +147,7 @@ struct RuntimeSymbols {
     print_int: FuncId,
     print_double: FuncId,
     print_bool: FuncId,
+    println_value: FuncId,
     list_empty: FuncId,
     list_cons: FuncId,
     list_is_empty: FuncId,
@@ -185,6 +187,11 @@ fn declare_runtime_symbols(
     let mut sig_bool = Signature::new(call_conv);
     sig_bool.params.push(AbiParam::new(types::I8));
     let print_bool = module.declare_function("tl_print_bool", Linkage::Import, &sig_bool)?;
+
+    let mut sig_println = Signature::new(call_conv);
+    sig_println.params.push(AbiParam::new(ptr_ty));
+    sig_println.returns.push(AbiParam::new(ptr_ty));
+    let println_value = module.declare_function("tl_println", Linkage::Import, &sig_println)?;
 
     let mut sig_list_empty = Signature::new(call_conv);
     sig_list_empty.returns.push(AbiParam::new(ptr_ty));
@@ -303,6 +310,7 @@ fn declare_runtime_symbols(
         print_int,
         print_double,
         print_bool,
+        println_value,
         list_empty,
         list_cons,
         list_is_empty,
@@ -351,19 +359,29 @@ fn declare_dictionary_symbols(
 ) -> NativeResult<DictionarySymbols> {
     let mut symbols = DictionarySymbols::new();
     for dict in &ir.dictionaries {
-        if let Some(symbol) = &dict.builder_symbol {
-            let mut sig = Signature::new(call_conv);
-            sig.returns.push(AbiParam::new(module.isa().pointer_type()));
-            let func_id = module
-                .declare_function(symbol, Linkage::Import, &sig)
-                .map_err(|err| {
-                    NativeError::unsupported(
-                        "CODEGEN300",
-                        format!("辞書ビルダー {symbol} の宣言に失敗しました: {err}"),
-                    )
-                })?;
-            symbols.insert((dict.classname.clone(), dict.type_repr.clone()), func_id);
-        }
+        let symbol = match &dict.builder {
+            core_ir::DictionaryBuilder::Resolved(sym) => sym,
+            core_ir::DictionaryBuilder::Unresolved => {
+                return Err(NativeError::unsupported(
+                    "CODEGEN301",
+                    format!(
+                        "辞書 {}<{}> のビルダーシンボルが解決されていません",
+                        dict.classname, dict.type_repr
+                    ),
+                ));
+            }
+        };
+        let mut sig = Signature::new(call_conv);
+        sig.returns.push(AbiParam::new(module.isa().pointer_type()));
+        let func_id = module
+            .declare_function(symbol, Linkage::Import, &sig)
+            .map_err(|err| {
+                NativeError::unsupported(
+                    "CODEGEN300",
+                    format!("辞書ビルダー {symbol} の宣言に失敗しました: {err}"),
+                )
+            })?;
+        symbols.insert((dict.classname.clone(), dict.type_repr.clone()), func_id);
     }
     Ok(symbols)
 }
@@ -412,6 +430,7 @@ fn define_functions(
                     var,
                     param.ty.clone(),
                     param.dict_type_repr.clone(),
+                    param.dict_value_ty.clone(),
                 );
             }
 
@@ -730,10 +749,12 @@ fn lower_var(
                 info.ty.clone(),
             ))
         }
-        VarKind::Function | VarKind::Primitive => Err(NativeError::unsupported(
-            "CODEGEN041",
-            format!("関数 {name} を値として扱うことは現在サポートされていません"),
-        )),
+        VarKind::Function | VarKind::Primitive | VarKind::Intrinsic => {
+            Err(NativeError::unsupported(
+                "CODEGEN041",
+                format!("関数 {name} を値として扱うことは現在サポートされていません"),
+            ))
+        }
     }
 }
 
@@ -866,28 +887,21 @@ fn lower_dictionary_primop(
             format!("演算子 {:?} は辞書情報を提供していません", op),
         )
     })?;
+    let type_repr_hint = preferred_dictionary_type_repr(&lhs, rhs.as_ref());
     let binding = env
-        .dictionary_param(info.classname)
-        .cloned()
-        .ok_or_else(|| {
-            NativeError::unsupported(
-                "CODEGEN211",
-                format!(
-                    "辞書 {} のパラメータがスコープ内に存在しません",
-                    info.classname
-                ),
-            )
-        })?;
-    ensure_dictionary_method_available(ir, &binding.classname, &binding.type_repr, info.method_id)?;
-    let operand_ty = value_ty_from_repr(&binding.type_repr).ok_or_else(|| {
-        NativeError::unsupported(
-            "CODEGEN213",
-            format!(
-                "辞書 {}<{}> の型表現をサポートしていません",
-                binding.classname, binding.type_repr
-            ),
-        )
-    })?;
+        .dictionary_param(info.classname, type_repr_hint.as_deref())?
+        .clone();
+    let dict_value_ty = ensure_dictionary_method_available(
+        ir,
+        &binding.classname,
+        &binding.type_repr,
+        info.method_id,
+    )?;
+    let operand_ty = binding
+        .value_ty
+        .clone()
+        .filter(|ty| !matches!(ty, ValueTy::Unknown))
+        .unwrap_or(dict_value_ty);
 
     let lhs = coerce_value(module, builder, runtime, lhs, &operand_ty)?;
     let rhs = match rhs {
@@ -936,40 +950,50 @@ fn lower_dictionary_primop(
     coerce_value(module, builder, runtime, lowered, target_ty)
 }
 
+fn preferred_dictionary_type_repr(
+    lhs: &LoweredValue,
+    rhs: Option<&LoweredValue>,
+) -> Option<String> {
+    dictionary_type_repr_from_value(&lhs.ty)
+        .or_else(|| rhs.and_then(|value| dictionary_type_repr_from_value(&value.ty)))
+}
+
+fn dictionary_type_repr_from_value(ty: &ValueTy) -> Option<String> {
+    match ty {
+        ValueTy::Int => Some("Int".to_string()),
+        ValueTy::Double => Some("Double".to_string()),
+        ValueTy::Bool => Some("Bool".to_string()),
+        _ => None,
+    }
+}
+
 fn ensure_dictionary_method_available(
     ir: &core_ir::Module,
     classname: &str,
     type_repr: &str,
     method_id: u64,
-) -> NativeResult<()> {
-    if let Some(dict) = ir
+) -> NativeResult<ValueTy> {
+    let dict = ir
         .dictionaries
         .iter()
         .find(|d| d.classname == classname && d.type_repr == type_repr)
-    {
-        let has_method = dict.methods.iter().any(|m| m.method_id == Some(method_id));
-        if !has_method {
-            return Err(NativeError::unsupported(
-                "CODEGEN212",
-                format!(
-                    "辞書 {}<{}> にメソッド ID {} が存在しません",
-                    classname, type_repr, method_id
-                ),
-            ));
-        }
+        .ok_or_else(|| {
+            NativeError::unsupported(
+                "CODEGEN211",
+                format!("辞書 {}<{}> が IR に存在しません", classname, type_repr),
+            )
+        })?;
+    let has_method = dict.methods.iter().any(|m| m.method_id == method_id);
+    if !has_method {
+        return Err(NativeError::unsupported(
+            "CODEGEN212",
+            format!(
+                "辞書 {}<{}> にメソッド ID {} が存在しません",
+                classname, type_repr, method_id
+            ),
+        ));
     }
-    Ok(())
-}
-
-fn value_ty_from_repr(type_repr: &str) -> Option<ValueTy> {
-    match type_repr {
-        repr if repr.eq_ignore_ascii_case("int") || repr.eq_ignore_ascii_case("integer") => {
-            Some(ValueTy::Int)
-        }
-        repr if repr.eq_ignore_ascii_case("double") => Some(ValueTy::Double),
-        repr if repr.eq_ignore_ascii_case("bool") => Some(ValueTy::Bool),
-        _ => None,
-    }
+    Ok(dict.value_ty.clone())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -994,6 +1018,11 @@ fn lower_apply(
             kind: VarKind::Primitive,
             ..
         } => lower_constructor_call(module, ir, runtime, func_ids, builder, env, name, args),
+        Expr::Var {
+            name,
+            kind: VarKind::Intrinsic,
+            ..
+        } => lower_intrinsic_call(module, ir, runtime, func_ids, builder, env, name, args),
         _ => Err(NativeError::unsupported(
             "CODEGEN070",
             "高階関数や部分適用はまだサポートされていません",
@@ -1161,6 +1190,52 @@ fn lower_constructor_call(
             args: lowered_args.into_iter().map(|lv| lv.ty).collect(),
         },
     ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn lower_intrinsic_call(
+    module: &mut ObjectModule,
+    ir: &core_ir::Module,
+    runtime: &RuntimeSymbols,
+    func_ids: &HashMap<String, FuncId>,
+    builder: &mut FunctionBuilder,
+    env: &mut CodegenEnv,
+    name: &str,
+    args: &[Expr],
+) -> NativeResult<LoweredValue> {
+    let intrinsic = intrinsics::lookup(name).ok_or_else(|| {
+        NativeError::unsupported(
+            "CODEGEN180",
+            format!("{name} は intrinsic として登録されていません"),
+        )
+    })?;
+    match intrinsic.kind {
+        IntrinsicKind::Println => {
+            lower_intrinsic_println(module, ir, runtime, func_ids, builder, env, args)
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn lower_intrinsic_println(
+    module: &mut ObjectModule,
+    ir: &core_ir::Module,
+    runtime: &RuntimeSymbols,
+    func_ids: &HashMap<String, FuncId>,
+    builder: &mut FunctionBuilder,
+    env: &mut CodegenEnv,
+    args: &[Expr],
+) -> NativeResult<LoweredValue> {
+    if args.len() != 1 {
+        return Err(NativeError::unsupported(
+            "CODEGEN181",
+            format!("println の引数数が一致しません: {}", args.len()),
+        ));
+    }
+    let value = lower_expr(module, ir, runtime, func_ids, builder, env, &args[0])?;
+    let boxed = coerce_value(module, builder, runtime, value, &ValueTy::Unknown)?;
+    let result = call_runtime(builder, module, runtime.println_value, &[boxed.value]);
+    Ok(LoweredValue::new(result, ValueTy::Unknown))
 }
 
 fn prepare_constructor_field(
@@ -1853,6 +1928,7 @@ struct DictionaryParamBinding {
     classname: String,
     type_repr: String,
     var: Variable,
+    value_ty: Option<ValueTy>,
 }
 
 #[derive(Clone)]
@@ -1862,7 +1938,8 @@ struct CodegenEnv {
     ptr_ty: Type,
     dict_symbols: DictionarySymbols,
     dict_cache: HashMap<(String, String), Value>,
-    dict_params: Vec<DictionaryParamBinding>,
+    dict_params: HashMap<(String, String), DictionaryParamBinding>,
+    dict_params_by_class: HashMap<String, Vec<String>>,
 }
 
 impl CodegenEnv {
@@ -1873,7 +1950,8 @@ impl CodegenEnv {
             ptr_ty,
             dict_symbols,
             dict_cache: HashMap::new(),
-            dict_params: Vec::new(),
+            dict_params: HashMap::new(),
+            dict_params_by_class: HashMap::new(),
         }
     }
 
@@ -1883,13 +1961,35 @@ impl CodegenEnv {
         var: Variable,
         ty: ValueTy,
         dict_type_repr: Option<String>,
+        dict_value_ty: Option<ValueTy>,
     ) {
-        if let (ValueTy::Dictionary { classname }, Some(repr)) = (&ty, &dict_type_repr) {
-            self.dict_params.push(DictionaryParamBinding {
+        if let ValueTy::Dictionary { classname } = &ty {
+            let repr = dict_type_repr.unwrap_or_else(|| {
+                panic!(
+                    "dictionary parameter {}<{}> is missing dict_type_repr",
+                    classname, name
+                )
+            });
+            let key = (classname.clone(), repr.clone());
+            let binding = DictionaryParamBinding {
                 classname: classname.clone(),
                 type_repr: repr.clone(),
                 var,
-            });
+                value_ty: dict_value_ty,
+            };
+            if self.dict_params.insert(key, binding).is_some() {
+                panic!(
+                    "duplicate dictionary parameter {}<{}> encountered",
+                    classname, repr
+                );
+            }
+            let entry = self
+                .dict_params_by_class
+                .entry(classname.clone())
+                .or_default();
+            if !entry.contains(&repr) {
+                entry.push(repr);
+            }
         }
         self.vars.insert(name, VarInfo { var, ty });
     }
@@ -1915,10 +2015,55 @@ impl CodegenEnv {
             .copied()
     }
 
-    fn dictionary_param(&self, classname: &str) -> Option<&DictionaryParamBinding> {
-        self.dict_params
-            .iter()
-            .find(|binding| binding.classname == classname)
+    fn dictionary_param(
+        &self,
+        classname: &str,
+        type_repr: Option<&str>,
+    ) -> NativeResult<&DictionaryParamBinding> {
+        if let Some(repr) = type_repr {
+            let key = (classname.to_string(), repr.to_string());
+            return self.dict_params.get(&key).ok_or_else(|| {
+                NativeError::unsupported(
+                    "CODEGEN211",
+                    format!(
+                        "辞書 {}<{}> のパラメータがスコープ内に存在しません",
+                        classname, repr
+                    ),
+                )
+            });
+        }
+        let reprs = self.dict_params_by_class.get(classname).ok_or_else(|| {
+            NativeError::unsupported(
+                "CODEGEN211",
+                format!("辞書 {} のパラメータがスコープ内に存在しません", classname),
+            )
+        })?;
+        match reprs.as_slice() {
+            [only] => {
+                let key = (classname.to_string(), only.clone());
+                self.dict_params.get(&key).ok_or_else(|| {
+                    NativeError::unsupported(
+                        "CODEGEN211",
+                        format!(
+                            "辞書 {}<{}> のパラメータがスコープ内に存在しません",
+                            classname, only
+                        ),
+                    )
+                })
+            }
+            [] => Err(NativeError::unsupported(
+                "CODEGEN211",
+                format!("辞書 {} のパラメータがスコープ内に存在しません", classname),
+            )),
+            many => Err(NativeError::unsupported(
+                "CODEGEN211",
+                format!(
+                    "辞書 {} の型表現が複数候補 ({}) あります。dict_type_repr ヒントが必要です",
+                    classname,
+                    many.join(", "),
+                ),
+            )),
+        }
     }
 
     fn ensure_dictionary(

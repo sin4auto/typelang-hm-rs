@@ -4,11 +4,12 @@
 // 関連ファイル: src/codegen/cranelift.rs, runtime_native/src/dict.rs
 
 use std::cmp::Ordering;
+use std::collections::HashSet;
 use std::io::Write;
 
 use tempfile::NamedTempFile;
 
-use crate::core_ir::DictionaryInit;
+use crate::core_ir::{DictionaryBuilder, DictionaryInit};
 
 use super::{NativeError, NativeResult};
 
@@ -34,6 +35,33 @@ pub fn generate(dictionaries: &[DictionaryInit]) -> NativeResult<Option<NamedTem
     Ok(Some(file))
 }
 
+#[allow(clippy::result_large_err)]
+/// 未解決の辞書ビルダーに自動生成シンボルを割り当てる。
+pub fn assign_missing_builders(dictionaries: &mut [DictionaryInit]) -> NativeResult<()> {
+    let mut existing: HashSet<String> = dictionaries
+        .iter()
+        .filter_map(|d| d.builder.as_str().map(ToOwned::to_owned))
+        .collect();
+    for dict in dictionaries.iter_mut() {
+        if matches!(dict.builder, DictionaryBuilder::Resolved(_)) {
+            continue;
+        }
+        let base = format!(
+            "tl_dict_build_auto_{}_{}",
+            sanitize_symbol(&dict.classname),
+            sanitize_symbol(&dict.type_repr)
+        );
+        let mut candidate = base.clone();
+        let mut counter = 0;
+        while !existing.insert(candidate.clone()) {
+            counter += 1;
+            candidate = format!("{}_{}", base, counter);
+        }
+        dict.builder = DictionaryBuilder::Resolved(candidate);
+    }
+    Ok(())
+}
+
 fn write_header<W: Write>(writer: &mut W) -> std::io::Result<()> {
     writeln!(
         writer,
@@ -43,15 +71,18 @@ fn write_header<W: Write>(writer: &mut W) -> std::io::Result<()> {
 
 #[allow(clippy::result_large_err)]
 fn write_dictionary<W: Write>(writer: &mut W, dict: &DictionaryInit) -> NativeResult<()> {
-    let builder_symbol = dict.builder_symbol.as_ref().ok_or_else(|| {
-        NativeError::unsupported(
-            "CODEGEN302",
-            format!(
-                "{}<{}> の辞書ビルダーシンボルが解決できません",
-                dict.classname, dict.type_repr
-            ),
-        )
-    })?;
+    let builder_symbol = match &dict.builder {
+        crate::core_ir::DictionaryBuilder::Resolved(sym) => sym,
+        crate::core_ir::DictionaryBuilder::Unresolved => {
+            return Err(NativeError::unsupported(
+                "CODEGEN302",
+                format!(
+                    "{}<{}> の辞書ビルダーシンボルが解決できません",
+                    dict.classname, dict.type_repr
+                ),
+            ));
+        }
+    };
     let label = format!("{}<{}>", dict.classname, dict.type_repr);
     writeln!(writer, "#[no_mangle]")?;
     writeln!(
@@ -69,33 +100,8 @@ fn write_dictionary<W: Write>(writer: &mut W, dict: &DictionaryInit) -> NativeRe
         writer,
         "        if builder.is_null() {{ return ::std::ptr::null_mut(); }}"
     )?;
-    for (idx, method) in dict.methods.iter().enumerate() {
-        let method_id = method.method_id.unwrap_or(idx as u64);
-        let signature = method.signature.as_deref().unwrap_or("(unknown)");
-        let symbol = method.symbol.as_ref().ok_or_else(|| {
-            NativeError::unsupported(
-                "CODEGEN303",
-                format!(
-                    "辞書 {}<{}> のメソッド {} にシンボルがありません",
-                    dict.classname, dict.type_repr, method.name
-                ),
-            )
-        })?;
-        writeln!(
-            writer,
-            "        let fn_value = crate::tl_value_from_ptr({symbol} as *mut c_void);"
-        )?;
-        writeln!(
-            writer,
-            "        if fn_value.as_raw().is_null() {{ return ::std::ptr::null_mut(); }}"
-        )?;
-        writeln!(
-            writer,
-            "        crate::tl_dict_builder_push_ext(builder, c\"{}\".as_ptr(), {}, c\"{}\".as_ptr(), fn_value);",
-            escape_c_literal(&method.name),
-            method_id,
-            escape_c_literal(signature)
-        )?;
+    for method in &dict.methods {
+        write_dictionary_method(writer, method)?;
     }
     writeln!(
         writer,
@@ -108,6 +114,29 @@ fn write_dictionary<W: Write>(writer: &mut W, dict: &DictionaryInit) -> NativeRe
     Ok(())
 }
 
+fn write_dictionary_method<W: Write>(
+    writer: &mut W,
+    method: &crate::core_ir::DictionaryMethod,
+) -> std::io::Result<()> {
+    let signature = method.signature.as_deref().unwrap_or("(unknown)");
+    writeln!(
+        writer,
+        "        let fn_value = crate::tl_value_from_ptr({} as *mut c_void);",
+        method.symbol
+    )?;
+    writeln!(
+        writer,
+        "        if fn_value.as_raw().is_null() {{ return ::std::ptr::null_mut(); }}"
+    )?;
+    writeln!(
+        writer,
+        "        crate::tl_dict_builder_push_ext(builder, c\"{}\".as_ptr(), {}, c\"{}\".as_ptr(), fn_value);",
+        escape_c_literal(&method.name),
+        method.method_id,
+        escape_c_literal(signature)
+    )
+}
+
 fn escape_c_literal(input: &str) -> String {
     let mut escaped = String::with_capacity(input.len());
     for ch in input.chars() {
@@ -118,4 +147,58 @@ fn escape_c_literal(input: &str) -> String {
         }
     }
     escaped
+}
+
+fn sanitize_symbol(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+        } else {
+            out.push('_');
+        }
+    }
+    if out.is_empty() {
+        out.push('_');
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn assign_missing_builders_generates_unique_symbols() {
+        let mut dicts = vec![
+            DictionaryInit {
+                classname: "Num".into(),
+                type_repr: "Custom<Int>".into(),
+                value_ty: crate::core_ir::ValueTy::Int,
+                methods: vec![],
+                scheme_repr: "Num a => a -> a".into(),
+                builder: DictionaryBuilder::Unresolved,
+                origin: "demo".into(),
+                source_span: crate::core_ir::SourceRef::default(),
+            },
+            DictionaryInit {
+                classname: "Num".into(),
+                type_repr: "Custom<Int>".into(),
+                value_ty: crate::core_ir::ValueTy::Int,
+                methods: vec![],
+                scheme_repr: "Num a => a -> a".into(),
+                builder: DictionaryBuilder::Unresolved,
+                origin: "demo2".into(),
+                source_span: crate::core_ir::SourceRef::default(),
+            },
+        ];
+        assign_missing_builders(&mut dicts).expect("assign builders");
+        let builders: Vec<_> = dicts
+            .iter()
+            .map(|d| d.builder.as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(builders.len(), 2);
+        assert_ne!(builders[0], builders[1]);
+        assert!(builders[0].starts_with("tl_dict_build_auto"));
+    }
 }

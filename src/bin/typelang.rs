@@ -201,29 +201,8 @@ fn build_native(input: &Path, out: Option<&Path>, opts: &BuildOptions) -> Result
     )
     .map_err(|e| format!("ネイティブコード生成に失敗しました: {e}"))?;
 
+    let dict_views = dictionary_views(&artifacts);
     if opts.json {
-        #[derive(Serialize)]
-        struct JsonDictionaryMethod<'a> {
-            name: &'a str,
-            signature: Option<&'a str>,
-            symbol: Option<&'a str>,
-            method_id: Option<u64>,
-        }
-        #[derive(Serialize)]
-        struct JsonSpan {
-            line: usize,
-            column: usize,
-        }
-        #[derive(Serialize)]
-        struct JsonDictionary<'a> {
-            class: &'a str,
-            r#type: &'a str,
-            builder: Option<&'a str>,
-            scheme: &'a str,
-            origin: &'a str,
-            span: JsonSpan,
-            methods: Vec<JsonDictionaryMethod<'a>>,
-        }
         #[derive(Serialize)]
         struct JsonOutput<'a> {
             status: &'static str,
@@ -231,40 +210,15 @@ fn build_native(input: &Path, out: Option<&Path>, opts: &BuildOptions) -> Result
             output: String,
             backend: &'static str,
             optim: &'static str,
-            dictionaries: Vec<JsonDictionary<'a>>,
+            dictionaries: &'a [DictionaryView<'a>],
         }
-        let dictionaries = artifacts
-            .dictionaries
-            .iter()
-            .map(|d| JsonDictionary {
-                class: &d.classname,
-                r#type: &d.type_repr,
-                builder: d.builder_symbol.as_deref(),
-                scheme: &d.scheme_repr,
-                origin: &d.origin,
-                span: JsonSpan {
-                    line: d.source_span.line,
-                    column: d.source_span.column,
-                },
-                methods: d
-                    .methods
-                    .iter()
-                    .map(|m| JsonDictionaryMethod {
-                        name: &m.name,
-                        signature: m.signature.as_deref(),
-                        symbol: m.symbol.as_deref(),
-                        method_id: m.method_id,
-                    })
-                    .collect(),
-            })
-            .collect();
         let payload = JsonOutput {
             status: "ok",
             input: input.display().to_string(),
             output: output_path.display().to_string(),
             backend: opts.backend.as_str(),
             optim: opts.optim_level.as_str(),
-            dictionaries,
+            dictionaries: &dict_views,
         };
         match to_string(&payload) {
             Ok(json) => println!("{}", json),
@@ -281,7 +235,7 @@ fn build_native(input: &Path, out: Option<&Path>, opts: &BuildOptions) -> Result
             opts.optim_level.as_str()
         );
         if opts.print_dictionaries {
-            print_dictionaries(&artifacts);
+            print_dictionary_views(&dict_views);
         }
     }
     Ok(())
@@ -295,36 +249,101 @@ fn default_output_path(input: &Path) -> PathBuf {
     PathBuf::from("target/typelang").join(stem)
 }
 
-fn print_dictionaries(artifacts: &typelang::NativeBuildArtifacts) {
-    if artifacts.dictionaries.is_empty() {
+#[derive(Serialize)]
+struct DictionaryMethodView<'a> {
+    name: &'a str,
+    signature: Option<&'a str>,
+    symbol: &'a str,
+    method_id: u64,
+}
+
+#[derive(Serialize)]
+struct DictionarySpanView {
+    line: usize,
+    column: usize,
+}
+
+#[derive(Serialize)]
+struct DictionaryView<'a> {
+    class: &'a str,
+    r#type: &'a str,
+    builder: Option<&'a str>,
+    scheme: &'a str,
+    origin: &'a str,
+    span: DictionarySpanView,
+    methods: Vec<DictionaryMethodView<'a>>,
+}
+
+impl<'a> DictionaryView<'a> {
+    fn new(dict: &'a typelang::core_ir::DictionaryInit) -> Self {
+        Self {
+            class: &dict.classname,
+            r#type: &dict.type_repr,
+            builder: dict.builder.as_str(),
+            scheme: &dict.scheme_repr,
+            origin: &dict.origin,
+            span: DictionarySpanView {
+                line: dict.source_span.line,
+                column: dict.source_span.column,
+            },
+            methods: dict
+                .methods
+                .iter()
+                .map(|m| DictionaryMethodView {
+                    name: &m.name,
+                    signature: m.signature.as_deref(),
+                    symbol: m.symbol.as_str(),
+                    method_id: m.method_id,
+                })
+                .collect(),
+        }
+    }
+}
+
+impl<'a> std::fmt::Display for DictionaryView<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "- {}<{}>", self.class, self.r#type)?;
+        if let Some(builder) = self.builder {
+            writeln!(f, "    builder: {builder}")?;
+        }
+        writeln!(
+            f,
+            "    origin: {} @ {}:{}",
+            self.origin, self.span.line, self.span.column
+        )?;
+        writeln!(f, "    scheme: {}", self.scheme)?;
+        if !self.methods.is_empty() {
+            writeln!(f, "    methods:")?;
+            for method in &self.methods {
+                let signature = method.signature.unwrap_or("(unknown)");
+                writeln!(
+                    f,
+                    "      - [{}] {} :: {} => {}",
+                    method.method_id, method.name, signature, method.symbol
+                )?;
+            }
+        }
+        Ok(())
+    }
+}
+
+fn dictionary_views<'a>(artifacts: &'a typelang::NativeBuildArtifacts) -> Vec<DictionaryView<'a>> {
+    let mut views: Vec<_> = artifacts
+        .dictionaries
+        .iter()
+        .map(DictionaryView::new)
+        .collect();
+    views.sort_by(|a, b| a.class.cmp(b.class).then_with(|| a.r#type.cmp(b.r#type)));
+    views
+}
+
+fn print_dictionary_views(views: &[DictionaryView<'_>]) {
+    if views.is_empty() {
         println!("(辞書は生成されませんでした)");
         return;
     }
     println!("辞書一覧:");
-    for dict in &artifacts.dictionaries {
-        println!("- {}<{}>", dict.classname, dict.type_repr);
-        if let Some(builder) = &dict.builder_symbol {
-            println!("    builder: {builder}");
-        }
-        println!(
-            "    origin: {} @ {}:{}",
-            dict.origin, dict.source_span.line, dict.source_span.column
-        );
-        println!("    scheme: {}", dict.scheme_repr);
-        if !dict.methods.is_empty() {
-            println!("    methods:");
-            for method in &dict.methods {
-                let signature = method.signature.as_deref().unwrap_or("(unknown)");
-                let symbol = method.symbol.as_deref().unwrap_or("(unresolved)");
-                if let Some(id) = method.method_id {
-                    println!(
-                        "      - [{}] {} :: {} => {symbol}",
-                        id, method.name, signature
-                    );
-                } else {
-                    println!("      - {} :: {} => {symbol}", method.name, signature);
-                }
-            }
-        }
+    for view in views {
+        print!("{}", view);
     }
 }

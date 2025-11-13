@@ -10,7 +10,7 @@
 
 use crate::runtime::{
     add_op, div_int_op, div_op, eq_op, ge_op, gt_op, le_op, lt_op, mod_int_op, mul_op, ne_op, powf,
-    powi, py_show, quot_int_op, rem_int_op, sub_op, PrimOp,
+    powi, println_op, py_show, quot_int_op, rem_int_op, sub_op, PrimOp,
 };
 
 /// 型推論側で利用するスキーム分類。
@@ -121,5 +121,10 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         name: "show",
         type_spec: PrimitiveTypeSpec::Show,
         op: PrimOp::unary(py_show),
+    },
+    PrimitiveDef {
+        name: "println",
+        type_spec: PrimitiveTypeSpec::Show,
+        op: PrimOp::unary(println_op),
     },
 ];

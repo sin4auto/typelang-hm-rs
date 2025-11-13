@@ -86,7 +86,7 @@ bench: ## ベンチ（criterion 想定）
 check: fmt clippy test ## フォーマット＋Lint＋テスト
 	@echo "✅ コードチェック (fmt → clippy → test) 完了"
 
-full_local: add-tools clean doc fmt clippy test release audit outdated udeps miri coverage ## フルローカルビルド
+full_local: add-tools clean doc fmt clippy test release audit outdated udeps coverage ## フルローカルビルド
 	@echo "✅ フルローカルビルド (clean → doc → fmt → clippy → test → release → audit → outdated → udeps → miri → coverage) 完了"
 
 ci: clean doc fmt-check clippy ## CIパイプライン

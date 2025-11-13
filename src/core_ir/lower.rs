@@ -3,16 +3,20 @@
 // 意図: 型検証済みプログラムをターゲット非依存な IR へ落とし込み、バックエンドから利用できるようにする
 // 関連ファイル: src/core_ir/mod.rs, src/repl/loader.rs, src/infer.rs
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, BTreeSet, HashMap},
+};
 
 use crate::ast as A;
 use crate::core_ir::{
-    Binding, ConstructorLayout, CoreIrError, DataTypeLayout, DictionaryInit, DictionaryMethod,
-    Expr, Function, Literal, MatchArm, MatchBinding, Module, Parameter, ParameterKind, PrimOp,
-    SourceRef, ValueTy, VarKind,
+    dict_specs, Binding, ConstructorLayout, CoreIrError, DataTypeLayout, DictionaryBuilder,
+    DictionaryInit, DictionaryMethod, Expr, Function, Literal, MatchArm, MatchBinding, Module,
+    Parameter, ParameterKind, PrimOp, SourceRef, ValueTy, VarKind,
 };
 use crate::evaluator;
 use crate::infer;
+use crate::intrinsics::{self, IntrinsicKind};
 use crate::repl;
 use crate::typesys::{
     Constraint as TyConstraint, QualType, Scheme, TApp, TCon, TFun, TTuple, TVar, Type, TypeEnv,
@@ -36,8 +40,10 @@ pub fn lower_program(prog: &A::Program) -> Result<Module, CoreIrError> {
     let mut type_env = infer::initial_env();
     let mut class_env = infer::initial_class_env();
     let mut value_env = evaluator::initial_env();
-    repl::load_program_into_env(prog, &mut type_env, &mut class_env, &mut value_env)
-        .map_err(|msg| CoreIrError::new(classify_loader_error(&msg), msg))?;
+    let load_result =
+        repl::load_program_into_env(prog, &mut type_env, &mut class_env, &mut value_env);
+    value_env.teardown();
+    load_result.map_err(|msg| CoreIrError::new(classify_loader_error(&msg), msg))?;
 
     let mut ctx = LoweringContext::new(type_env.clone_env());
     ctx.register_data_layouts(prog);
@@ -136,9 +142,10 @@ impl LoweringContext {
             let mut init = DictionaryInit {
                 classname: constraint.classname.clone(),
                 type_repr: type_to_string(&constraint.r#type),
+                value_ty: convert_type_with_overrides(&constraint.r#type)?,
                 methods: Vec::new(),
                 scheme_repr: scheme_to_string(scheme),
-                builder_symbol: None,
+                builder: DictionaryBuilder::Unresolved,
                 origin: origin.to_string(),
                 source_span: span,
             };
@@ -147,25 +154,18 @@ impl LoweringContext {
                 resolve_builtin_dictionary(&constraint.classname, &constraint.r#type)
             {
                 init.type_repr = resolution.type_repr.to_string();
-                init.builder_symbol = Some(resolution.builder.to_string());
+                init.builder = DictionaryBuilder::Resolved(resolution.builder.to_string());
+                init.value_ty = resolution.value_ty.clone();
                 init.methods = resolution
                     .methods
                     .iter()
                     .map(|method| DictionaryMethod {
                         name: method.name.to_string(),
-                        signature: Some(method.signature.to_string()),
-                        symbol: Some(method.symbol.to_string()),
-                        method_id: Some(method.method_id),
+                        signature: Some(method.signature.clone()),
+                        symbol: method.symbol.to_string(),
+                        method_id: method.method_id,
                     })
                     .collect();
-            } else {
-                return Err(CoreIrError::new(
-                    "COREIR401",
-                    format!(
-                        "{} で辞書 {}<{}> を解決できません",
-                        origin, constraint.classname, init.type_repr
-                    ),
-                ));
             }
 
             let repr = init.type_repr.clone();
@@ -216,6 +216,7 @@ impl LoweringContext {
                             classname: classname.clone(),
                         },
                         spec.dict_type_repr.clone(),
+                        spec.dict_value_ty.clone(),
                     ));
                 }
                 ParameterKind::Value => {
@@ -230,6 +231,7 @@ impl LoweringContext {
                         param_name.clone(),
                         spec.ty.clone(),
                         ParameterKind::Value,
+                        None,
                         None,
                     ));
                 }
@@ -373,6 +375,14 @@ impl LoweringContext {
                 kind: VarKind::Function,
             });
         }
+        if let Some(intr) = intrinsics::lookup(name) {
+            let ty = intrinsic_function_ty(intr.kind);
+            return Ok(Expr::Var {
+                name: name.into(),
+                ty,
+                kind: VarKind::Intrinsic,
+            });
+        }
         if let Some(scheme) = self.type_env.lookup(name) {
             let sig = FunctionSig::from_scheme(name, scheme)?;
             let params = sig.param_specs.iter().map(|spec| spec.ty.clone()).collect();
@@ -482,14 +492,25 @@ impl LoweringContext {
         }
 
         let lowered_args = if let Expr::Var { name, kind, .. } = &callee {
-            if matches!(kind, VarKind::Function) {
-                if let Some(sig) = self.function_sigs.get(name) {
-                    self.inject_dictionary_args(sig, lowered_args)?
-                } else {
-                    lowered_args
+            match kind {
+                VarKind::Function => {
+                    let param_specs: Option<Cow<'_, [ParameterSpec]>> =
+                        if let Some(sig) = self.function_sigs.get(name) {
+                            Some(Cow::Borrowed(&sig.param_specs))
+                        } else if let Some(scheme) = self.type_env.lookup(name) {
+                            let sig = FunctionSig::from_scheme(name, scheme)?;
+                            Some(Cow::Owned(sig.param_specs))
+                        } else {
+                            None
+                        };
+                    if let Some(specs) = param_specs {
+                        self.inject_dictionary_args(&specs, lowered_args)?
+                    } else {
+                        lowered_args
+                    }
                 }
-            } else {
-                lowered_args
+                VarKind::Intrinsic => lowered_args,
+                _ => lowered_args,
             }
         } else {
             lowered_args
@@ -668,11 +689,10 @@ impl LoweringContext {
 
     fn inject_dictionary_args(
         &self,
-        sig: &FunctionSig,
+        param_specs: &[ParameterSpec],
         value_args: Vec<Expr>,
     ) -> Result<Vec<Expr>, CoreIrError> {
-        let expected_value_args = sig
-            .param_specs
+        let expected_value_args = param_specs
             .iter()
             .filter(|spec| matches!(spec.kind, ParameterKind::Value))
             .count();
@@ -687,8 +707,8 @@ impl LoweringContext {
             ));
         }
         let mut value_iter = value_args.into_iter();
-        let mut final_args = Vec::with_capacity(sig.param_specs.len());
-        for spec in &sig.param_specs {
+        let mut final_args = Vec::with_capacity(param_specs.len());
+        for spec in param_specs {
             match &spec.kind {
                 ParameterKind::Dictionary { classname } => {
                     let type_repr = spec
@@ -752,6 +772,7 @@ struct ParameterSpec {
     ty: ValueTy,
     kind: ParameterKind,
     dict_type_repr: Option<String>,
+    dict_value_ty: Option<ValueTy>,
 }
 
 #[derive(Clone, Debug)]
@@ -764,6 +785,7 @@ impl FunctionSig {
     fn from_scheme(_name: &str, scheme: &Scheme) -> Result<Self, CoreIrError> {
         let mut specs = Vec::new();
         for constraint in &scheme.qual.constraints {
+            let dict_value_ty = convert_type_with_overrides(&constraint.r#type)?;
             specs.push(ParameterSpec {
                 ty: ValueTy::Dictionary {
                     classname: constraint.classname.clone(),
@@ -772,6 +794,7 @@ impl FunctionSig {
                     classname: constraint.classname.clone(),
                 },
                 dict_type_repr: None,
+                dict_value_ty: Some(dict_value_ty),
             });
         }
         let (value_params, result_ty) = flatten_fun_type_types(&scheme.qual.r#type);
@@ -780,6 +803,7 @@ impl FunctionSig {
                 ty: convert_type_with_overrides(&param_ty)?,
                 kind: ParameterKind::Value,
                 dict_type_repr: None,
+                dict_value_ty: None,
             });
         }
         let result = convert_type_with_overrides(&result_ty)?;
@@ -856,6 +880,9 @@ fn convert_type(ty: &Type) -> Result<ValueTy, CoreIrError> {
             if let Type::TCon(TCon { name }) = func.as_ref() {
                 if name == "[]" {
                     let elem_ty = convert_type(arg)?;
+                    if matches!(elem_ty, ValueTy::Char) {
+                        return Ok(ValueTy::String);
+                    }
                     return Ok(ValueTy::List(Box::new(elem_ty)));
                 }
             }
@@ -937,6 +964,15 @@ fn flatten_app<'a>(func: &'a A::Expr, arg: &'a A::Expr) -> (&'a A::Expr, Vec<&'a
     (head, args)
 }
 
+fn intrinsic_function_ty(kind: IntrinsicKind) -> ValueTy {
+    match kind {
+        IntrinsicKind::Println => ValueTy::Function {
+            params: vec![ValueTy::Unknown],
+            result: Box::new(ValueTy::Unknown),
+        },
+    }
+}
+
 fn infer_apply_type(func: &Expr, args: &[Expr]) -> Result<ValueTy, CoreIrError> {
     match func.ty() {
         ValueTy::Function { params, result } => {
@@ -1010,136 +1046,375 @@ impl BinOpMapping {
     }
 }
 
-fn map_binop(op: &str, lhs_ty: &ValueTy, rhs_ty: &ValueTy) -> Result<BinOpMapping, CoreIrError> {
-    let needs_dict = matches!(lhs_ty, ValueTy::Unknown) || matches!(rhs_ty, ValueTy::Unknown);
-    let mismatch = |code: &'static str, symbol: &str| {
+#[derive(Clone, Copy)]
+enum OperandKind {
+    Int,
+    Double,
+    Bool,
+}
+
+impl OperandKind {
+    fn matches(self, ty: &ValueTy) -> bool {
+        matches!(
+            (self, ty),
+            (OperandKind::Int, ValueTy::Int)
+                | (OperandKind::Double, ValueTy::Double)
+                | (OperandKind::Bool, ValueTy::Bool)
+        )
+    }
+}
+
+struct BinOpCase {
+    lhs: OperandKind,
+    rhs: OperandKind,
+    prim_op: PrimOp,
+    result: ValueTy,
+}
+
+impl BinOpCase {
+    fn matches(&self, lhs: &ValueTy, rhs: &ValueTy) -> bool {
+        self.lhs.matches(lhs) && self.rhs.matches(rhs)
+    }
+}
+
+#[derive(Clone)]
+struct BinOpDictFallback {
+    prim_op: PrimOp,
+    result: ValueTy,
+}
+
+struct BinOpSpec {
+    symbol: &'static str,
+    error_code: &'static str,
+    cases: &'static [BinOpCase],
+    dict_fallback: Option<BinOpDictFallback>,
+}
+
+impl BinOpSpec {
+    fn lookup_case(&self, lhs: &ValueTy, rhs: &ValueTy) -> Option<&BinOpCase> {
+        self.cases.iter().find(|case| case.matches(lhs, rhs))
+    }
+
+    fn type_mismatch(&self, lhs: &ValueTy, rhs: &ValueTy) -> CoreIrError {
         CoreIrError::new(
-            code,
+            self.error_code,
             format!(
                 "{} 演算子の型が一致しません: {:?} vs {:?}",
-                symbol, lhs_ty, rhs_ty
+                self.symbol, lhs, rhs
             ),
         )
-    };
-    match op {
-        "+" => match (lhs_ty, rhs_ty) {
-            (ValueTy::Int, ValueTy::Int) => Ok(BinOpMapping::direct(PrimOp::AddInt, ValueTy::Int)),
-            (ValueTy::Double, ValueTy::Double) => {
-                Ok(BinOpMapping::direct(PrimOp::AddDouble, ValueTy::Double))
-            }
-            _ if needs_dict => Ok(BinOpMapping::dictionary(PrimOp::AddInt, ValueTy::Unknown)),
-            _ => Err(mismatch("COREIR141", "+")),
-        },
-        "-" => match (lhs_ty, rhs_ty) {
-            (ValueTy::Int, ValueTy::Int) => Ok(BinOpMapping::direct(PrimOp::SubInt, ValueTy::Int)),
-            (ValueTy::Double, ValueTy::Double) => {
-                Ok(BinOpMapping::direct(PrimOp::SubDouble, ValueTy::Double))
-            }
-            _ if needs_dict => Ok(BinOpMapping::dictionary(PrimOp::SubInt, ValueTy::Unknown)),
-            _ => Err(mismatch("COREIR142", "-")),
-        },
-        "*" => match (lhs_ty, rhs_ty) {
-            (ValueTy::Int, ValueTy::Int) => Ok(BinOpMapping::direct(PrimOp::MulInt, ValueTy::Int)),
-            (ValueTy::Double, ValueTy::Double) => {
-                Ok(BinOpMapping::direct(PrimOp::MulDouble, ValueTy::Double))
-            }
-            _ if needs_dict => Ok(BinOpMapping::dictionary(PrimOp::MulInt, ValueTy::Unknown)),
-            _ => Err(mismatch("COREIR143", "*")),
-        },
-        "/" => match (lhs_ty, rhs_ty) {
-            (ValueTy::Double, ValueTy::Double) => {
-                Ok(BinOpMapping::direct(PrimOp::DivDouble, ValueTy::Double))
-            }
-            _ if needs_dict => Ok(BinOpMapping::dictionary(
-                PrimOp::DivDouble,
-                ValueTy::Unknown,
-            )),
-            _ => Err(mismatch("COREIR144", "/")),
-        },
-        "div" => match (lhs_ty, rhs_ty) {
-            (ValueTy::Int, ValueTy::Int) => Ok(BinOpMapping::direct(PrimOp::DivInt, ValueTy::Int)),
-            _ if needs_dict => Ok(BinOpMapping::dictionary(PrimOp::DivInt, ValueTy::Unknown)),
-            _ => Err(mismatch("COREIR145", "div")),
-        },
-        "mod" => match (lhs_ty, rhs_ty) {
-            (ValueTy::Int, ValueTy::Int) => Ok(BinOpMapping::direct(PrimOp::ModInt, ValueTy::Int)),
-            _ if needs_dict => Ok(BinOpMapping::dictionary(PrimOp::ModInt, ValueTy::Unknown)),
-            _ => Err(mismatch("COREIR146", "mod")),
-        },
-        "==" => match (lhs_ty, rhs_ty) {
-            (ValueTy::Int, ValueTy::Int) | (ValueTy::Bool, ValueTy::Bool) => {
-                Ok(BinOpMapping::direct(PrimOp::EqInt, ValueTy::Bool))
-            }
-            (ValueTy::Double, ValueTy::Double) => {
-                Ok(BinOpMapping::direct(PrimOp::EqDouble, ValueTy::Bool))
-            }
-            _ if needs_dict => Ok(BinOpMapping::dictionary(PrimOp::EqInt, ValueTy::Bool)),
-            _ => Err(mismatch("COREIR147", "==")),
-        },
-        "/=" => match (lhs_ty, rhs_ty) {
-            (ValueTy::Int, ValueTy::Int) | (ValueTy::Bool, ValueTy::Bool) => {
-                Ok(BinOpMapping::direct(PrimOp::NeqInt, ValueTy::Bool))
-            }
-            (ValueTy::Double, ValueTy::Double) => {
-                Ok(BinOpMapping::direct(PrimOp::NeqDouble, ValueTy::Bool))
-            }
-            _ if needs_dict => Ok(BinOpMapping::dictionary(PrimOp::NeqInt, ValueTy::Bool)),
-            _ => Err(mismatch("COREIR148", "/=")),
-        },
-        "<" => match (lhs_ty, rhs_ty) {
-            (ValueTy::Int, ValueTy::Int) => Ok(BinOpMapping::direct(PrimOp::LtInt, ValueTy::Bool)),
-            (ValueTy::Double, ValueTy::Double) => {
-                Ok(BinOpMapping::direct(PrimOp::LtDouble, ValueTy::Bool))
-            }
-            _ if needs_dict => Ok(BinOpMapping::dictionary(PrimOp::LtInt, ValueTy::Bool)),
-            _ => Err(mismatch("COREIR149", "<")),
-        },
-        "<=" => match (lhs_ty, rhs_ty) {
-            (ValueTy::Int, ValueTy::Int) => Ok(BinOpMapping::direct(PrimOp::LeInt, ValueTy::Bool)),
-            (ValueTy::Double, ValueTy::Double) => {
-                Ok(BinOpMapping::direct(PrimOp::LeDouble, ValueTy::Bool))
-            }
-            _ if needs_dict => Ok(BinOpMapping::dictionary(PrimOp::LeInt, ValueTy::Bool)),
-            _ => Err(mismatch("COREIR150", "<=")),
-        },
-        ">" => match (lhs_ty, rhs_ty) {
-            (ValueTy::Int, ValueTy::Int) => Ok(BinOpMapping::direct(PrimOp::GtInt, ValueTy::Bool)),
-            (ValueTy::Double, ValueTy::Double) => {
-                Ok(BinOpMapping::direct(PrimOp::GtDouble, ValueTy::Bool))
-            }
-            _ if needs_dict => Ok(BinOpMapping::dictionary(PrimOp::GtInt, ValueTy::Bool)),
-            _ => Err(mismatch("COREIR151", ">")),
-        },
-        ">=" => match (lhs_ty, rhs_ty) {
-            (ValueTy::Int, ValueTy::Int) => Ok(BinOpMapping::direct(PrimOp::GeInt, ValueTy::Bool)),
-            (ValueTy::Double, ValueTy::Double) => {
-                Ok(BinOpMapping::direct(PrimOp::GeDouble, ValueTy::Bool))
-            }
-            _ if needs_dict => Ok(BinOpMapping::dictionary(PrimOp::GeInt, ValueTy::Bool)),
-            _ => Err(mismatch("COREIR152", ">=")),
-        },
-        "&&" => match (lhs_ty, rhs_ty) {
-            (ValueTy::Bool, ValueTy::Bool) => {
-                Ok(BinOpMapping::direct(PrimOp::AndBool, ValueTy::Bool))
-            }
-            _ if needs_dict => Ok(BinOpMapping::dictionary(PrimOp::AndBool, ValueTy::Bool)),
-            _ => Err(mismatch("COREIR153", "&&")),
-        },
-        "||" => match (lhs_ty, rhs_ty) {
-            (ValueTy::Bool, ValueTy::Bool) => {
-                Ok(BinOpMapping::direct(PrimOp::OrBool, ValueTy::Bool))
-            }
-            _ if needs_dict => Ok(BinOpMapping::dictionary(PrimOp::OrBool, ValueTy::Bool)),
-            _ => Err(mismatch("COREIR154", "||")),
-        },
-        other => Err(CoreIrError::new(
-            "COREIR140",
-            format!(
-                "演算子 {} はまだネイティブバックエンドで対応していません",
-                other
-            ),
-        )),
     }
+}
+
+const BINOP_SPECS: &[BinOpSpec] = &[
+    BinOpSpec {
+        symbol: "+",
+        error_code: "COREIR141",
+        cases: &[
+            BinOpCase {
+                lhs: OperandKind::Int,
+                rhs: OperandKind::Int,
+                prim_op: PrimOp::AddInt,
+                result: ValueTy::Int,
+            },
+            BinOpCase {
+                lhs: OperandKind::Double,
+                rhs: OperandKind::Double,
+                prim_op: PrimOp::AddDouble,
+                result: ValueTy::Double,
+            },
+        ],
+        dict_fallback: Some(BinOpDictFallback {
+            prim_op: PrimOp::AddInt,
+            result: ValueTy::Unknown,
+        }),
+    },
+    BinOpSpec {
+        symbol: "-",
+        error_code: "COREIR142",
+        cases: &[
+            BinOpCase {
+                lhs: OperandKind::Int,
+                rhs: OperandKind::Int,
+                prim_op: PrimOp::SubInt,
+                result: ValueTy::Int,
+            },
+            BinOpCase {
+                lhs: OperandKind::Double,
+                rhs: OperandKind::Double,
+                prim_op: PrimOp::SubDouble,
+                result: ValueTy::Double,
+            },
+        ],
+        dict_fallback: Some(BinOpDictFallback {
+            prim_op: PrimOp::SubInt,
+            result: ValueTy::Unknown,
+        }),
+    },
+    BinOpSpec {
+        symbol: "*",
+        error_code: "COREIR143",
+        cases: &[
+            BinOpCase {
+                lhs: OperandKind::Int,
+                rhs: OperandKind::Int,
+                prim_op: PrimOp::MulInt,
+                result: ValueTy::Int,
+            },
+            BinOpCase {
+                lhs: OperandKind::Double,
+                rhs: OperandKind::Double,
+                prim_op: PrimOp::MulDouble,
+                result: ValueTy::Double,
+            },
+        ],
+        dict_fallback: Some(BinOpDictFallback {
+            prim_op: PrimOp::MulInt,
+            result: ValueTy::Unknown,
+        }),
+    },
+    BinOpSpec {
+        symbol: "/",
+        error_code: "COREIR144",
+        cases: &[BinOpCase {
+            lhs: OperandKind::Double,
+            rhs: OperandKind::Double,
+            prim_op: PrimOp::DivDouble,
+            result: ValueTy::Double,
+        }],
+        dict_fallback: Some(BinOpDictFallback {
+            prim_op: PrimOp::DivDouble,
+            result: ValueTy::Unknown,
+        }),
+    },
+    BinOpSpec {
+        symbol: "div",
+        error_code: "COREIR145",
+        cases: &[BinOpCase {
+            lhs: OperandKind::Int,
+            rhs: OperandKind::Int,
+            prim_op: PrimOp::DivInt,
+            result: ValueTy::Int,
+        }],
+        dict_fallback: Some(BinOpDictFallback {
+            prim_op: PrimOp::DivInt,
+            result: ValueTy::Unknown,
+        }),
+    },
+    BinOpSpec {
+        symbol: "mod",
+        error_code: "COREIR146",
+        cases: &[BinOpCase {
+            lhs: OperandKind::Int,
+            rhs: OperandKind::Int,
+            prim_op: PrimOp::ModInt,
+            result: ValueTy::Int,
+        }],
+        dict_fallback: Some(BinOpDictFallback {
+            prim_op: PrimOp::ModInt,
+            result: ValueTy::Unknown,
+        }),
+    },
+    BinOpSpec {
+        symbol: "==",
+        error_code: "COREIR147",
+        cases: &[
+            BinOpCase {
+                lhs: OperandKind::Int,
+                rhs: OperandKind::Int,
+                prim_op: PrimOp::EqInt,
+                result: ValueTy::Bool,
+            },
+            BinOpCase {
+                lhs: OperandKind::Bool,
+                rhs: OperandKind::Bool,
+                prim_op: PrimOp::EqInt,
+                result: ValueTy::Bool,
+            },
+            BinOpCase {
+                lhs: OperandKind::Double,
+                rhs: OperandKind::Double,
+                prim_op: PrimOp::EqDouble,
+                result: ValueTy::Bool,
+            },
+        ],
+        dict_fallback: Some(BinOpDictFallback {
+            prim_op: PrimOp::EqInt,
+            result: ValueTy::Bool,
+        }),
+    },
+    BinOpSpec {
+        symbol: "/=",
+        error_code: "COREIR148",
+        cases: &[
+            BinOpCase {
+                lhs: OperandKind::Int,
+                rhs: OperandKind::Int,
+                prim_op: PrimOp::NeqInt,
+                result: ValueTy::Bool,
+            },
+            BinOpCase {
+                lhs: OperandKind::Bool,
+                rhs: OperandKind::Bool,
+                prim_op: PrimOp::NeqInt,
+                result: ValueTy::Bool,
+            },
+            BinOpCase {
+                lhs: OperandKind::Double,
+                rhs: OperandKind::Double,
+                prim_op: PrimOp::NeqDouble,
+                result: ValueTy::Bool,
+            },
+        ],
+        dict_fallback: Some(BinOpDictFallback {
+            prim_op: PrimOp::NeqInt,
+            result: ValueTy::Bool,
+        }),
+    },
+    BinOpSpec {
+        symbol: "<",
+        error_code: "COREIR149",
+        cases: &[
+            BinOpCase {
+                lhs: OperandKind::Int,
+                rhs: OperandKind::Int,
+                prim_op: PrimOp::LtInt,
+                result: ValueTy::Bool,
+            },
+            BinOpCase {
+                lhs: OperandKind::Double,
+                rhs: OperandKind::Double,
+                prim_op: PrimOp::LtDouble,
+                result: ValueTy::Bool,
+            },
+        ],
+        dict_fallback: Some(BinOpDictFallback {
+            prim_op: PrimOp::LtInt,
+            result: ValueTy::Bool,
+        }),
+    },
+    BinOpSpec {
+        symbol: "<=",
+        error_code: "COREIR150",
+        cases: &[
+            BinOpCase {
+                lhs: OperandKind::Int,
+                rhs: OperandKind::Int,
+                prim_op: PrimOp::LeInt,
+                result: ValueTy::Bool,
+            },
+            BinOpCase {
+                lhs: OperandKind::Double,
+                rhs: OperandKind::Double,
+                prim_op: PrimOp::LeDouble,
+                result: ValueTy::Bool,
+            },
+        ],
+        dict_fallback: Some(BinOpDictFallback {
+            prim_op: PrimOp::LeInt,
+            result: ValueTy::Bool,
+        }),
+    },
+    BinOpSpec {
+        symbol: ">",
+        error_code: "COREIR151",
+        cases: &[
+            BinOpCase {
+                lhs: OperandKind::Int,
+                rhs: OperandKind::Int,
+                prim_op: PrimOp::GtInt,
+                result: ValueTy::Bool,
+            },
+            BinOpCase {
+                lhs: OperandKind::Double,
+                rhs: OperandKind::Double,
+                prim_op: PrimOp::GtDouble,
+                result: ValueTy::Bool,
+            },
+        ],
+        dict_fallback: Some(BinOpDictFallback {
+            prim_op: PrimOp::GtInt,
+            result: ValueTy::Bool,
+        }),
+    },
+    BinOpSpec {
+        symbol: ">=",
+        error_code: "COREIR152",
+        cases: &[
+            BinOpCase {
+                lhs: OperandKind::Int,
+                rhs: OperandKind::Int,
+                prim_op: PrimOp::GeInt,
+                result: ValueTy::Bool,
+            },
+            BinOpCase {
+                lhs: OperandKind::Double,
+                rhs: OperandKind::Double,
+                prim_op: PrimOp::GeDouble,
+                result: ValueTy::Bool,
+            },
+        ],
+        dict_fallback: Some(BinOpDictFallback {
+            prim_op: PrimOp::GeInt,
+            result: ValueTy::Bool,
+        }),
+    },
+    BinOpSpec {
+        symbol: "&&",
+        error_code: "COREIR153",
+        cases: &[BinOpCase {
+            lhs: OperandKind::Bool,
+            rhs: OperandKind::Bool,
+            prim_op: PrimOp::AndBool,
+            result: ValueTy::Bool,
+        }],
+        dict_fallback: Some(BinOpDictFallback {
+            prim_op: PrimOp::AndBool,
+            result: ValueTy::Bool,
+        }),
+    },
+    BinOpSpec {
+        symbol: "||",
+        error_code: "COREIR154",
+        cases: &[BinOpCase {
+            lhs: OperandKind::Bool,
+            rhs: OperandKind::Bool,
+            prim_op: PrimOp::OrBool,
+            result: ValueTy::Bool,
+        }],
+        dict_fallback: Some(BinOpDictFallback {
+            prim_op: PrimOp::OrBool,
+            result: ValueTy::Bool,
+        }),
+    },
+];
+
+fn map_binop(op: &str, lhs_ty: &ValueTy, rhs_ty: &ValueTy) -> Result<BinOpMapping, CoreIrError> {
+    let spec = BINOP_SPECS
+        .iter()
+        .find(|spec| spec.symbol == op)
+        .ok_or_else(|| {
+            CoreIrError::new(
+                "COREIR140",
+                format!(
+                    "演算子 {} はまだネイティブバックエンドで対応していません",
+                    op
+                ),
+            )
+        })?;
+
+    if let Some(case) = spec.lookup_case(lhs_ty, rhs_ty) {
+        return Ok(BinOpMapping::direct(case.prim_op, case.result.clone()));
+    }
+
+    let needs_dict = matches!(lhs_ty, ValueTy::Unknown) || matches!(rhs_ty, ValueTy::Unknown);
+    if needs_dict {
+        if let Some(dict) = &spec.dict_fallback {
+            return Ok(BinOpMapping::dictionary(dict.prim_op, dict.result.clone()));
+        }
+    }
+
+    Err(spec.type_mismatch(lhs_ty, rhs_ty))
 }
 
 fn type_expr_to_value_ty(expr: &A::TypeExpr, subst: &HashMap<String, ValueTy>) -> ValueTy {
@@ -1228,291 +1503,210 @@ fn type_to_string(ty: &Type) -> String {
 
 struct DictionaryResolution {
     builder: &'static str,
-    methods: &'static [BuiltinDictionaryMethodSpec],
+    methods: Vec<DictionaryResolutionMethod>,
     type_repr: &'static str,
+    value_ty: ValueTy,
 }
 
-struct BuiltinDictionaryMethodSpec {
-    method_id: u64,
+struct DictionaryResolutionMethod {
     name: &'static str,
-    signature: &'static str,
+    signature: String,
     symbol: &'static str,
+    method_id: u64,
 }
 
-const NUM_INT_METHODS: &[BuiltinDictionaryMethodSpec] = &[
-    BuiltinDictionaryMethodSpec {
-        method_id: 0,
-        name: "add",
-        signature: "Int -> Int -> Int",
-        symbol: "tl_num_int_add",
-    },
-    BuiltinDictionaryMethodSpec {
-        method_id: 1,
-        name: "sub",
-        signature: "Int -> Int -> Int",
-        symbol: "tl_num_int_sub",
-    },
-    BuiltinDictionaryMethodSpec {
-        method_id: 2,
-        name: "mul",
-        signature: "Int -> Int -> Int",
-        symbol: "tl_num_int_mul",
-    },
-    BuiltinDictionaryMethodSpec {
-        method_id: 3,
-        name: "fromInt",
-        signature: "Int -> Int",
-        symbol: "tl_num_int_from_int",
-    },
+const NUM_INT_METHOD_SYMBOLS: &[(&str, &str)] = &[
+    ("add", "tl_num_int_add"),
+    ("sub", "tl_num_int_sub"),
+    ("mul", "tl_num_int_mul"),
+    ("fromInt", "tl_num_int_from_int"),
 ];
 
-const NUM_DOUBLE_METHODS: &[BuiltinDictionaryMethodSpec] = &[
-    BuiltinDictionaryMethodSpec {
-        method_id: 0,
-        name: "add",
-        signature: "Double -> Double -> Double",
-        symbol: "tl_num_double_add",
-    },
-    BuiltinDictionaryMethodSpec {
-        method_id: 1,
-        name: "sub",
-        signature: "Double -> Double -> Double",
-        symbol: "tl_num_double_sub",
-    },
-    BuiltinDictionaryMethodSpec {
-        method_id: 2,
-        name: "mul",
-        signature: "Double -> Double -> Double",
-        symbol: "tl_num_double_mul",
-    },
-    BuiltinDictionaryMethodSpec {
-        method_id: 3,
-        name: "fromInt",
-        signature: "Int -> Double",
-        symbol: "tl_num_double_from_int",
-    },
+const NUM_DOUBLE_METHOD_SYMBOLS: &[(&str, &str)] = &[
+    ("add", "tl_num_double_add"),
+    ("sub", "tl_num_double_sub"),
+    ("mul", "tl_num_double_mul"),
+    ("fromInt", "tl_num_double_from_int"),
 ];
 
-const FRACTIONAL_DOUBLE_METHODS: &[BuiltinDictionaryMethodSpec] = &[BuiltinDictionaryMethodSpec {
-    method_id: 0,
-    name: "div",
-    signature: "Double -> Double -> Double",
-    symbol: "tl_fractional_double_div",
-}];
+const FRACTIONAL_DOUBLE_METHOD_SYMBOLS: &[(&str, &str)] = &[("div", "tl_fractional_double_div")];
 
-const INTEGRAL_INT_METHODS: &[BuiltinDictionaryMethodSpec] = &[
-    BuiltinDictionaryMethodSpec {
-        method_id: 0,
-        name: "div",
-        signature: "Int -> Int -> Int",
-        symbol: "tl_integral_int_div",
-    },
-    BuiltinDictionaryMethodSpec {
-        method_id: 1,
-        name: "mod",
-        signature: "Int -> Int -> Int",
-        symbol: "tl_integral_int_mod",
-    },
+const INTEGRAL_INT_METHOD_SYMBOLS: &[(&str, &str)] = &[
+    ("div", "tl_integral_int_div"),
+    ("mod", "tl_integral_int_mod"),
 ];
 
-const EQ_INT_METHODS: &[BuiltinDictionaryMethodSpec] = &[
-    BuiltinDictionaryMethodSpec {
-        method_id: 0,
-        name: "eq",
-        signature: "Int -> Int -> Bool",
-        symbol: "tl_eq_int",
-    },
-    BuiltinDictionaryMethodSpec {
-        method_id: 1,
-        name: "neq",
-        signature: "Int -> Int -> Bool",
-        symbol: "tl_neq_int",
-    },
+const EQ_INT_METHOD_SYMBOLS: &[(&str, &str)] = &[("eq", "tl_eq_int"), ("neq", "tl_neq_int")];
+
+const EQ_DOUBLE_METHOD_SYMBOLS: &[(&str, &str)] =
+    &[("eq", "tl_eq_double"), ("neq", "tl_neq_double")];
+
+const EQ_BOOL_METHOD_SYMBOLS: &[(&str, &str)] = &[("eq", "tl_eq_bool"), ("neq", "tl_neq_bool")];
+
+const ORD_INT_METHOD_SYMBOLS: &[(&str, &str)] = &[
+    ("lt", "tl_ord_int_lt"),
+    ("le", "tl_ord_int_le"),
+    ("gt", "tl_ord_int_gt"),
+    ("ge", "tl_ord_int_ge"),
 ];
 
-const EQ_DOUBLE_METHODS: &[BuiltinDictionaryMethodSpec] = &[
-    BuiltinDictionaryMethodSpec {
-        method_id: 0,
-        name: "eq",
-        signature: "Double -> Double -> Bool",
-        symbol: "tl_eq_double",
-    },
-    BuiltinDictionaryMethodSpec {
-        method_id: 1,
-        name: "neq",
-        signature: "Double -> Double -> Bool",
-        symbol: "tl_neq_double",
-    },
+const ORD_DOUBLE_METHOD_SYMBOLS: &[(&str, &str)] = &[
+    ("lt", "tl_ord_double_lt"),
+    ("le", "tl_ord_double_le"),
+    ("gt", "tl_ord_double_gt"),
+    ("ge", "tl_ord_double_ge"),
 ];
 
-const EQ_BOOL_METHODS: &[BuiltinDictionaryMethodSpec] = &[
-    BuiltinDictionaryMethodSpec {
-        method_id: 0,
-        name: "eq",
-        signature: "Bool -> Bool -> Bool",
-        symbol: "tl_eq_bool",
-    },
-    BuiltinDictionaryMethodSpec {
-        method_id: 1,
-        name: "neq",
-        signature: "Bool -> Bool -> Bool",
-        symbol: "tl_neq_bool",
-    },
+const BOOL_LOGIC_METHOD_SYMBOLS: &[(&str, &str)] = &[
+    ("and", "tl_bool_logic_and"),
+    ("or", "tl_bool_logic_or"),
+    ("not", "tl_bool_logic_not"),
 ];
 
-const ORD_INT_METHODS: &[BuiltinDictionaryMethodSpec] = &[
-    BuiltinDictionaryMethodSpec {
-        method_id: 0,
-        name: "lt",
-        signature: "Int -> Int -> Bool",
-        symbol: "tl_ord_int_lt",
-    },
-    BuiltinDictionaryMethodSpec {
-        method_id: 1,
-        name: "le",
-        signature: "Int -> Int -> Bool",
-        symbol: "tl_ord_int_le",
-    },
-    BuiltinDictionaryMethodSpec {
-        method_id: 2,
-        name: "gt",
-        signature: "Int -> Int -> Bool",
-        symbol: "tl_ord_int_gt",
-    },
-    BuiltinDictionaryMethodSpec {
-        method_id: 3,
-        name: "ge",
-        signature: "Int -> Int -> Bool",
-        symbol: "tl_ord_int_ge",
-    },
-];
-
-const ORD_DOUBLE_METHODS: &[BuiltinDictionaryMethodSpec] = &[
-    BuiltinDictionaryMethodSpec {
-        method_id: 0,
-        name: "lt",
-        signature: "Double -> Double -> Bool",
-        symbol: "tl_ord_double_lt",
-    },
-    BuiltinDictionaryMethodSpec {
-        method_id: 1,
-        name: "le",
-        signature: "Double -> Double -> Bool",
-        symbol: "tl_ord_double_le",
-    },
-    BuiltinDictionaryMethodSpec {
-        method_id: 2,
-        name: "gt",
-        signature: "Double -> Double -> Bool",
-        symbol: "tl_ord_double_gt",
-    },
-    BuiltinDictionaryMethodSpec {
-        method_id: 3,
-        name: "ge",
-        signature: "Double -> Double -> Bool",
-        symbol: "tl_ord_double_ge",
-    },
-];
-
-const BOOL_LOGIC_METHODS: &[BuiltinDictionaryMethodSpec] = &[
-    BuiltinDictionaryMethodSpec {
-        method_id: 0,
-        name: "and",
-        signature: "Bool -> Bool -> Bool",
-        symbol: "tl_bool_logic_and",
-    },
-    BuiltinDictionaryMethodSpec {
-        method_id: 1,
-        name: "or",
-        signature: "Bool -> Bool -> Bool",
-        symbol: "tl_bool_logic_or",
-    },
-    BuiltinDictionaryMethodSpec {
-        method_id: 2,
-        name: "not",
-        signature: "Bool -> Bool",
-        symbol: "tl_bool_logic_not",
-    },
-];
-
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum BuiltinTypeKind {
     Int,
     Double,
     Bool,
 }
 
+#[derive(Clone)]
+struct BuiltinDictionaryDescriptor {
+    classname: &'static str,
+    target: BuiltinTypeKind,
+    type_repr: &'static str,
+    builder: &'static str,
+    value_ty: ValueTy,
+    method_symbols: &'static [(&'static str, &'static str)],
+}
+
+const BUILTIN_DICTIONARY_DESCRIPTORS: &[BuiltinDictionaryDescriptor] = &[
+    BuiltinDictionaryDescriptor {
+        classname: "Num",
+        target: BuiltinTypeKind::Int,
+        type_repr: "Int",
+        builder: "tl_dict_build_Num_Int",
+        value_ty: ValueTy::Int,
+        method_symbols: NUM_INT_METHOD_SYMBOLS,
+    },
+    BuiltinDictionaryDescriptor {
+        classname: "Num",
+        target: BuiltinTypeKind::Double,
+        type_repr: "Double",
+        builder: "tl_dict_build_Num_Double",
+        value_ty: ValueTy::Double,
+        method_symbols: NUM_DOUBLE_METHOD_SYMBOLS,
+    },
+    BuiltinDictionaryDescriptor {
+        classname: "Fractional",
+        target: BuiltinTypeKind::Double,
+        type_repr: "Double",
+        builder: "tl_dict_build_Fractional_Double",
+        value_ty: ValueTy::Double,
+        method_symbols: FRACTIONAL_DOUBLE_METHOD_SYMBOLS,
+    },
+    BuiltinDictionaryDescriptor {
+        classname: "Integral",
+        target: BuiltinTypeKind::Int,
+        type_repr: "Int",
+        builder: "tl_dict_build_Integral_Int",
+        value_ty: ValueTy::Int,
+        method_symbols: INTEGRAL_INT_METHOD_SYMBOLS,
+    },
+    BuiltinDictionaryDescriptor {
+        classname: "Eq",
+        target: BuiltinTypeKind::Int,
+        type_repr: "Int",
+        builder: "tl_dict_build_Eq_Int",
+        value_ty: ValueTy::Int,
+        method_symbols: EQ_INT_METHOD_SYMBOLS,
+    },
+    BuiltinDictionaryDescriptor {
+        classname: "Eq",
+        target: BuiltinTypeKind::Double,
+        type_repr: "Double",
+        builder: "tl_dict_build_Eq_Double",
+        value_ty: ValueTy::Double,
+        method_symbols: EQ_DOUBLE_METHOD_SYMBOLS,
+    },
+    BuiltinDictionaryDescriptor {
+        classname: "Eq",
+        target: BuiltinTypeKind::Bool,
+        type_repr: "Bool",
+        builder: "tl_dict_build_Eq_Bool",
+        value_ty: ValueTy::Bool,
+        method_symbols: EQ_BOOL_METHOD_SYMBOLS,
+    },
+    BuiltinDictionaryDescriptor {
+        classname: "Ord",
+        target: BuiltinTypeKind::Int,
+        type_repr: "Int",
+        builder: "tl_dict_build_Ord_Int",
+        value_ty: ValueTy::Int,
+        method_symbols: ORD_INT_METHOD_SYMBOLS,
+    },
+    BuiltinDictionaryDescriptor {
+        classname: "Ord",
+        target: BuiltinTypeKind::Double,
+        type_repr: "Double",
+        builder: "tl_dict_build_Ord_Double",
+        value_ty: ValueTy::Double,
+        method_symbols: ORD_DOUBLE_METHOD_SYMBOLS,
+    },
+    BuiltinDictionaryDescriptor {
+        classname: "BoolLogic",
+        target: BuiltinTypeKind::Bool,
+        type_repr: "Bool",
+        builder: "tl_dict_build_BoolLogic_Bool",
+        value_ty: ValueTy::Bool,
+        method_symbols: BOOL_LOGIC_METHOD_SYMBOLS,
+    },
+];
+
 fn resolve_builtin_dictionary(classname: &str, ty: &Type) -> Option<DictionaryResolution> {
-    match classname {
-        "Num" => match detect_builtin_type(ty).unwrap_or(BuiltinTypeKind::Int) {
-            BuiltinTypeKind::Int => Some(DictionaryResolution {
-                builder: "tl_dict_build_Num_Int",
-                methods: NUM_INT_METHODS,
-                type_repr: "Int",
-            }),
-            BuiltinTypeKind::Double => Some(DictionaryResolution {
-                builder: "tl_dict_build_Num_Double",
-                methods: NUM_DOUBLE_METHODS,
-                type_repr: "Double",
-            }),
-            BuiltinTypeKind::Bool => None,
-        },
-        "Fractional" => match detect_builtin_type(ty).unwrap_or(BuiltinTypeKind::Double) {
-            BuiltinTypeKind::Double => Some(DictionaryResolution {
-                builder: "tl_dict_build_Fractional_Double",
-                methods: FRACTIONAL_DOUBLE_METHODS,
-                type_repr: "Double",
-            }),
-            _ => None,
-        },
-        "Integral" => match detect_builtin_type(ty).unwrap_or(BuiltinTypeKind::Int) {
-            BuiltinTypeKind::Int => Some(DictionaryResolution {
-                builder: "tl_dict_build_Integral_Int",
-                methods: INTEGRAL_INT_METHODS,
-                type_repr: "Int",
-            }),
-            _ => None,
-        },
-        "Eq" => match detect_builtin_type(ty).unwrap_or(BuiltinTypeKind::Int) {
-            BuiltinTypeKind::Int => Some(DictionaryResolution {
-                builder: "tl_dict_build_Eq_Int",
-                methods: EQ_INT_METHODS,
-                type_repr: "Int",
-            }),
-            BuiltinTypeKind::Double => Some(DictionaryResolution {
-                builder: "tl_dict_build_Eq_Double",
-                methods: EQ_DOUBLE_METHODS,
-                type_repr: "Double",
-            }),
-            BuiltinTypeKind::Bool => Some(DictionaryResolution {
-                builder: "tl_dict_build_Eq_Bool",
-                methods: EQ_BOOL_METHODS,
-                type_repr: "Bool",
-            }),
-        },
-        "Ord" => match detect_builtin_type(ty).unwrap_or(BuiltinTypeKind::Int) {
-            BuiltinTypeKind::Int => Some(DictionaryResolution {
-                builder: "tl_dict_build_Ord_Int",
-                methods: ORD_INT_METHODS,
-                type_repr: "Int",
-            }),
-            BuiltinTypeKind::Double => Some(DictionaryResolution {
-                builder: "tl_dict_build_Ord_Double",
-                methods: ORD_DOUBLE_METHODS,
-                type_repr: "Double",
-            }),
-            BuiltinTypeKind::Bool => None,
-        },
-        "BoolLogic" => match detect_builtin_type(ty).unwrap_or(BuiltinTypeKind::Bool) {
-            BuiltinTypeKind::Bool => Some(DictionaryResolution {
-                builder: "tl_dict_build_BoolLogic_Bool",
-                methods: BOOL_LOGIC_METHODS,
-                type_repr: "Bool",
-            }),
-            _ => None,
-        },
-        _ => None,
+    let descriptor = descriptor_for(classname, ty)?;
+    let methods = build_methods_for_descriptor(descriptor)?;
+    Some(DictionaryResolution {
+        builder: descriptor.builder,
+        methods,
+        type_repr: descriptor.type_repr,
+        value_ty: descriptor.value_ty.clone(),
+    })
+}
+
+fn descriptor_for(classname: &str, ty: &Type) -> Option<&'static BuiltinDictionaryDescriptor> {
+    let fallback = match classname {
+        "Num" | "Integral" | "Eq" | "Ord" => BuiltinTypeKind::Int,
+        "Fractional" => BuiltinTypeKind::Double,
+        "BoolLogic" => BuiltinTypeKind::Bool,
+        _ => return None,
+    };
+    let kind = detect_builtin_type(ty).unwrap_or(fallback);
+    BUILTIN_DICTIONARY_DESCRIPTORS
+        .iter()
+        .find(|desc| desc.classname == classname && desc.target == kind)
+}
+
+fn build_methods_for_descriptor(
+    descriptor: &BuiltinDictionaryDescriptor,
+) -> Option<Vec<DictionaryResolutionMethod>> {
+    let specs = dict_specs::methods_for_class(descriptor.classname)?;
+    let mut methods = Vec::with_capacity(specs.len());
+    for spec in specs {
+        let symbol = descriptor
+            .method_symbols
+            .iter()
+            .find(|(name, _)| *name == spec.name)
+            .map(|(_, sym)| *sym)?;
+        let signature = spec.pattern.instantiate(descriptor.type_repr).into_owned();
+        methods.push(DictionaryResolutionMethod {
+            name: spec.name,
+            signature,
+            symbol,
+            method_id: spec.method_id,
+        });
     }
+    Some(methods)
 }
 
 fn detect_builtin_type(ty: &Type) -> Option<BuiltinTypeKind> {

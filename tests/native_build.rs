@@ -10,8 +10,8 @@ use tempfile::tempdir;
 use typelang::{
     codegen::NativeError,
     core_ir::{
-        DictionaryInit, DictionaryMethod, Expr, Function, Literal, Module, Parameter,
-        ParameterKind, PrimOp, SourceRef, ValueTy, VarKind,
+        DictionaryBuilder, DictionaryInit, DictionaryMethod, Expr, Function, Literal, Module,
+        Parameter, ParameterKind, PrimOp, SourceRef, ValueTy, VarKind,
     },
     evaluator, infer, repl,
 };
@@ -52,23 +52,49 @@ let main = 1 + 2;
     ignore = "uses native backend and temp directories that Miri isolation forbids"
 )]
 #[test]
-fn emit_module_with_dictionary_param() -> Result<(), Box<dyn std::error::Error>> {
-    let mut module = Module::new();
+fn build_program_with_println_intrinsic() -> Result<(), Box<dyn std::error::Error>> {
+    let src = r#"
+main :: Int;
+let main =
+  let printedNumber = println 42;
+      printedFlag = println True
+  in 7;
+"#;
 
+    let program = typelang::parser::parse_program(src)?;
+    let temp = tempdir()?;
+    let output_path = temp.path().join("println_sample");
+
+    let _artifacts = typelang::emit_native(&program, &output_path)?;
+    assert!(
+        output_path.exists(),
+        "expected println sample binary to exist"
+    );
+
+    let result = Command::new(&output_path).output()?;
+    assert!(result.status.success(), "println sample execution failed");
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let lines: Vec<_> = stdout.lines().collect();
+    assert_eq!(
+        lines,
+        vec!["42", "True", "7"],
+        "unexpected println output: {stdout}"
+    );
+
+    Ok(())
+}
+
+#[cfg_attr(
+    miri,
+    ignore = "uses native backend and temp directories that Miri isolation forbids"
+)]
+#[test]
+fn emit_module_with_dictionary_param() -> Result<(), Box<dyn std::error::Error>> {
     let helper = Function {
         name: "helper".into(),
         params: vec![
-            Parameter::with_kind(
-                "$dict0_Num",
-                ValueTy::Dictionary {
-                    classname: "Num".into(),
-                },
-                ParameterKind::Dictionary {
-                    classname: "Num".into(),
-                },
-                Some("Int".into()),
-            ),
-            Parameter::with_kind("x", ValueTy::Int, ParameterKind::Value, None),
+            mk_dict_param("$dict0_Num", "Num", "Int", ValueTy::Int),
+            mk_value_param("x", ValueTy::Int),
         ],
         result: ValueTy::Int,
         body: Expr::Var {
@@ -98,13 +124,7 @@ fn emit_module_with_dictionary_param() -> Result<(), Box<dyn std::error::Error>>
                 kind: VarKind::Function,
             }),
             args: vec![
-                Expr::DictionaryPlaceholder {
-                    classname: "Num".into(),
-                    type_repr: "Int".into(),
-                    ty: ValueTy::Dictionary {
-                        classname: "Num".into(),
-                    },
-                },
+                mk_dict_placeholder("Num", "Int"),
                 Expr::Literal {
                     value: Literal::Int(42),
                     ty: ValueTy::Int,
@@ -114,10 +134,7 @@ fn emit_module_with_dictionary_param() -> Result<(), Box<dyn std::error::Error>>
         },
         location: SourceRef::default(),
     };
-
-    module.insert_function(helper);
-    module.insert_function(main_fn);
-    module.set_entry("main");
+    let module = mk_module_with_entry("main", vec![helper, main_fn], Vec::new());
 
     let temp = tempdir()?;
     let output = temp.path().join("dict_param_module");
@@ -142,23 +159,12 @@ fn emit_module_with_dictionary_param() -> Result<(), Box<dyn std::error::Error>>
 )]
 #[test]
 fn emit_module_with_eq_bool_dictionary_runs() -> Result<(), Box<dyn std::error::Error>> {
-    let mut module = Module::new();
-
     let sameness = Function {
         name: "sameness".into(),
         params: vec![
-            Parameter::with_kind(
-                "$dict0_Eq",
-                ValueTy::Dictionary {
-                    classname: "Eq".into(),
-                },
-                ParameterKind::Dictionary {
-                    classname: "Eq".into(),
-                },
-                Some("Bool".into()),
-            ),
-            Parameter::with_kind("x", ValueTy::Bool, ParameterKind::Value, None),
-            Parameter::with_kind("y", ValueTy::Bool, ParameterKind::Value, None),
+            mk_dict_param("$dict0_Eq", "Eq", "Bool", ValueTy::Bool),
+            mk_value_param("x", ValueTy::Bool),
+            mk_value_param("y", ValueTy::Bool),
         ],
         result: ValueTy::Bool,
         body: Expr::PrimOp {
@@ -201,13 +207,7 @@ fn emit_module_with_eq_bool_dictionary_runs() -> Result<(), Box<dyn std::error::
                 kind: VarKind::Function,
             }),
             args: vec![
-                Expr::DictionaryPlaceholder {
-                    classname: "Eq".into(),
-                    type_repr: "Bool".into(),
-                    ty: ValueTy::Dictionary {
-                        classname: "Eq".into(),
-                    },
-                },
+                mk_dict_placeholder("Eq", "Bool"),
                 Expr::Literal {
                     value: Literal::Bool(true),
                     ty: ValueTy::Bool,
@@ -222,31 +222,23 @@ fn emit_module_with_eq_bool_dictionary_runs() -> Result<(), Box<dyn std::error::
         location: SourceRef::default(),
     };
 
-    module.insert_function(sameness);
-    module.insert_function(main_fn);
-    module.set_entry("main");
-    module.dictionaries.push(DictionaryInit {
-        classname: "Eq".into(),
-        type_repr: "Bool".into(),
-        methods: vec![
-            DictionaryMethod {
-                name: "eq".into(),
-                signature: Some("Bool -> Bool -> Bool".into()),
-                symbol: Some("tl_eq_bool".into()),
-                method_id: Some(0),
-            },
-            DictionaryMethod {
-                name: "neq".into(),
-                signature: Some("Bool -> Bool -> Bool".into()),
-                symbol: Some("tl_neq_bool".into()),
-                method_id: Some(1),
-            },
-        ],
-        scheme_repr: "Eq Bool => Bool -> Bool -> Bool".into(),
-        builder_symbol: Some("tl_dict_build_Eq_Bool".into()),
-        origin: "sameness".into(),
-        source_span: SourceRef::default(),
-    });
+    let module = mk_module_with_entry(
+        "main",
+        vec![sameness, main_fn],
+        vec![DictionaryInit {
+            classname: "Eq".into(),
+            type_repr: "Bool".into(),
+            value_ty: ValueTy::Bool,
+            methods: vec![
+                mk_dict_method("eq", "Bool -> Bool -> Bool", "tl_eq_bool", 0),
+                mk_dict_method("neq", "Bool -> Bool -> Bool", "tl_neq_bool", 1),
+            ],
+            scheme_repr: "Eq Bool => Bool -> Bool -> Bool".into(),
+            builder: DictionaryBuilder::Resolved("tl_dict_build_Eq_Bool".into()),
+            origin: "sameness".into(),
+            source_span: SourceRef::default(),
+        }],
+    );
 
     let temp = tempdir()?;
     let output = temp.path().join("eq_bool_dict");
@@ -270,20 +262,10 @@ fn emit_native_reports_lambda_unsupported() -> Result<(), Box<dyn std::error::Er
 
     let with_lambda = Function {
         name: "with_lambda".into(),
-        params: vec![Parameter::with_kind(
-            "x",
-            ValueTy::Int,
-            ParameterKind::Value,
-            None,
-        )],
+        params: vec![mk_value_param("x", ValueTy::Int)],
         result: ValueTy::Int,
         body: Expr::Lambda {
-            params: vec![Parameter::with_kind(
-                "y",
-                ValueTy::Int,
-                ParameterKind::Value,
-                None,
-            )],
+            params: vec![mk_value_param("y", ValueTy::Int)],
             body: Box::new(Expr::Var {
                 name: "x".into(),
                 ty: ValueTy::Int,
@@ -361,10 +343,7 @@ let main = square 0;
         .iter()
         .find(|d| d.classname == "Num")
         .expect("Num dictionary not generated");
-    assert_eq!(
-        dict.builder_symbol.as_deref(),
-        Some("tl_dict_build_Num_Int")
-    );
+    assert_eq!(dict.builder.as_str(), Some("tl_dict_build_Num_Int"));
     assert!(
         dict.scheme_repr.contains("Num"),
         "scheme should describe Num constraint: {}",
@@ -376,10 +355,7 @@ let main = square 0;
     assert!(method_names.contains(&"mul"));
     assert!(method_names.contains(&"fromInt"));
     for method in &dict.methods {
-        assert!(method
-            .symbol
-            .as_deref()
-            .is_some_and(|s| s.starts_with("tl_num_int")));
+        assert!(method.symbol.starts_with("tl_num_int"));
         assert!(method.signature.as_deref().is_some());
     }
 
@@ -420,7 +396,7 @@ let main = square 3;
         artifacts
             .dictionaries
             .iter()
-            .any(|d| d.classname == "Num" && d.builder_symbol.is_some()),
+            .any(|d| d.classname == "Num" && d.builder.as_str().is_some()),
         "dictionary metadata should include Num builder"
     );
 
@@ -473,7 +449,7 @@ let main = ratio 7.5 2.5;
             .iter()
             .any(|dict| dict.classname == "Fractional"
                 && dict.type_repr == "Double"
-                && dict.builder_symbol.as_deref() == Some("tl_dict_build_Fractional_Double")),
+                && dict.builder.as_str() == Some("tl_dict_build_Fractional_Double")),
         "Fractional<Double> dictionary metadata missing"
     );
 
@@ -587,7 +563,7 @@ let main = foo 0;
             .dictionaries
             .iter()
             .any(|dict| dict.classname == "Ord"
-                && dict.builder_symbol.as_deref() == Some("tl_dict_build_Ord_Int")),
+                && dict.builder.as_str() == Some("tl_dict_build_Ord_Int")),
         "Ord<Int> dictionary metadata missing"
     );
     assert!(output_path.exists(), "native binary should be emitted");
@@ -616,4 +592,55 @@ fn typelang_cli_path() -> PathBuf {
         return fallback_rel;
     }
     panic!("typelang CLI バイナリへのパスが取得できませんでした");
+}
+fn mk_dict_param(name: &str, classname: &str, type_repr: &str, value_ty: ValueTy) -> Parameter {
+    Parameter::with_kind(
+        name.to_string(),
+        ValueTy::Dictionary {
+            classname: classname.to_string(),
+        },
+        ParameterKind::Dictionary {
+            classname: classname.to_string(),
+        },
+        Some(type_repr.to_string()),
+        Some(value_ty),
+    )
+}
+
+fn mk_value_param(name: &str, ty: ValueTy) -> Parameter {
+    Parameter::with_kind(name.to_string(), ty, ParameterKind::Value, None, None)
+}
+
+fn mk_dict_method(name: &str, signature: &str, symbol: &str, method_id: u64) -> DictionaryMethod {
+    DictionaryMethod {
+        name: name.to_string(),
+        signature: Some(signature.to_string()),
+        symbol: symbol.to_string(),
+        method_id,
+    }
+}
+
+fn mk_dict_placeholder(classname: &str, type_repr: &str) -> Expr {
+    let class_name = classname.to_string();
+    Expr::DictionaryPlaceholder {
+        classname: class_name.clone(),
+        type_repr: type_repr.into(),
+        ty: ValueTy::Dictionary {
+            classname: class_name,
+        },
+    }
+}
+
+fn mk_module_with_entry(
+    entry: &str,
+    functions: Vec<Function>,
+    dictionaries: Vec<DictionaryInit>,
+) -> Module {
+    let mut module = Module::new();
+    for func in functions {
+        module.insert_function(func);
+    }
+    module.set_entry(entry);
+    module.dictionaries.extend(dictionaries);
+    module
 }

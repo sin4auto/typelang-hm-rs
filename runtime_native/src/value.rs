@@ -313,6 +313,31 @@ pub extern "C" fn tl_print_bool(value: i8) {
     }
 }
 
+#[no_mangle]
+pub extern "C" fn tl_println(value: TlValue) -> TlValue {
+    match tl_value_kind(value) {
+        Some(TlValueKind::Int) => unsafe {
+            let v = tl_value_to_int(value);
+            println!("{v}");
+        },
+        Some(TlValueKind::Double) => unsafe {
+            let v = tl_value_to_double(value);
+            println!("{v}");
+        },
+        Some(TlValueKind::Bool) => unsafe {
+            let v = tl_value_to_bool(value);
+            if v != 0 {
+                println!("True");
+            } else {
+                println!("False");
+            }
+        },
+        Some(TlValueKind::Pointer) => println!("<pointer {:?}>", unsafe { tl_value_to_ptr(value) }),
+        None => println!("<invalid value>"),
+    }
+    value
+}
+
 pub fn tl_value_kind(value: TlValue) -> Option<TlValueKind> {
     value.validate().ok().map(|ptr| unsafe { (*ptr).kind })
 }

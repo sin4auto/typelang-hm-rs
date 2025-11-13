@@ -6,6 +6,7 @@
 //! 型推論・既定化・評価の順に処理し、安全に環境へ取り込む。
 
 use std::collections::HashMap;
+use std::panic;
 
 use crate::ast as A;
 use crate::infer::{type_from_texpr, type_from_texpr_with_vars};
@@ -33,7 +34,6 @@ pub fn load_program_into_env(
     let mut type_env_tmp = type_env.clone_env();
     let mut class_env_tmp = class_env.clone();
     let mut value_env_tmp = crate::evaluator::Env::from_map(value_env.snapshot());
-    let mut loaded: Vec<String> = Vec::new();
 
     for class_decl in &prog.class_decls {
         register_class_decl(class_decl, &mut class_env_tmp).map_err(|e| format!("[TYPE] {e}"))?;
@@ -46,6 +46,42 @@ pub fn load_program_into_env(
         register_data_decl(data_decl, &mut type_env_tmp, &mut value_env_tmp)
             .map_err(|e| format!("[TYPE] {e}"))?;
     }
+    let eval_result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        process_top_level_decls(
+            prog,
+            &mut type_env_tmp,
+            &mut class_env_tmp,
+            &mut value_env_tmp,
+        )
+    }));
+    let loaded = match eval_result {
+        Ok(Ok(names)) => names,
+        Ok(Err(msg)) => {
+            value_env_tmp.teardown();
+            return Err(msg);
+        }
+        Err(payload) => {
+            value_env_tmp.teardown();
+            drop(type_env_tmp);
+            drop(class_env_tmp);
+            drop(value_env_tmp);
+            panic::resume_unwind(payload);
+        }
+    };
+    value_env.teardown();
+    *type_env = type_env_tmp;
+    *class_env = class_env_tmp;
+    *value_env = value_env_tmp;
+    Ok(loaded)
+}
+
+fn process_top_level_decls(
+    prog: &A::Program,
+    type_env_tmp: &mut crate::typesys::TypeEnv,
+    class_env_tmp: &mut crate::typesys::ClassEnv,
+    value_env_tmp: &mut crate::evaluator::Env,
+) -> Result<Vec<String>, String> {
+    let mut loaded: Vec<String> = Vec::new();
     for decl in &prog.decls {
         let orig = if decl.params.is_empty() {
             decl.expr.clone()
@@ -58,33 +94,30 @@ pub fn load_program_into_env(
         };
         let body = normalize_expr(&orig);
         let should_default = decl.signature.is_none() && decl.params.is_empty();
-        match infer_qual_type(&type_env_tmp, &class_env_tmp, &body, should_default) {
+        match infer_qual_type(type_env_tmp, class_env_tmp, &body, should_default) {
             Ok(q_rhs) => {
                 if let Some(sig) = &decl.signature {
                     let ty_anno = type_from_texpr(&sig.r#type);
                     unify(q_rhs.r#type.clone(), ty_anno)
                         .map_err(|e| format!("[{}] {}", e.code, e.message))?;
                 }
-                let sch = generalize(&type_env_tmp, q_rhs);
+                let sch = generalize(type_env_tmp, q_rhs);
                 let val =
-                    eval_expr_for_pipeline(&body, &value_env_tmp).map_err(|e| e.to_string())?;
+                    eval_expr_for_pipeline(&body, value_env_tmp).map_err(|e| e.to_string())?;
                 type_env_tmp.extend(decl.name.clone(), sch);
                 value_env_tmp.insert(decl.name.clone(), val);
                 loaded.push(decl.name.clone());
             }
             Err(_) => {
                 let val =
-                    eval_expr_for_pipeline(&body, &value_env_tmp).map_err(|e| e.to_string())?;
-                let sch = fallback_scheme_from_value(&type_env_tmp, &val);
+                    eval_expr_for_pipeline(&body, value_env_tmp).map_err(|e| e.to_string())?;
+                let sch = fallback_scheme_from_value(type_env_tmp, &val);
                 type_env_tmp.extend(decl.name.clone(), sch);
                 value_env_tmp.insert(decl.name.clone(), val);
                 loaded.push(decl.name.clone());
             }
         }
     }
-    *type_env = type_env_tmp;
-    *class_env = class_env_tmp;
-    *value_env = value_env_tmp;
     Ok(loaded)
 }
 
